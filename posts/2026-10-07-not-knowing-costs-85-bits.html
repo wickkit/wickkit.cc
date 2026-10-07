@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Not Knowing Costs 85 Bits — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+
+    <article>
+      <h1>Not Knowing Costs 85 Bits</h1>
+      <div class="meta">2026-10-07 · Kit Wickham</div>
+
+      <p>In <a href="/posts/2026-10-07-most-compressors-stop-learning.html">the last post</a> a twenty-line counting model got within a hair of the entropy floor on random text, beating gzip, bzip2, xz and zstd by miles. But only because I told it how many previous letters matter. Give it too little memory and it was 50–110% above the floor. Give it too much and it was still 11% above after a million letters.</p>
+
+      <p>The fix I ended on was to blend counting models with different amounts of memory and let the data pick. There's a classic way to do that properly, <em>context tree weighting</em> (Willems, Shtarkov and Tjalkens, 1995), and it comes with a strong promise: it does almost as well as if you'd known the right memory all along, and the "almost" is a fixed number of bits. Not a percentage, not something that grows with the text. A fixed cost, paid once.</p>
+
+      <p>I wanted to see that number. It turns out you can predict it to the bit.</p>
+
+      <div class="viz" id="ct">
+        <div class="viz-presets" role="group" aria-label="Source">
+          <button type="button" data-p="m1" aria-pressed="false">memory 1</button>
+          <button type="button" data-p="m3" aria-pressed="false">memory 3</button>
+          <button type="button" data-p="var" aria-pressed="true">variable memory</button>
+          <button type="button" id="ct-new">new random tree</button>
+          <button type="button" id="ct-play">pause</button>
+        </div>
+        <div class="viz-controls">
+          <label>Most memory CTW may use <output id="ct-d-out">6</output>
+            <input id="ct-d" type="range" min="0" max="8" step="1" value="6"></label>
+        </div>
+        <div class="viz-stats" aria-live="polite">
+          <div><b id="ct-n">0</b>symbols seen</div>
+          <div><b id="ct-ctw">–</b>CTW, above the floor</div>
+          <div><b id="ct-fixed">–</b><span id="ct-best">best fixed memory, above the floor</span></div>
+          <div><b id="ct-toll">–</b><span id="ct-toll-l">CTW's total extra cost over knowing the tree</span></div>
+        </div>
+        <figure class="viz-chart">
+          <div class="viz-legend"><span style="--c: var(--s1)">CTW</span><span style="--c: var(--s2)">best fixed memory</span><span class="ct-leg-o">counting model that knows the tree</span></div>
+          <svg id="ct-chart" role="img" aria-label="Percent above the entropy floor against symbols seen, on log scales, for CTW, the best fixed-memory counting model, and a counting model that knows the true tree"></svg>
+        </figure>
+        <figure class="viz-chart viz-tree">
+          <div class="viz-legend"><span class="ct-leg-i">CTW looks further back</span><span style="--c: var(--s1)">CTW stops, correctly</span><span style="--c: var(--s2)">CTW stops too early</span><span class="ct-leg-l">CTW looks too far back</span><span class="ct-leg-m">not learned yet</span></div>
+          <svg id="ct-tree" role="img" aria-label="The source's context tree and the one CTW currently prefers, drawn as rows of boxes, one row per symbol of memory"></svg>
+          <p class="ct-sum" id="ct-tree-sum"></p>
+          <figcaption>Top: how far above the floor each model is after <i>n</i> symbols of one sample. Bottom: the source's memory as a tree, row <i>d</i> = looking <i>d</i> symbols back, with what CTW currently believes painted on. Everything runs in your browser, up to 4 million symbols.</figcaption>
+        </figure>
+        <noscript><p class="note">The demo needs JavaScript.</p></noscript>
+      </div>
+
+      <h2>How it blends</h2>
+
+      <p>Picture every context the model could use as a node in a tree. The root is "no memory". Its four children are "the last symbol was a", "…was b", and so on. Their children look two symbols back, down to some maximum depth <i>D</i>. Every node keeps its own counting model of what comes next in that context.</p>
+
+      <p>Each node then hedges: its probability for the text it has seen is half "my own counts are the right model here" plus half "my children's are, multiplied together". The leaves at depth <i>D</i> can't split, so they just use their counts. Unfold that recursion and the root ends up averaging over every possible shape of tree, from "no memory at all" to "full memory <i>D</i> everywhere", with each shape weighted by 2<sup>−(its description length)</sup>, where describing a tree costs one bit per node: "split here" or "stop here". The nodes at depth <i>D</i> are free, because there's nothing to decide.</p>
+
+      <p>That gives a sharp prediction. Once the data has made the right tree overwhelmingly likely, the mixture is dominated by that one tree, and the cost of not knowing it should be exactly its description length. Not roughly. To the bit.</p>
+
+      <p>It's also cheap: each new symbol updates one path from root to leaf, <i>D</i> + 1 nodes. My plain JavaScript version does about 6 million symbols a second at depth 6.</p>
+
+      <h2>The toll, predicted and measured</h2>
+
+      <p>I reused the six sources from last time, three samples of 16 million symbols each, and ran CTW with a range of maximum depths. Each row compares it with a counting model that was told the right memory, on the same text.</p>
+
+      <div class="table-wrap"><table class="compact">
+        <thead><tr><th>Source</th><th>Max depth</th><th>Predicted</th><th>64k</th><th>1M</th><th>16M</th></tr></thead>
+        <tbody>
+          <tr><td>fair coin</td><td>1 to 16</td><td>1</td><td>1.0</td><td>1.0</td><td>1.0</td></tr>
+          <tr><td>26 letters, no memory</td><td>1 to 4</td><td>1</td><td>1.0</td><td>1.0</td><td>1.0</td></tr>
+          <tr><td>8 symbols, memory 1</td><td>2 to 6</td><td>9</td><td>9.0</td><td>9.0</td><td>9.0</td></tr>
+          <tr><td>4 symbols, memory 3</td><td>3</td><td>21</td><td>21.0</td><td>21.0</td><td>21.0</td></tr>
+          <tr><td>4 symbols, memory 3</td><td>4 to 10</td><td>85</td><td>84.0–84.5</td><td>85.0</td><td>85.0</td></tr>
+          <tr><td>26 letters, memory 2</td><td>2</td><td>27</td><td>27.0</td><td>27.0</td><td>27.0</td></tr>
+          <tr><td>26 letters, memory 2</td><td>3 or 4</td><td>703</td><td>699</td><td>703.0</td><td>703.0</td></tr>
+        </tbody>
+      </table></div>
+      <p class="note">Total extra bits CTW spends compared with a counting model that knows the memory, after 64 thousand, 1 million and 16 million symbols. Average of three samples; at 1M and 16M the three agree to within 0.01 bits.</p>
+
+      <p>A fair coin compressed by a model allowed to look 16 flips back costs exactly one bit more than a model told "no memory": the bit that says "don't split the root". On "4 symbols, memory 3", the tree is full to depth 3: 1 + 4 + 16 = 21 splits, each a bit. If depth 3 is also the maximum, the 64 leaves are free, and the toll is 21 bits. Allow more depth and each of those 64 leaves now has to say "stop", one bit each: 85. Allowing depth 10 instead of 4 costs nothing more, because the model never goes below the leaves once it's sure they're leaves.</p>
+
+      <p>Before checking these numbers I made sure the code was right: a straightforward recursive version, computed from the final counts, gives the same total as the streaming one to within a millionth of a bit, and the version on this page matches the one I ran the big batch with exactly.</p>
+
+      <p>Eighty-five bits on 16 million symbols is nothing (0.0004%). On short text it isn't: at 4,096 symbols, the counting model told "memory 3" is 7.9% above the floor, CTW limited to depth 3 is 8.4%, and CTW allowed depth 10 is 9.4%. The toll is fixed, so it matters exactly when the text is short. But compare that with the last post's table, where the wrong fixed memory on this source cost 46–61%.</p>
+
+      <h2>When the memory varies</h2>
+
+      <p>Every source so far has the same memory in every context, which is the easy case for picking one fixed memory too. Real text isn't like that: after "q" you need one letter of memory to predict "u"; elsewhere you need several. So I made two sources where the memory itself varies. Starting from "no memory", each context looks one symbol further back with probability 0.4 or 0.5, up to six symbols, and each final context gets its own random odds. The first one ended up with 70 contexts, from one to six symbols long; the second with 61. The demo's "variable memory" button builds one the same way, with 58.</p>
+
+      <p>Now no fixed memory is right. Too short and it misses the long contexts; long enough for the long contexts and it splits all the short ones into thousands of pieces that each have to be learned separately:</p>
+
+      <div class="table-wrap"><table class="compact">
+        <thead><tr><th>Symbols</th><th>Mem 2</th><th>Mem 3</th><th>Mem 4</th><th>Mem 5</th><th>Mem 6</th><th>CTW</th><th>Knows tree</th></tr></thead>
+        <tbody>
+          <tr><td>4k</td><td><b>8.5%</b></td><td>8.9%</td><td>13%</td><td>19%</td><td>27%</td><td>4.7%</td><td>4.0%</td></tr>
+          <tr><td>64k</td><td>5.0%</td><td><b>2.6%</b></td><td>2.6%</td><td>3.7%</td><td>6.3%</td><td>0.58%</td><td>0.52%</td></tr>
+          <tr><td>1M</td><td>4.8%</td><td>1.8%</td><td>1.0%</td><td><b>0.56%</b></td><td>1.0%</td><td>0.063%</td><td>0.058%</td></tr>
+          <tr><td>16M</td><td>4.8%</td><td>1.7%</td><td>0.84%</td><td><b>0.12%</b></td><td>0.13%</td><td>0.006%</td><td>0.006%</td></tr>
+        </tbody>
+      </table></div>
+      <p class="note">The 70-context source: above the floor, average of three samples. Bold is the best fixed memory at that length. CTW with maximum depth 6. xz at its strongest setting is 17.7% above the floor at 16M.</p>
+
+      <p>The best fixed memory keeps changing as the text grows, from 2 to 3 to 5, and it falls further behind CTW the longer the text gets: about 2 times further from the floor at 4k symbols, 4 times at 64k, 9 times at 1M, 20 times at 16M. Even at 16 million symbols, memory 6, the deepest the source actually uses, still loses to memory 5: it has 4,096 contexts to learn, most of them copies of the same few. CTW, meanwhile, tracks the model that was handed the tree from the start: its gap is 17% bigger at 4k symbols and 5% bigger at 16M. The second source tells the same story.</p>
+
+      <h2>The toll isn't paid all at once</h2>
+
+      <p>Here the prediction misses, in an interesting way. Describing the 70-context tree costs 65 bits with maximum depth 6. The measured toll is 36 bits at 64k symbols, 49 at 1M, and 56 at 16M. It's still climbing.</p>
+
+      <p>Less than the prediction means CTW is betting on a smaller tree than the true one, and doing well by it. Looking at which of the 23 splits in the true tree CTW prefers at each length (on one sample) shows what's going on: it's all about how often a context comes up.</p>
+
+      <div class="table-wrap"><table class="compact">
+        <thead><tr><th>How often the context comes up</th><th>Splits</th><th>CTW has them from</th></tr></thead>
+        <tbody>
+          <tr><td>more than 1% of the time</td><td>9</td><td>256 symbols</td></tr>
+          <tr><td>0.2–0.8%</td><td>3</td><td>1k</td></tr>
+          <tr><td>0.026–0.09%</td><td>4</td><td>64k–256k</td></tr>
+          <tr><td>0.001–0.003%</td><td>4</td><td>1M (one of them 16M)</td></tr>
+          <tr><td>almost never</td><td>3</td><td>64k, 1M, never</td></tr>
+        </tbody>
+      </table></div>
+      <p class="note">One sample of the 70-context source, checked each time the text grew fourfold. "Has them from" is the first length after which CTW prefers that split at every later check.</p>
+
+      <p>A split gets adopted after its context has been seen anywhere from a handful of times to a few hundred, depending on how different the children's odds are. Before that, lumping the children together is the better bet: one counting model learns faster than four, and the price of being slightly wrong about rare contexts is smaller than the price of learning four sets of odds from a handful of examples. CTW doesn't need a rule for this. The halving at every node makes the trade automatically, and it keeps making it as the evidence comes in.</p>
+
+      <p>You can watch it in the demo. Early on, the tree is mostly orange: CTW stops short almost everywhere. The orange cells turn blue as each context collects enough evidence, the common ones first, and the toll creeps up toward the price of the whole tree. Turn the maximum depth below the source's deepest context and the toll keeps growing instead, because now CTW can never describe the tree exactly.</p>
+
+      <h2>What I take from it</h2>
+
+      <p>The last post ended with "knowing the right amount of context is most of the battle". CTW turns that battle into a bill you can read off in advance: one bit per decision about the tree, paid once. On the fixed-memory sources it's paid in full by a few tens of thousands of symbols, exactly as predicted. On the variable ones it's paid gradually, context by context, as each one earns its keep.</p>
+
+      <p>One caution: these sources are exactly the kind of thing CTW is built for. They're generated by a context tree, and CTW's mixture includes the right tree. Real text has long exact repeats, which LZ-style compressors like xz exploit and a context tree can only approximate. The strongest practical compressors mix both kinds of model. But as a demonstration that "let the data pick the memory" can be done with a known, fixed, small price, it's hard to beat.</p>
+
+      <p>The sources and the model are in <a href="/js/ctw.js">one small file</a>, the same code as the demo.</p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+  <script src="/js/ctw.js"></script>
+  <script src="/js/ctw-ui.js"></script>
+</body>
+</html>

@@ -452,3 +452,20 @@ article table.compact { min-width: 0; }
 #cz .cz-leg-h { --c: repeating-linear-gradient(90deg, var(--viz-muted) 0 5px, transparent 5px 8px); }
 #cz .viz-controls { grid-template-columns: 1fr; }
 #cz .viz-legend { flex-wrap: wrap; gap: .3rem 1rem; } #cz .viz-legend > span { white-space: nowrap; }
+#ct .viz-line.ct-orc { stroke: var(--viz-muted); stroke-dasharray: 5 4; }
+#ct .viz-dot.ct-orc { fill: var(--viz-muted); }
+#ct .ct-leg-o { --c: repeating-linear-gradient(90deg, var(--viz-muted) 0 5px, transparent 5px 8px); }
+#ct .viz-tree { margin-top: 1.25rem; }
+#ct .ct-cell { stroke-width: 1; }
+#ct .ct-inner { fill: var(--viz-grid); stroke: var(--viz-axis); }
+#ct .ct-right { fill: var(--s1); stroke: var(--s1); }
+#ct .ct-short { fill: var(--s2); stroke: var(--s2); }
+#ct .ct-long { fill: var(--viz-muted); stroke: var(--viz-muted); }
+#ct .ct-missing { fill: none; stroke: var(--viz-axis); stroke-dasharray: 3 2; }
+#ct .ct-leg-i { --c: var(--viz-grid); }
+#ct .ct-leg-m { --c: transparent; }
+#ct .ct-leg-m::before { outline: 1px dashed var(--viz-axis); outline-offset: -1px; }
+#ct .ct-leg-l { --c: var(--viz-muted); }
+#ct .viz-legend { flex-wrap: wrap; gap: .3rem 1rem; }
+#ct .ct-sum { font-size: .78rem; color: var(--viz-muted); margin-top: .35rem; min-height: 1.2em; }
+#ct .viz-tree .viz-legend > span::before { width: 10px; height: 10px; }
