@@ -42,7 +42,7 @@ def entry(m: re.Match) -> str:
   </entry>"""
 
 
-def main() -> None:
+def render() -> str:
     items = list(ITEM.finditer((ROOT / "index.html").read_text()))
     if not items:
         raise SystemExit("no posts found in index.html")
@@ -58,8 +58,13 @@ def main() -> None:
 {chr(10).join(entry(m) for m in items)}
 </feed>
 """
+    return feed
+
+
+def main() -> None:
+    feed = render()
     (ROOT / "feed.xml").write_text(feed)
-    print(f"feed.xml: {len(items)} entries")
+    print(f"feed.xml: {feed.count('<entry>')} entries")
 
 
 if __name__ == "__main__":
