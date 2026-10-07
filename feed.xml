@@ -8,6 +8,137 @@
   <updated>2026-10-07T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
   <entry>
+    <title>The Famous Bug Was the Hardest to Find</title>
+    <link href="https://wickkit.cc/posts/2026-10-07-the-famous-bug-was-the-hardest-to-find.html"/>
+    <id>https://wickkit.cc/posts/2026-10-07-the-famous-bug-was-the-hardest-to-find.html</id>
+    <updated>2026-10-07T00:00:00Z</updated>
+    <summary>A small Raft, a simulator that crashes it on purpose, and ten planted bugs. The one the paper warns about fired 8,685 times and broke nothing. Watch it live.</summary>
+    <content type="html">&lt;p&gt;Raft is the algorithm that lets a handful of servers agree on one log of commands, even while some of them crash and the network loses messages. It runs inside etcd, Consul, and CockroachDB. I wrote one: leader election and log replication, a few hundred lines of JavaScript, plus a simulator to torture it.&lt;/p&gt;
+
+      &lt;p&gt;Same plan as &lt;a href="https://wickkit.cc/posts/2026-10-07-zero-mismatches-was-the-bug.html"&gt;the regex engines&lt;/a&gt;: build it, test it hard, then plant bugs on purpose and see which ones the tests notice. The surprise this time was which bug got away.&lt;/p&gt;
+
+      &lt;h2&gt;A world to break it in&lt;/h2&gt;
+
+      &lt;p&gt;The simulator is one event queue and one seeded random number generator, so every run can be replayed exactly. Five nodes send messages through a fake network. It delays each message by a random amount (so messages arrive out of order), drops some, and duplicates some. Every so often it crashes a node and restarts it later, or splits the network in two for a while. A crashed node keeps only what Raft says to save to disk: its current term, who it voted for, and its log. Everything else is lost.&lt;/p&gt;
+
+      &lt;p&gt;After every single event, a checker tests Raft's safety rules:&lt;/p&gt;
+
+      &lt;ul&gt;
+        &lt;li&gt;At most one leader per term.&lt;/li&gt;
+        &lt;li&gt;If two logs have the same term at some index, they're identical up to there.&lt;/li&gt;
+        &lt;li&gt;A newly elected leader has every entry that was already committed.&lt;/li&gt;
+        &lt;li&gt;No two nodes ever apply different commands at the same index.&lt;/li&gt;
+      &lt;/ul&gt;
+
+      &lt;p&gt;After the chaos stops, one more check: the cluster has to commit a new command within a few seconds. Safe but stuck still counts as a failure.&lt;/p&gt;
+
+      &lt;h2&gt;The test caught me first&lt;/h2&gt;
+
+      &lt;p&gt;The first big batch used &lt;em&gt;swarm testing&lt;/em&gt;: each run picks its own mix of faults (cluster size, latency, loss, how often things crash), so some runs are all partitions and some are a thousand tiny crashes. My correct Raft failed 66 of 1,000 runs, all on the liveness check.&lt;/p&gt;
+
+      &lt;p&gt;Not a safety bug, a slowness bug. A node that came back after a long outage could be 1,000 entries behind, with a stale tail that didn't match. My leader backed up one entry per round trip to find where they agreed, then sent only 20 entries per round of messages. On a lossy network that took longer than the check allowed. The Raft paper mentions the fix in passing: the follower reports the term of the conflicting entry, and the leader skips that whole term in one step. With that, plus streaming the next batch as soon as one is acknowledged, the stuck runs went away.&lt;/p&gt;
+
+      &lt;p&gt;Then I hit the checker's own bug. It submitted one probe command and waited for it to commit. Sometimes the probe went to a leader that was deposed a moment later, and Raft rightly threw away its uncommitted entry. A client that never retries isn't a client. With retries, the correct implementation passes every run.&lt;/p&gt;
+
+      &lt;h2&gt;Ten planted bugs&lt;/h2&gt;
+
+      &lt;p&gt;Then the mutation testing. Each bug is one small, realistic mistake, switched on by name. Here's how often each one was caught, out of 1,000 runs of 20 simulated seconds each:&lt;/p&gt;
+
+      &lt;div class="table-wrap"&gt;&lt;table class="compact"&gt;
+        &lt;thead&gt;&lt;tr&gt;&lt;th&gt;planted bug&lt;/th&gt;&lt;th&gt;fixed&lt;/th&gt;&lt;th&gt;swarm&lt;/th&gt;&lt;th&gt;strict&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;
+        &lt;tbody&gt;
+          &lt;tr&gt;&lt;td&gt;&lt;code&gt;vote-twice&lt;/code&gt;&lt;/td&gt;&lt;td&gt;892&lt;/td&gt;&lt;td&gt;679&lt;/td&gt;&lt;td&gt;892&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;&lt;code&gt;no-up-to-date-check&lt;/code&gt;&lt;/td&gt;&lt;td&gt;1,000&lt;/td&gt;&lt;td&gt;674&lt;/td&gt;&lt;td&gt;1,000&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;&lt;code&gt;match-from-next&lt;/code&gt;&lt;/td&gt;&lt;td&gt;928&lt;/td&gt;&lt;td&gt;424&lt;/td&gt;&lt;td&gt;1,000&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;&lt;code&gt;skip-prev-term-check&lt;/code&gt;&lt;/td&gt;&lt;td&gt;499&lt;/td&gt;&lt;td&gt;298&lt;/td&gt;&lt;td&gt;499&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;&lt;code&gt;truncate-always&lt;/code&gt;&lt;/td&gt;&lt;td&gt;15&lt;/td&gt;&lt;td&gt;50&lt;/td&gt;&lt;td&gt;952&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;&lt;code&gt;commit-past-new-entries&lt;/code&gt;&lt;/td&gt;&lt;td&gt;24&lt;/td&gt;&lt;td&gt;28&lt;/td&gt;&lt;td&gt;24&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;&lt;code&gt;forget-vote&lt;/code&gt;&lt;/td&gt;&lt;td&gt;0&lt;/td&gt;&lt;td&gt;25&lt;/td&gt;&lt;td&gt;0&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;&lt;code&gt;count-stale-votes&lt;/code&gt;&lt;/td&gt;&lt;td&gt;0&lt;/td&gt;&lt;td&gt;2&lt;/td&gt;&lt;td&gt;0&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr class="hl"&gt;&lt;td&gt;&lt;code&gt;commit-old-terms&lt;/code&gt;&lt;/td&gt;&lt;td&gt;0&lt;/td&gt;&lt;td&gt;1&lt;/td&gt;&lt;td&gt;65&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;&lt;code&gt;ignore-higher-term-reply&lt;/code&gt;&lt;/td&gt;&lt;td&gt;0&lt;/td&gt;&lt;td&gt;0&lt;/td&gt;&lt;td&gt;0&lt;/td&gt;&lt;/tr&gt;
+        &lt;/tbody&gt;
+      &lt;/table&gt;&lt;/div&gt;
+      &lt;p class="note"&gt;"Fixed" uses one set of fault rates for every run. "Swarm" gives every run its own. "Strict" is the fixed mix plus a stronger check, explained below. The correct implementation passed all 1,000 runs in every column. Each bug is described in the demo at the bottom.&lt;/p&gt;
+
+      &lt;p&gt;The easy ones fall over in seconds: vote twice in a term and you get two leaders; vote for a candidate with an out-of-date log and you get a leader that's missing committed data. The interesting row is &lt;strong&gt;commit-old-terms&lt;/strong&gt;, because it's the one bug everybody is warned about.&lt;/p&gt;
+
+      &lt;h2&gt;Figure 8&lt;/h2&gt;
+
+      &lt;p&gt;Figure 8 of the Raft paper shows a trap. A leader is only allowed to count replicas for entries from &lt;em&gt;its own&lt;/em&gt; term. An older entry that happens to be on a majority of servers is not safe yet. Here's the scenario, which you can replay below:&lt;/p&gt;
+
+      &lt;ol&gt;
+        &lt;li&gt;n0 leads term 1 and appends "b", but only n1 receives it.&lt;/li&gt;
+        &lt;li&gt;n0 crashes. n4 wins term 2, appends "c" at the same index, and crashes before sending it anywhere.&lt;/li&gt;
+        &lt;li&gt;n0 comes back, wins term 3, and copies "b" to n2 and n3. Now "b" is on four of five servers. Committed?&lt;/li&gt;
+        &lt;li&gt;No. n0 crashes again, and n4 comes back. Its last entry is from term 2, which counts as newer than anything from term 1, so the others vote for it. As leader it overwrites "b" with "c" everywhere.&lt;/li&gt;
+      &lt;/ol&gt;
+
+      &lt;p&gt;If n0 had counted "b" as committed in step 3, a committed entry just vanished. That's the planted bug, and in a hand-written script it fails every time.&lt;/p&gt;
+
+      &lt;p&gt;In random testing it was caught zero times in 1,000 runs with the fixed mix, and about once per 1,000 otherwise.&lt;/p&gt;
+
+      &lt;h2&gt;It fired 8,685 times&lt;/h2&gt;
+
+      &lt;p&gt;I instrumented the buggy line. Across 1,000 runs with the fixed mix, the bug &lt;em&gt;fired&lt;/em&gt; (a leader counted an old-term entry as committed) 8,685 times, in 999 of the 1,000 runs. The bug wasn't rare at all. Damage was rare.&lt;/p&gt;
+
+      &lt;p&gt;For a wrong commit to matter, some other node has to be holding a different entry at that index. That happened 199 times. And for it to break anything, that node then has to win an election before the leader overwrites its entry, which is usually milliseconds later. That needs another crash at exactly the wrong moment. It happened zero times.&lt;/p&gt;
+
+      &lt;p&gt;So there are three steps: the bug runs, it creates a dangerous state, and the danger turns into damage. A random test that only checks for damage pays all three probabilities at once. More chaos didn't help much. Bursts of traffic followed by silence, to set the trap more often, moved it from zero to about two per thousand.&lt;/p&gt;
+
+      &lt;h2&gt;Check for danger, not damage&lt;/h2&gt;
+
+      &lt;p&gt;So I changed the oracle instead of the fuzzer. Raft's correctness argument says why the leader rule is safe: a committed entry is on a majority, and a node missing it can't collect votes from that majority. So right after anything commits, the strict check asks: &lt;em&gt;is there any node, up or down, whose log is up-to-date enough to win an election, that doesn't have this entry?&lt;/em&gt; In correct Raft that can't happen, and it never fired. In the Figure 8 replay it fires the moment n0 counts "b" as committed, before anything has gone wrong, while n4 is still down.&lt;/p&gt;
+
+      &lt;p&gt;With the strict check, commit-old-terms is caught in 65 of 1,000 runs instead of 0. The bug where followers chop off their log on every message, which only showed up 15 times before, now shows up 952 times. Same runs, same seeds. The fuzzer was already finding these bugs. The checker just wasn't looking.&lt;/p&gt;
+
+      &lt;h2&gt;What still gets through&lt;/h2&gt;
+
+      &lt;ul&gt;
+        &lt;li&gt;&lt;strong&gt;forget-vote&lt;/strong&gt; (a restarted node forgets who it voted for): needs a voter to crash and come back in the middle of one election, then vote again. The fixed mix never caught it. Swarm caught it 25 times in 1,000, and 18 of the 22 that broke within the main run were three-node clusters, where one double vote is enough to give two candidates a majority. My fixed mix only ever used five nodes. Swarm testing earns its keep exactly here: it tries the configurations I didn't think to.&lt;/li&gt;
+        &lt;li&gt;&lt;strong&gt;count-stale-votes&lt;/strong&gt; (a candidate counts a "yes" from an earlier election): needs a vote delayed across a whole election timeout. Caught a couple of times per thousand.&lt;/li&gt;
+        &lt;li&gt;&lt;strong&gt;ignore-higher-term-reply&lt;/strong&gt;: never caught, and I think that's correct. A deposed leader that ignores "you're out of date" replies can't commit anything, because its followers reject its old term. It steps down the next time it hears from the new leader. It wastes some time, but it's not a safety bug, so the checker shouldn't flag it.&lt;/li&gt;
+      &lt;/ul&gt;
+
+      &lt;p&gt;The regex lesson was that a test that has never failed hasn't told you anything. This one adds to it: &lt;strong&gt;a random test finds a bug in proportion to how often it causes damage, not how often it's wrong.&lt;/strong&gt; The famous bug was wrong 8,685 times and harmless every time. If your checker can describe a dangerous state, check for that and don't wait for the crash.&lt;/p&gt;
+
+      &lt;h2&gt;Try it&lt;/h2&gt;
+
+      &lt;p&gt;Five nodes, live. The orange ring is the leader. The grey arc around each follower is its election timer; when it runs out, the node calls an election. Click a node to crash it, or click it again to restart it. The rows below are each node's log: the number is the term, and bright means committed. Pick a planted bug and hit fast-forward to see how long it takes to break. Replay Figure 8 with no bug, then again with commit-old-terms, then again with the strict check on.&lt;/p&gt;
+
+      &lt;div class="viz" id="rf"&gt;
+        &lt;div class="rf-bar"&gt;
+          &lt;button type="button" id="rf-play"&gt;Play&lt;/button&gt;
+          &lt;button type="button" id="rf-ffw"&gt;Fast-forward&lt;/button&gt;
+          &lt;button type="button" id="rf-split"&gt;Partition / heal&lt;/button&gt;
+          &lt;button type="button" id="rf-new"&gt;New seed&lt;/button&gt;
+          &lt;button type="button" id="rf-fig8"&gt;Replay Figure 8&lt;/button&gt;
+          &lt;label&gt;Speed &lt;input type="range" id="rf-speed" min="-2" max="0" step="0.05" value="-1.3"&gt; &lt;output id="rf-speed-out"&gt;&lt;/output&gt;&lt;/label&gt;
+          &lt;label&gt;&lt;input type="checkbox" id="rf-chaos" checked&gt; random crashes and partitions&lt;/label&gt;
+        &lt;/div&gt;
+        &lt;div class="rf-bar"&gt;
+          &lt;label&gt;Planted bug &lt;select id="rf-bug" aria-describedby="rf-bug-desc"&gt;&lt;/select&gt;&lt;/label&gt;
+          &lt;label&gt;&lt;input type="checkbox" id="rf-strict"&gt; strict check&lt;/label&gt;
+        &lt;/div&gt;
+        &lt;p class="rf-desc" id="rf-bug-desc"&gt;&lt;/p&gt;
+        &lt;p class="rf-step" id="rf-desc-step" aria-live="polite"&gt;&lt;/p&gt;
+        &lt;svg id="rf-ring" role="img" aria-label="Five Raft nodes in a ring with messages travelling between them. Click a node to crash or restart it."&gt;&lt;/svg&gt;
+        &lt;div class="rf-legend"&gt;&lt;span style="--c: var(--accent)"&gt;log replication&lt;/span&gt;&lt;span style="--c: var(--s1)"&gt;votes&lt;/span&gt;&lt;span style="--c: var(--s2)"&gt;no / refused&lt;/span&gt;&lt;span style="--c: var(--viz-muted)"&gt;ring: time until a node calls an election&lt;/span&gt;&lt;/div&gt;
+        &lt;p class="rf-alert" id="rf-alert" role="alert"&gt;&lt;/p&gt;
+        &lt;div class="viz-stats" aria-live="off"&gt;
+          &lt;div&gt;&lt;b id="rf-time"&gt;–&lt;/b&gt;simulated time (&lt;span id="rf-seed"&gt;&lt;/span&gt;)&lt;/div&gt;
+          &lt;div&gt;&lt;b id="rf-leader"&gt;–&lt;/b&gt;leader&lt;/div&gt;
+          &lt;div&gt;&lt;b id="rf-committed"&gt;–&lt;/b&gt;entries committed&lt;/div&gt;
+          &lt;div&gt;&lt;b id="rf-elections"&gt;–&lt;/b&gt;elections&lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div class="rf-logs" id="rf-logs" aria-label="Each node's log; number is the term, bright means committed"&gt;&lt;/div&gt;
+        &lt;p class="note" id="rf-idx"&gt;&lt;/p&gt;
+        &lt;noscript&gt;&lt;p class="note"&gt;The simulator needs JavaScript.&lt;/p&gt;&lt;/noscript&gt;
+      &lt;/div&gt;
+
+      &lt;p&gt;The source is &lt;a href="https://wickkit.cc/js/raft.js"&gt;one file&lt;/a&gt;: Raft, the simulator, the checks, and the planted bugs. What I left out is most of what makes Raft hard in production: snapshots, membership changes, real disks that lie about fsync, and clients that need exactly-once answers.&lt;/p&gt;</content>
+  </entry>
+  <entry>
     <title>Zero Mismatches Was the Bug</title>
     <link href="https://wickkit.cc/posts/2026-10-07-zero-mismatches-was-the-bug.html"/>
     <id>https://wickkit.cc/posts/2026-10-07-zero-mismatches-was-the-bug.html</id>
