@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>The Cliff Was a Trap Door — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+    <article>
+      <h1>The Cliff Was a Trap Door</h1>
+      <div class="meta">2026-10-07 · Kit Wickham</div>
+
+      <p><a href="/posts/2026-10-07-the-least-loaded-server-is-a-rumor.html">The Least Loaded Server Is a Rumor</a> left a loose end. Several dispatchers share a load board that's refreshed every <i>T</i> service times, and each one adds the jobs it sent since the last refresh to what the board says. With three or more dispatchers that setup herds badly, and the herd gets worse as the board gets staler. Then, past some staleness, response time falls off a cliff to near round robin. I measured where the cliff sits (the peak times (1 − load)² came out constant) and said I didn't have an explanation I'd trust.</p>
+
+      <p>I have one now, and the cliff turns out to be the wrong picture. Past the cliff the herd hasn't gone away. The system has two stable states, and which one you get depends on its history.</p>
+
+      <h2>Same settings, two outcomes</h2>
+
+      <p>Setup as before: 100 identical servers with first-come-first-served queues, jobs arriving at random, mean job size one service time, each job handed to one of <i>k</i> dispatchers at random. Each dispatcher sends the job to the server with the lowest board count plus its own sends since the refresh. The only new thing is how the run starts: either every queue at the same length, or half the servers with a backlog and half empty, roughly what you'd see right after adding a batch of fresh servers or after half the fleet restarts.</p>
+
+      <figure class="fig smooth"><img src="/img/lb-trapdoor.png" width="1650" height="690" alt="Left: log-log chart of mean time in system against time between board refreshes, five dispatchers at 90% load. Started balanced, the curve climbs from 24 at T=30 to between 100 and 140 at T=150 to 300, then drops to 7.8 at T=417 and 6.0 at T=3000. Started half-loaded, it follows the same climb but never drops, reaching 1,200 at T=3000. Partitioned dispatchers stay between 3.9 and 5.5 throughout. Right: tipping point times (1 minus load) squared against number of dispatchers, for 80, 90 and 95% load; the points sit near the line 0.85 times (k minus 1), with three dispatchers below it.">
+        <figcaption>Left: five dispatchers, 90% load; median of 3 seeds per point, each run at least 100 refresh periods (small dots: individual seeds started balanced). Right: refresh period at which a balanced start tips into the herd in half of 6 seeds within 150 refreshes, scaled by (1 − load)². The grid steps are 28% apart, so each point is good to about that.</figcaption></figure>
+
+      <p>Started balanced, five dispatchers at 90% load reproduce the old cliff: herded up to a refresh period of about 300 service times, then down to 6 to 8 and staying there. Started half-loaded, the herd never lets go. At <i>T</i> = 1,100 the mean time in the system is 449 against 6.4 from a balanced start; at 3,000 it's 1,200 against 6.0. Same servers, same load, same dispatchers, a 200-fold difference.</p>
+
+      <p>It doesn't take much of a push. A half-loaded start with a backlog of 0.1<i>T</i> jobs per loaded server tipped every run I tried, at every refresh period from 450 to 2,000; 0.05<i>T</i> recovered. A single server with 3,200 extra jobs didn't tip anything: all the dispatchers avoid it, but the slack is spread over 99 others and gets absorbed. The trigger is a broad imbalance, not one bad server.</p>
+
+      <h2>Why the balanced state breaks where it does</h2>
+
+      <p>Take the balanced state and look at one refresh. The board shows small random differences between servers, and every dispatcher sees the same ones. Each dispatcher, keeping its own tally, tops up the servers that look short until they look even, then spreads its jobs evenly. But there are <i>k</i> of them doing the same top-up, so a server that looked short by <i>d</i> receives <i>kd</i> extra and ends up (<i>k</i> − 1)<i>d</i> ahead. Every refresh, the board's differences come back inverted and multiplied by <i>k</i> − 1.</p>
+
+      <p>What pulls the system back is draining. Once the top-up is over, every server receives jobs at the load rate λ and serves at rate 1, so a server that's ahead loses its excess at 1 − λ per service time while the others sit near their usual short queues. If that drain clears the overshoot before the next refresh, the next board shows only the usual noise and the balanced state survives. If not, the next board shows the overshoot, it gets multiplied again, and the system tips.</p>
+
+      <p>So the balanced state needs (<i>k</i> − 1) × (typical spread) to be smaller than (1 − λ) × <i>T</i>, up to a constant. I measured the spread directly: the gap between the longest and shortest queue on the board times (1 − λ) came out at 2.1 to 2.8 across loads of 70 to 95% and two to five dispatchers, so the spread grows like 1/(1 − λ). Put together, the tipping point should scale like (<i>k</i> − 1)/(1 − λ)². That's where the (1 − load)² came from. In the first post I guessed it was the time a single queue takes to forget its starting point; that guess was wrong.</p>
+
+      <p>The right panel checks the prediction. For four to ten dispatchers, the tipping point times (1 − λ)² sits close to 0.85 × (<i>k</i> − 1) at 80, 90 and 95% load. At 90 and 95% load, three dispatchers tip earlier than the line (about 1.0 instead of 1.7); with an overshoot factor of only 2, the simple drain argument is at its weakest there. The constant 0.85 is fitted, not derived. Well below the threshold the balanced state lasts a handful of refreshes; above it, not one of 10 runs tipped in 1,000 refreshes. It's a sharp edge, not a slow leak.</p>
+
+      <h2>Why the herd never ends</h2>
+
+      <p>The herd is the same multiplication running at full size. Half the servers look short, every dispatcher piles onto them, and by the next refresh the other half look short. The swing in each period is set by how many jobs each dispatcher sends per period, which grows with <i>T</i>, and so does the backlog the drain would have to clear. Everything scales with <i>T</i> together, so the drain never catches up, however stale the board gets. Started half-loaded, the mean time in the system came out at 0.40<i>T</i> at every refresh period from 300 to 3,000. A start with queue lengths spread evenly from short to long settled in a different herd at about 0.6<i>T</i>, so there's more than one herded pattern.</p>
+
+      <p>That changes what the first post's cliff means. Past it, the herd isn't fixed. You're standing on a trap door that a large enough disturbance opens, and nothing in the system closes it again.</p>
+
+      <h2>What gets you out</h2>
+
+      <p>Best of two doesn't. With each dispatcher sampling two servers and adding its own tally, the same trap is there: at <i>T</i> = 2,000 a balanced start averaged 6.9 and a half-loaded start 334. Without the tally, best of two simply sits in the herd at long refresh periods (343 from either start). The tally is what creates the good state; it doesn't remove the bad one.</p>
+
+      <p>What works is making each dispatcher's tally complete. If each of the five dispatchers owns its own 20 servers and only sends there, its tally sees every job those servers get, and there's no one else's top-up to multiply. Partitioned that way, the mean time in the system stayed between 3.9 and 5.5 at every refresh period from 30 to 3,000, from either start, about what a single dispatcher with a tally gets (round robin is 5.2 here). Sharing the tallies, so every dispatcher counts everyone's sends, should do the same; one dispatcher is that case, and it recovered from every start I tried.</p>
+
+      <ul>
+        <li>Several dispatchers, each correcting a shared stale view with only its own sends, overcorrect together. With <i>k</i> of them, each refresh multiplies the imbalance by <i>k</i> − 1.</li>
+        <li>The balanced state survives only if queues drain that overshoot between refreshes: roughly <i>T</i> &gt; 0.85(<i>k</i> − 1)/(1 − λ)². At 90% load and five dispatchers that's about 340 service times.</li>
+        <li>Past that point the herd still exists. A fleet-wide imbalance (a restart, a scale-out) can flip the system into it permanently, at 200 times the response time.</li>
+        <li>Partition the servers among the dispatchers, or share the tally. Either removes the multiplication.</li>
+      </ul>
+
+      <p>Limits: one simulator, exponential job sizes, 100 servers, identical dispatchers that each get a random share of the jobs. The constant 0.85 is measured on a coarse grid. I haven't tested whether real systems refresh their load views slowly enough to sit near this edge. The point that I'd carry over is that a cliff in a parameter sweep can hide two coexisting states, and a sweep that always starts from the same place can't tell you which one is the cliff.</p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+</body>
+</html>
