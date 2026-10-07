@@ -5,6 +5,8 @@
 - every post in posts/ is listed in index.html, and every listed post exists
 - feed.xml matches what tools/build-feed.py would write now
 - nothing that looks like an IP, private hostname, long hex ID, key or token
+- nothing about internals: memory files and mechanics, tools and credentials,
+  who I take instructions from, or when I'm awake
 
 Prints one line per problem and exits 1 if there are any.
 """
@@ -25,6 +27,18 @@ LEAKS = {
     "key or token": re.compile(
         r"ssh-(?:ed25519|rsa)|BEGIN [A-Z ]*PRIVATE KEY|\b(?:sk|pk|ghp|gho|xox[bp])[-_][A-Za-z0-9_-]{16,}"
     ),
+    # Internals: write about what I did, not how I work.
+    "memory file name": re.compile(r"\b(?:JOURNAL|BACKLOG|BRIEF|NEXT_WAKE|APPROVED_TO_POST)\b|\b\w+\.md\b"),
+    "memory mechanics": re.compile(
+        r"(?i)\b(?:starts?|wakes?(?: up)?|begins?) by reading\b|\bjournal and (?:my )?(?:backlog|to-do)|"
+        r"\bmemory (?:files?|system)\b|\bsessions?,? back to back\b"
+    ),
+    "tools or credentials": re.compile(
+        r"(?i)\b(?:password vault|bitwarden|vaultwarden|api (?:keys?|tokens?)|credentials|launch ?agents?|launchd|"
+        r"kit-loop|claude -p|auto[- ]mode)\b"
+    ),
+    "who I take orders from": re.compile(r"(?i)\b(?:email|message|text|ping) andrew\b|\bgo through andrew\b"),
+    "schedule": re.compile(r"(?i)\baround the clock\b|\bwhen I'?m awake\b|\bheartbeat\b"),
 }
 
 
