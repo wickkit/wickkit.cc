@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Round Robin Can't See the Giant — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+
+    <article>
+      <h1>Round Robin Can't See the Giant</h1>
+      <div class="meta">2026-10-07 · Kit Wickham</div>
+
+      <p>In <a href="/posts/2026-10-07-the-least-loaded-server-is-a-rumor.html">The Least Loaded Server Is a Rumor</a> I argued that round robin, not random, is the baseline a load balancer has to beat, and that with load numbers a few service times old, plain round robin often wins. I ended with a caveat I hadn't tested: every job there had the same average size with a mild, exponential spread. Real jobs aren't like that. Most requests are quick and a few are enormous, and round robin can't see which is which.</p>
+
+      <p>So I measured it. The caveat turns out to be most of the story: with heavy-tailed jobs, round robin's advantage nearly disappears, and load information that is hundreds of service times old is still worth reading.</p>
+
+      <h2>The setup</h2>
+
+      <p>Same as before: 100 identical servers, each with its own first-come-first-served queue, jobs arriving at random, mean job size one service time, and the score is the mean time a job spends in the system. The board that dispatchers read shows each server's job count and is refreshed every <i>T</i> service times. One dispatcher, no tally of its own sends.</p>
+
+      <p>What changes is the spread of job sizes. I measure it with the squared coefficient of variation (SCV): the variance divided by the mean squared. Exponential sizes, as in the first post, have SCV 1. To get more spread I used a mix of two exponentials. At SCV 30, about 1 job in 61 is a giant averaging 30 service times and the rest average half a service time; the giants carry half of all the work. SCV 4 and 10 are milder versions of the same mix. I ran 12 seeds of 2 million jobs for every point.</p>
+
+      <p>Why not a Pareto distribution, the textbook heavy tail? I tried that too, and it's a trap for simulation. With a tail exponent of 2.2, random dispatch should average 55 service times at 90% load according to the exact formula for a single queue (Pollaczek–Khinchine), and two million jobs per run gave 38. The mean is driven by giants so rare that a finite run mostly doesn't meet them. The two-exponential mix has the same kind of variance without that problem: random dispatch at SCV 30 came out at 139.9 against the formula's 140.5, and at SCV 10, 51.1 against 50.5. The Pareto runs told the same story qualitatively; I'm just not quoting their numbers.</p>
+
+      <h2>Round robin loses its edge</h2>
+
+      <div class="table-wrap"><table class="compact">
+        <thead><tr><th>Job sizes</th><th>Random</th><th>Round robin</th><th>Best of two (live)</th></tr></thead>
+        <tbody>
+          <tr><td>Exponential (SCV 1)</td><td>10.0</td><td>5.2</td><td>2.6</td></tr>
+          <tr><td>SCV 4</td><td>23.4</td><td>18.6</td><td>4.2</td></tr>
+          <tr><td>SCV 10</td><td>51.1</td><td>45.5</td><td>6.8</td></tr>
+          <tr><td>SCV 30</td><td>139.9</td><td>132.5</td><td>15.2</td></tr>
+        </tbody>
+      </table></div>
+      <p class="note">Mean time in system, in service times, at 90% load. Standard errors are under 2% everywhere.</p>
+
+      <p>With exponential jobs, round robin halves random's time. At SCV 30 it saves 5%.</p>
+
+      <p>The reason is in the shape of the queueing formula. Waiting time at a busy queue is roughly proportional to the variability of the arrivals plus the variability of the job sizes. Round robin removes almost all of the first: each server gets exactly every hundredth job, so its arrivals are nearly regular. With exponential jobs, arrival variability was half the total, so removing it halves the wait. With SCV 30, it was 1 part in 31. Round robin fixes the wrong half of the problem.</p>
+
+      <p>Best of two attacks the other half. It doesn't know job sizes either, only counts, but a server stuck behind a giant builds up a queue of small jobs, and a queue length is visible. At SCV 30 it is almost 9 times better than round robin. Least loaded with a live board does even better: 1.5, against 1.18 for an oracle that knows exactly how much work every server has left.</p>
+
+      <h2>Old information stays useful</h2>
+
+      <p>That's with a live board. The first post's real point was what happens when the board is old, so I swept the refresh interval from 1 to 500 service times.</p>
+
+      <figure class="fig smooth"><img src="/img/lb-heavy.png" width="1650" height="690" alt="Two log-log charts at 90% load of mean time in system divided by round robin's, against time between board refreshes. Left, best of two: with exponential jobs it crosses round robin between 10 and 20 service times; with SCV 4 between 50 and 100; with SCV 10 between 100 and 200; with SCV 30 it is still below round robin at 500. Right, least loaded: exponential crosses between 1 and 2, SCV 4 between 5 and 10, SCV 10 between 20 and 50, and SCV 30 is still well below round robin at 50.">
+        <figcaption>90% load, 100 servers. Below the dotted line, the policy beats round robin. Each point is 12 seeds of 2 million jobs. Least loaded stops at 50: there, with the two milder spreads, the herd overflowed my simulator's queues.</figcaption>
+      </figure>
+
+      <p>Here's when each policy becomes worse than round robin:</p>
+
+      <div class="table-wrap"><table class="compact">
+        <thead><tr><th>Job sizes</th><th>Load</th><th>Best of two worse once <i>T</i> is</th><th>Least loaded worse once <i>T</i> is</th></tr></thead>
+        <tbody>
+          <tr><td>Exponential</td><td>70%</td><td>1–2</td><td>1–2</td></tr>
+          <tr><td>SCV 4</td><td>70%</td><td>20–50</td><td>5–10</td></tr>
+          <tr><td>SCV 10</td><td>70%</td><td>50–100</td><td>20–50</td></tr>
+          <tr><td>SCV 30</td><td>70%</td><td>200–500</td><td>over 50</td></tr>
+          <tr><td>Exponential</td><td>90%</td><td>10–20</td><td>1–2</td></tr>
+          <tr><td>SCV 4</td><td>90%</td><td>50–100</td><td>5–10</td></tr>
+          <tr><td>SCV 10</td><td>90%</td><td>100–200</td><td>20–50</td></tr>
+          <tr><td>SCV 30</td><td>90%</td><td>over 500</td><td>over 50</td></tr>
+        </tbody>
+      </table></div>
+      <p class="note"><i>T</i> is the time between board refreshes, in service times. The ranges are the two grid points where the curve crosses round robin.</p>
+
+      <p>Going from exponential jobs to SCV 30 stretches the staleness budget by more than an order of magnitude. At 90% load, a best-of-two dispatcher reading a board refreshed every 10 service times averages 18.5 at SCV 30, seven times better than round robin. With exponential jobs, the same setup roughly ties it (5.1 vs 5.2).</p>
+
+      <p>My reading of why: the information that matters most is which servers are stuck behind a giant, and that fact changes on the time scale of a giant, not of an average job. A count that is 50 service times old still points at the server that's been grinding through one 30-unit job with a queue behind it. With exponential jobs nothing lasts that long, so an old count is mostly noise. I haven't tested this explanation beyond noticing that the curves move the right way.</p>
+
+      <p>Least loaded still herds: every job between refreshes chases the same few servers that looked empty. But the cost of that herd barely depends on job sizes. With a board 10 service times old at 90% load it averaged 22 to 25 at every spread I tried, while round robin grew from 5 to 132. So the herd is a fixed tax, and once job sizes are spread out enough (somewhere between SCV 4 and 10 at that staleness) it's cheaper than round robin's blindness.</p>
+
+      <h2>What changes from the first post</h2>
+
+      <ul>
+        <li>"With old information, just use round robin" holds only when job sizes are fairly uniform. With heavy-tailed jobs, even quite old queue counts beat it by a wide margin.</li>
+        <li>Best of two is still the safe choice. It degraded gently at every spread and every staleness I tried, and it's the one that tolerates the oldest information.</li>
+        <li>Round robin is still the right baseline to compare against. It's just a much weaker baseline when jobs vary a lot, so beating it proves less.</li>
+        <li>If you simulate heavy tails, don't trust a Pareto mean from a finite run. Check it against the closed form first; mine was 30% low at two million jobs.</li>
+      </ul>
+
+      <p>Limits: one dispatcher, identical servers, first-come-first-served queues, sizes independent of everything else. Real servers often share a processor among jobs instead of queueing them, and that changes how much a giant blocks everyone behind it. I'd expect it to shrink the gap, and I haven't measured it.</p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+</body>
+</html>

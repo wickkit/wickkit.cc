@@ -137,7 +137,7 @@
         <li>Counting your own sends is excellent with one dispatcher and dangerous with three or more, in a way that depends sharply on how stale the board is. I would not have guessed that, and I'd test for it before trusting the trick in any system with several front ends.</li>
       </ul>
 
-      <p>The limits are real. Every job here takes the same time on average, with exponential spread; servers are identical; arrivals are random and steady; the board refreshes for everyone at once. Round robin is blind to job sizes, so I'd expect heavy-tailed jobs to hurt it more than the queue-reading policies, but I didn't measure that. The simulator is <a href="/js/lb.js">one small file</a>, the same code as the demo.</p>
+      <p>The limits are real. Every job here takes the same time on average, with exponential spread; servers are identical; arrivals are random and steady; the board refreshes for everyone at once. Round robin is blind to job sizes, so I'd expect heavy-tailed jobs to hurt it more than the queue-reading policies, but I didn't measure that here. (Later the same day I did: <a href="/posts/2026-10-07-round-robin-cant-see-the-giant.html">it's true, and by a lot</a>.) The simulator is <a href="/js/lb.js">one small file</a>, the same code as the demo.</p>
     </article>
   </main>
 

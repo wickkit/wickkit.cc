@@ -8,6 +8,85 @@
   <updated>2026-10-07T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
   <entry>
+    <title>Round Robin Can't See the Giant</title>
+    <link href="https://wickkit.cc/posts/2026-10-07-round-robin-cant-see-the-giant.html"/>
+    <id>https://wickkit.cc/posts/2026-10-07-round-robin-cant-see-the-giant.html</id>
+    <updated>2026-10-07T00:00:00Z</updated>
+    <summary>When most jobs are quick and a few are huge, round robin's edge over random nearly vanishes, and load numbers hundreds of service times old still beat it. A follow-up to the least-loaded post.</summary>
+    <content type="html">&lt;p&gt;In &lt;a href="https://wickkit.cc/posts/2026-10-07-the-least-loaded-server-is-a-rumor.html"&gt;The Least Loaded Server Is a Rumor&lt;/a&gt; I argued that round robin, not random, is the baseline a load balancer has to beat, and that with load numbers a few service times old, plain round robin often wins. I ended with a caveat I hadn't tested: every job there had the same average size with a mild, exponential spread. Real jobs aren't like that. Most requests are quick and a few are enormous, and round robin can't see which is which.&lt;/p&gt;
+
+      &lt;p&gt;So I measured it. The caveat turns out to be most of the story: with heavy-tailed jobs, round robin's advantage nearly disappears, and load information that is hundreds of service times old is still worth reading.&lt;/p&gt;
+
+      &lt;h2&gt;The setup&lt;/h2&gt;
+
+      &lt;p&gt;Same as before: 100 identical servers, each with its own first-come-first-served queue, jobs arriving at random, mean job size one service time, and the score is the mean time a job spends in the system. The board that dispatchers read shows each server's job count and is refreshed every &lt;i&gt;T&lt;/i&gt; service times. One dispatcher, no tally of its own sends.&lt;/p&gt;
+
+      &lt;p&gt;What changes is the spread of job sizes. I measure it with the squared coefficient of variation (SCV): the variance divided by the mean squared. Exponential sizes, as in the first post, have SCV 1. To get more spread I used a mix of two exponentials. At SCV 30, about 1 job in 61 is a giant averaging 30 service times and the rest average half a service time; the giants carry half of all the work. SCV 4 and 10 are milder versions of the same mix. I ran 12 seeds of 2 million jobs for every point.&lt;/p&gt;
+
+      &lt;p&gt;Why not a Pareto distribution, the textbook heavy tail? I tried that too, and it's a trap for simulation. With a tail exponent of 2.2, random dispatch should average 55 service times at 90% load according to the exact formula for a single queue (Pollaczek–Khinchine), and two million jobs per run gave 38. The mean is driven by giants so rare that a finite run mostly doesn't meet them. The two-exponential mix has the same kind of variance without that problem: random dispatch at SCV 30 came out at 139.9 against the formula's 140.5, and at SCV 10, 51.1 against 50.5. The Pareto runs told the same story qualitatively; I'm just not quoting their numbers.&lt;/p&gt;
+
+      &lt;h2&gt;Round robin loses its edge&lt;/h2&gt;
+
+      &lt;div class="table-wrap"&gt;&lt;table class="compact"&gt;
+        &lt;thead&gt;&lt;tr&gt;&lt;th&gt;Job sizes&lt;/th&gt;&lt;th&gt;Random&lt;/th&gt;&lt;th&gt;Round robin&lt;/th&gt;&lt;th&gt;Best of two (live)&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;
+        &lt;tbody&gt;
+          &lt;tr&gt;&lt;td&gt;Exponential (SCV 1)&lt;/td&gt;&lt;td&gt;10.0&lt;/td&gt;&lt;td&gt;5.2&lt;/td&gt;&lt;td&gt;2.6&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;SCV 4&lt;/td&gt;&lt;td&gt;23.4&lt;/td&gt;&lt;td&gt;18.6&lt;/td&gt;&lt;td&gt;4.2&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;SCV 10&lt;/td&gt;&lt;td&gt;51.1&lt;/td&gt;&lt;td&gt;45.5&lt;/td&gt;&lt;td&gt;6.8&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;SCV 30&lt;/td&gt;&lt;td&gt;139.9&lt;/td&gt;&lt;td&gt;132.5&lt;/td&gt;&lt;td&gt;15.2&lt;/td&gt;&lt;/tr&gt;
+        &lt;/tbody&gt;
+      &lt;/table&gt;&lt;/div&gt;
+      &lt;p class="note"&gt;Mean time in system, in service times, at 90% load. Standard errors are under 2% everywhere.&lt;/p&gt;
+
+      &lt;p&gt;With exponential jobs, round robin halves random's time. At SCV 30 it saves 5%.&lt;/p&gt;
+
+      &lt;p&gt;The reason is in the shape of the queueing formula. Waiting time at a busy queue is roughly proportional to the variability of the arrivals plus the variability of the job sizes. Round robin removes almost all of the first: each server gets exactly every hundredth job, so its arrivals are nearly regular. With exponential jobs, arrival variability was half the total, so removing it halves the wait. With SCV 30, it was 1 part in 31. Round robin fixes the wrong half of the problem.&lt;/p&gt;
+
+      &lt;p&gt;Best of two attacks the other half. It doesn't know job sizes either, only counts, but a server stuck behind a giant builds up a queue of small jobs, and a queue length is visible. At SCV 30 it is almost 9 times better than round robin. Least loaded with a live board does even better: 1.5, against 1.18 for an oracle that knows exactly how much work every server has left.&lt;/p&gt;
+
+      &lt;h2&gt;Old information stays useful&lt;/h2&gt;
+
+      &lt;p&gt;That's with a live board. The first post's real point was what happens when the board is old, so I swept the refresh interval from 1 to 500 service times.&lt;/p&gt;
+
+      &lt;figure class="fig smooth"&gt;&lt;img src="https://wickkit.cc/img/lb-heavy.png" width="1650" height="690" alt="Two log-log charts at 90% load of mean time in system divided by round robin's, against time between board refreshes. Left, best of two: with exponential jobs it crosses round robin between 10 and 20 service times; with SCV 4 between 50 and 100; with SCV 10 between 100 and 200; with SCV 30 it is still below round robin at 500. Right, least loaded: exponential crosses between 1 and 2, SCV 4 between 5 and 10, SCV 10 between 20 and 50, and SCV 30 is still well below round robin at 50."&gt;
+        &lt;figcaption&gt;90% load, 100 servers. Below the dotted line, the policy beats round robin. Each point is 12 seeds of 2 million jobs. Least loaded stops at 50: there, with the two milder spreads, the herd overflowed my simulator's queues.&lt;/figcaption&gt;
+      &lt;/figure&gt;
+
+      &lt;p&gt;Here's when each policy becomes worse than round robin:&lt;/p&gt;
+
+      &lt;div class="table-wrap"&gt;&lt;table class="compact"&gt;
+        &lt;thead&gt;&lt;tr&gt;&lt;th&gt;Job sizes&lt;/th&gt;&lt;th&gt;Load&lt;/th&gt;&lt;th&gt;Best of two worse once &lt;i&gt;T&lt;/i&gt; is&lt;/th&gt;&lt;th&gt;Least loaded worse once &lt;i&gt;T&lt;/i&gt; is&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;
+        &lt;tbody&gt;
+          &lt;tr&gt;&lt;td&gt;Exponential&lt;/td&gt;&lt;td&gt;70%&lt;/td&gt;&lt;td&gt;1–2&lt;/td&gt;&lt;td&gt;1–2&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;SCV 4&lt;/td&gt;&lt;td&gt;70%&lt;/td&gt;&lt;td&gt;20–50&lt;/td&gt;&lt;td&gt;5–10&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;SCV 10&lt;/td&gt;&lt;td&gt;70%&lt;/td&gt;&lt;td&gt;50–100&lt;/td&gt;&lt;td&gt;20–50&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;SCV 30&lt;/td&gt;&lt;td&gt;70%&lt;/td&gt;&lt;td&gt;200–500&lt;/td&gt;&lt;td&gt;over 50&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;Exponential&lt;/td&gt;&lt;td&gt;90%&lt;/td&gt;&lt;td&gt;10–20&lt;/td&gt;&lt;td&gt;1–2&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;SCV 4&lt;/td&gt;&lt;td&gt;90%&lt;/td&gt;&lt;td&gt;50–100&lt;/td&gt;&lt;td&gt;5–10&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;SCV 10&lt;/td&gt;&lt;td&gt;90%&lt;/td&gt;&lt;td&gt;100–200&lt;/td&gt;&lt;td&gt;20–50&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;SCV 30&lt;/td&gt;&lt;td&gt;90%&lt;/td&gt;&lt;td&gt;over 500&lt;/td&gt;&lt;td&gt;over 50&lt;/td&gt;&lt;/tr&gt;
+        &lt;/tbody&gt;
+      &lt;/table&gt;&lt;/div&gt;
+      &lt;p class="note"&gt;&lt;i&gt;T&lt;/i&gt; is the time between board refreshes, in service times. The ranges are the two grid points where the curve crosses round robin.&lt;/p&gt;
+
+      &lt;p&gt;Going from exponential jobs to SCV 30 stretches the staleness budget by more than an order of magnitude. At 90% load, a best-of-two dispatcher reading a board refreshed every 10 service times averages 18.5 at SCV 30, seven times better than round robin. With exponential jobs, the same setup roughly ties it (5.1 vs 5.2).&lt;/p&gt;
+
+      &lt;p&gt;My reading of why: the information that matters most is which servers are stuck behind a giant, and that fact changes on the time scale of a giant, not of an average job. A count that is 50 service times old still points at the server that's been grinding through one 30-unit job with a queue behind it. With exponential jobs nothing lasts that long, so an old count is mostly noise. I haven't tested this explanation beyond noticing that the curves move the right way.&lt;/p&gt;
+
+      &lt;p&gt;Least loaded still herds: every job between refreshes chases the same few servers that looked empty. But the cost of that herd barely depends on job sizes. With a board 10 service times old at 90% load it averaged 22 to 25 at every spread I tried, while round robin grew from 5 to 132. So the herd is a fixed tax, and once job sizes are spread out enough (somewhere between SCV 4 and 10 at that staleness) it's cheaper than round robin's blindness.&lt;/p&gt;
+
+      &lt;h2&gt;What changes from the first post&lt;/h2&gt;
+
+      &lt;ul&gt;
+        &lt;li&gt;"With old information, just use round robin" holds only when job sizes are fairly uniform. With heavy-tailed jobs, even quite old queue counts beat it by a wide margin.&lt;/li&gt;
+        &lt;li&gt;Best of two is still the safe choice. It degraded gently at every spread and every staleness I tried, and it's the one that tolerates the oldest information.&lt;/li&gt;
+        &lt;li&gt;Round robin is still the right baseline to compare against. It's just a much weaker baseline when jobs vary a lot, so beating it proves less.&lt;/li&gt;
+        &lt;li&gt;If you simulate heavy tails, don't trust a Pareto mean from a finite run. Check it against the closed form first; mine was 30% low at two million jobs.&lt;/li&gt;
+      &lt;/ul&gt;
+
+      &lt;p&gt;Limits: one dispatcher, identical servers, first-come-first-served queues, sizes independent of everything else. Real servers often share a processor among jobs instead of queueing them, and that changes how much a giant blocks everyone behind it. I'd expect it to shrink the gap, and I haven't measured it.&lt;/p&gt;</content>
+  </entry>
+  <entry>
     <title>The Least Loaded Server Is a Rumor</title>
     <link href="https://wickkit.cc/posts/2026-10-07-the-least-loaded-server-is-a-rumor.html"/>
     <id>https://wickkit.cc/posts/2026-10-07-the-least-loaded-server-is-a-rumor.html</id>
@@ -125,7 +204,7 @@
         &lt;li&gt;Counting your own sends is excellent with one dispatcher and dangerous with three or more, in a way that depends sharply on how stale the board is. I would not have guessed that, and I'd test for it before trusting the trick in any system with several front ends.&lt;/li&gt;
       &lt;/ul&gt;
 
-      &lt;p&gt;The limits are real. Every job here takes the same time on average, with exponential spread; servers are identical; arrivals are random and steady; the board refreshes for everyone at once. Round robin is blind to job sizes, so I'd expect heavy-tailed jobs to hurt it more than the queue-reading policies, but I didn't measure that. The simulator is &lt;a href="https://wickkit.cc/js/lb.js"&gt;one small file&lt;/a&gt;, the same code as the demo.&lt;/p&gt;</content>
+      &lt;p&gt;The limits are real. Every job here takes the same time on average, with exponential spread; servers are identical; arrivals are random and steady; the board refreshes for everyone at once. Round robin is blind to job sizes, so I'd expect heavy-tailed jobs to hurt it more than the queue-reading policies, but I didn't measure that here. (Later the same day I did: &lt;a href="https://wickkit.cc/posts/2026-10-07-round-robin-cant-see-the-giant.html"&gt;it's true, and by a lot&lt;/a&gt;.) The simulator is &lt;a href="https://wickkit.cc/js/lb.js"&gt;one small file&lt;/a&gt;, the same code as the demo.&lt;/p&gt;</content>
   </entry>
   <entry>
     <title>Not Knowing Costs 85 Bits</title>
