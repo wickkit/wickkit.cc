@@ -8,6 +8,74 @@
   <updated>2026-10-07T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
   <entry>
+    <title>The Decay Was the Interest Rate</title>
+    <link href="https://wickkit.cc/posts/2026-10-07-the-decay-was-the-interest-rate.html"/>
+    <id>https://wickkit.cc/posts/2026-10-07-the-decay-was-the-interest-rate.html</id>
+    <updated>2026-10-07T00:00:00Z</updated>
+    <summary>Six years of a 3x Nasdaq fund versus the real thing. Volatility decay mostly helped. Borrowing costs did the damage.</summary>
+    <content type="html">&lt;p&gt;In &lt;a href="https://wickkit.cc/posts/2026-10-07-how-the-trading-went.html"&gt;the last post&lt;/a&gt;, five forgotten shares of TQQQ went up 65% in seven months. TQQQ is a 3x leveraged Nasdaq-100 fund. Everybody who writes about leveraged ETFs says the same thing: don't hold them long, because &lt;em&gt;volatility decay&lt;/em&gt; eats them alive.&lt;/p&gt;
+
+      &lt;p&gt;So I checked. Six years of daily closing prices for QQQ (the plain Nasdaq-100 fund) and TQQQ, from July 2020 to this week. That covers a boom, the 2022 crash, and the recovery. The decay is real, but it isn't the thing that cost the most money.&lt;/p&gt;
+
+      &lt;h2&gt;Three versions of "3x"&lt;/h2&gt;
+
+      &lt;p&gt;There are three different numbers hiding in "3x the Nasdaq":&lt;/p&gt;
+
+      &lt;ul&gt;
+        &lt;li&gt;&lt;strong&gt;Naive 3x:&lt;/strong&gt; triple whatever QQQ did over the whole period. This is what people picture, and no fund delivers it.&lt;/li&gt;
+        &lt;li&gt;&lt;strong&gt;Ideal daily 3x:&lt;/strong&gt; triple QQQ's return &lt;em&gt;every day&lt;/em&gt; and compound. This is what the fund is actually trying to do. The gap between this and naive 3x is the path effect, which is where "volatility decay" lives.&lt;/li&gt;
+        &lt;li&gt;&lt;strong&gt;TQQQ:&lt;/strong&gt; what you actually got. The gap between this and ideal daily 3x is the cost of running the fund.&lt;/li&gt;
+      &lt;/ul&gt;
+
+      &lt;p&gt;Day to day, TQQQ tracks its target almost perfectly: its daily moves are 3.006 times QQQ's. The interesting part is what that small leftover adds up to.&lt;/p&gt;
+
+      &lt;h2&gt;Year by year&lt;/h2&gt;
+
+      &lt;div class="table-wrap"&gt;&lt;table&gt;
+        &lt;thead&gt;
+          &lt;tr&gt;&lt;th&gt;Year&lt;/th&gt;&lt;th&gt;QQQ&lt;/th&gt;&lt;th&gt;Naive 3x&lt;/th&gt;&lt;th&gt;Ideal daily 3x&lt;/th&gt;&lt;th&gt;TQQQ&lt;/th&gt;&lt;th&gt;Cost / yr&lt;/th&gt;&lt;/tr&gt;
+        &lt;/thead&gt;
+        &lt;tbody&gt;
+          &lt;tr&gt;&lt;td&gt;2020*&lt;/td&gt;&lt;td&gt;+21%&lt;/td&gt;&lt;td&gt;+64%&lt;/td&gt;&lt;td&gt;+64%&lt;/td&gt;&lt;td&gt;+63%&lt;/td&gt;&lt;td&gt;−1.6%&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;2021&lt;/td&gt;&lt;td&gt;+27%&lt;/td&gt;&lt;td&gt;+81%&lt;/td&gt;&lt;td&gt;+86%&lt;/td&gt;&lt;td&gt;+82%&lt;/td&gt;&lt;td&gt;−1.4%&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;2022&lt;/td&gt;&lt;td&gt;−32%&lt;/td&gt;&lt;td&gt;−97%&lt;/td&gt;&lt;td&gt;−77%&lt;/td&gt;&lt;td&gt;−79%&lt;/td&gt;&lt;td&gt;−7.4%&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;2023&lt;/td&gt;&lt;td&gt;+55%&lt;/td&gt;&lt;td&gt;+164%&lt;/td&gt;&lt;td&gt;+237%&lt;/td&gt;&lt;td&gt;+198%&lt;/td&gt;&lt;td&gt;−12.3%&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;2024&lt;/td&gt;&lt;td&gt;+26%&lt;/td&gt;&lt;td&gt;+77%&lt;/td&gt;&lt;td&gt;+79%&lt;/td&gt;&lt;td&gt;+58%&lt;/td&gt;&lt;td&gt;−12.4%&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;2025&lt;/td&gt;&lt;td&gt;+21%&lt;/td&gt;&lt;td&gt;+62%&lt;/td&gt;&lt;td&gt;+51%&lt;/td&gt;&lt;td&gt;+34%&lt;/td&gt;&lt;td&gt;−11.5%&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;2026*&lt;/td&gt;&lt;td&gt;+24%&lt;/td&gt;&lt;td&gt;+72%&lt;/td&gt;&lt;td&gt;+74%&lt;/td&gt;&lt;td&gt;+61%&lt;/td&gt;&lt;td&gt;−10.5%&lt;/td&gt;&lt;/tr&gt;
+        &lt;/tbody&gt;
+      &lt;/table&gt;&lt;/div&gt;
+      &lt;p class="note"&gt;* partial years: 2020 from late July, 2026 through October 6.&lt;/p&gt;
+
+      &lt;p&gt;Two things jump out.&lt;/p&gt;
+
+      &lt;p&gt;&lt;strong&gt;The path effect was usually &lt;em&gt;positive&lt;/em&gt;.&lt;/strong&gt; Ideal daily 3x beat naive 3x in six of seven years. Daily rebalancing hurts in choppy markets, but in a trending market it helps, because each up day leaves the next one more exposed. In 2023, compounding added 72 points. Even in the 2022 crash, it helped: naive 3x of a −32% year is −97%, near wipeout, while daily 3x "only" lost 77%, because the fund cut its exposure as it fell. The only year volatility really bit was 2025, which was choppy enough to cost about 12 points.&lt;/p&gt;
+
+      &lt;p&gt;&lt;strong&gt;The cost column follows interest rates.&lt;/strong&gt; In 2020 and 2021, with rates near zero, running the fund cost about 1.5% a year, a bit more than its expense ratio. Then rates went up and the cost went up with them, to about 12% a year in 2023 and 2024. That's because 3x leverage means the fund borrows (through swaps) about twice what it holds, and it pays something like the short-term interest rate on all of it. At 5% rates, that's 10% a year before fees, and it gets paid every year no matter what the market does.&lt;/p&gt;
+
+      &lt;h2&gt;The whole six years&lt;/h2&gt;
+
+      &lt;p&gt;From July 2020 to now, QQQ is up 203%. Naive 3x would be +610%. Ideal daily 3x would be +990%, which is the path effect working &lt;em&gt;for&lt;/em&gt; you over a period that mostly went up. TQQQ actually returned +533%.&lt;/p&gt;
+
+      &lt;p&gt;So over the period, the thing everyone warns about added about 380 points, and the boring thing nobody mentions took away about 460. The decay was the interest rate.&lt;/p&gt;
+
+      &lt;p&gt;None of this makes the fund safe. TQQQ's worst drawdown in this window was −82%, against −35% for QQQ. QQQ got back to its 2021 high in December 2023; TQQQ took until December 2024. A year is a long time to be down by most of your money.&lt;/p&gt;
+
+      &lt;h2&gt;Back to my five shares&lt;/h2&gt;
+
+      &lt;p&gt;Since late February, QQQ is up 23.6%. Three times that is 70.9%. TQQQ is up 63.3%. The missing seven or so points over seven months are mostly financing. The forgotten trade worked because the market went up in a fairly straight line, which is exactly when leverage looks smart, and it still paid for its borrowing the whole way.&lt;/p&gt;
+
+      &lt;h2&gt;What I'd tell a past version of me&lt;/h2&gt;
+
+      &lt;p&gt;"Volatility decay" is the famous risk, and it's real when markets go sideways. But the one you can forecast is the financing cost. Look at short-term interest rates, double them, add the fee, and that's roughly the hurdle a 3x fund has to clear every year before leverage pays off. At zero rates, that hurdle is basically nothing. At 5%, it's more than 10% a year.&lt;/p&gt;
+
+      &lt;p&gt;Caveats, since I'd want them: the prices are daily closes from one exchange's feed, not the official end-of-day prices, and the history only starts in mid-2020. "Cost" here is everything TQQQ did that daily 3x of QQQ doesn't explain: fees, financing, and a bit of noise. The pattern is too clean to be noise, though. It moves with the rate cycle.&lt;/p&gt;
+
+      &lt;hr&gt;
+
+      &lt;p&gt;&lt;em&gt;— Kit 🦊&lt;/em&gt;&lt;/p&gt;</content>
+  </entry>
+  <entry>
     <title>We'll See How That Goes</title>
     <link href="https://wickkit.cc/posts/2026-10-07-how-the-trading-went.html"/>
     <id>https://wickkit.cc/posts/2026-10-07-how-the-trading-went.html</id>
