@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Most Compressors Stop Learning — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+
+    <article>
+      <h1>Most Compressors Stop Learning</h1>
+      <div class="meta">2026-10-07 · Kit Wickham</div>
+
+      <p>Every compressor is up against a floor. Shannon showed that text from a random source can't be squeezed below its <em>entropy</em>, on average, no matter how clever you are. The textbook result for gzip's family of compressors is that they're <em>universal</em>: given enough data, they get down to that floor on any source, without being told anything about it.</p>
+
+      <p>"Given enough data" is doing a lot of work in that sentence. For real text you can't check how close a compressor gets, because nobody knows the entropy of English. But you can make up a random source where you know the entropy exactly, generate text from it, and measure how far above the floor each compressor lands, and how that gap shrinks as the text gets longer.</p>
+
+      <p>So I did that for gzip, bzip2, xz and zstd, each at its strongest setting, on six sources and up to 16 million characters. The short answer: gzip and bzip2 stop improving after about a megabyte and sit 14–60% above the floor forever. xz keeps improving, but slowly enough that the numbers are a little absurd. And a twenty-line counting model beats all four by a mile, as long as you tell it one thing.</p>
+
+      <div class="viz" id="cz">
+        <div class="viz-presets" role="group" aria-label="Source">
+          <button type="button" data-p="coin" aria-pressed="false">fair coin</button>
+          <button type="button" data-p="biased" aria-pressed="false">90/10 coin</button>
+          <button type="button" data-p="zipf" aria-pressed="false">26 letters, no memory</button>
+          <button type="button" data-p="m1" aria-pressed="true">8 symbols, memory 1</button>
+          <button type="button" data-p="m3" aria-pressed="false">4 symbols, memory 3</button>
+          <button type="button" data-p="m2" aria-pressed="false">26 letters, memory 2</button>
+          <button type="button" id="cz-new">new random source</button>
+        </div>
+        <div class="viz-controls">
+          <label>Text length <output id="cz-len-out"></output>
+            <input id="cz-len" type="range" min="14" max="20" step="1" value="18"></label>
+        </div>
+        <div class="viz-stats" aria-live="polite">
+          <div><b id="cz-h">–</b>entropy, bits per symbol</div>
+          <div><b id="cz-kt">–</b>counting model, above the floor</div>
+          <div><b id="cz-gz">–</b>gzip, above the floor</div>
+          <div><b id="cz-flat">–</b>gzip after only 32k symbols</div>
+        </div>
+        <figure class="viz-chart">
+          <div class="viz-legend"><span style="--c: var(--s1)">counting model</span><span style="--c: var(--s2)">gzip</span><span class="cz-leg-h">entropy</span></div>
+          <svg id="cz-chart" role="img" aria-label="Bits per symbol against text length, for the counting model and gzip, with the entropy as a dashed line"></svg>
+          <figcaption>Bits per symbol on the first <i>n</i> symbols of one sample. The dashed line is the floor. Everything runs in your browser; gzip here is the browser's built-in one at its default level, which does noticeably worse than the <code>-9</code> I used below.</figcaption>
+        </figure>
+        <p class="note" id="cz-nogz" hidden>Your browser has no built-in compressor, so only the counting model is shown.</p>
+        <noscript><p class="note">The chart needs JavaScript.</p></noscript>
+      </div>
+
+      <h2>The sources</h2>
+
+      <p>Each source writes one letter per byte, which is wasteful on purpose: there's slack for the compressor to take up. The first three have no memory. Every letter is drawn fresh from a fixed set of odds: a fair coin (exactly 1 bit per letter), a 90/10 coin (0.47 bits), and 26 letters with uneven odds like a long-tailed word list (3.93 bits).</p>
+
+      <p>The other three have memory. The odds for the next letter depend on the last one, two or three letters, and each of those contexts gets its own random table of odds. "Memory 1" over 8 letters has 8 tables; "memory 2" over 26 letters has 676, which is a crude imitation of how English spelling depends on the letters just before. For a source like that, the entropy is the average uncertainty of the next letter given the ones before it, weighted by how often each context comes up. It takes a few lines to compute exactly.</p>
+
+      <p>Before trusting any of it I checked the generator: scoring the text with the true odds that made it gives the entropy back, to within 0.1% at a million letters on every source. The browser version and the one I ran the big batch with agree on the entropy to 13 decimal places.</p>
+
+      <h2>What they managed</h2>
+
+      <figure class="fig smooth"><img src="/img/comp-curves.png" width="1650" height="990" alt="Six small charts, one per source, showing how far above the entropy floor each compressor lands as the text grows from 256 to 16 million symbols, on log scales. The counting model's line falls steeply in every panel, to 0.01% or below on five of the six. gzip and bzip2 level off between about 14% and 60% after a megabyte. xz keeps sloping down slowly on the three sources with memory but rises on the 26-letter source without memory. zstd gets under 1% on the fair coin and on the 26 letters without memory, and runs alongside xz elsewhere.">
+        <figcaption>How far above the floor each compressor lands, against how much text it was given. Both axes are logarithmic. Averages of three samples; the samples agree to well under a percent.</figcaption></figure>
+
+      <div class="table-wrap"><table class="compact">
+        <thead><tr><th>Source</th><th>gzip</th><th>bzip2</th><th>xz</th><th>zstd</th><th>Counting model</th></tr></thead>
+        <tbody>
+          <tr><td>fair coin</td><td>19.3%</td><td>28.1%</td><td>7.5%</td><td>0.7%</td><td>0.000%</td></tr>
+          <tr><td>90/10 coin</td><td>38.8%</td><td>16.2%</td><td>22.4%</td><td>20.6%</td><td>0.000%</td></tr>
+          <tr><td>26 letters, no memory</td><td>15.2%</td><td>13.7%</td><td>4.9%</td><td>0.8%</td><td>0.000%</td></tr>
+          <tr><td>8 symbols, memory 1</td><td>26.6%</td><td>19.8%</td><td>14.3%</td><td>13.9%</td><td>0.002%</td></tr>
+          <tr><td>4 symbols, memory 3</td><td>35.7%</td><td>27.7%</td><td>18.0%</td><td>17.8%</td><td>0.007%</td></tr>
+          <tr><td>26 letters, memory 2</td><td>59.6%</td><td>23.1%</td><td>34.1%</td><td>33.9%</td><td>0.24%</td></tr>
+        </tbody>
+      </table></div>
+      <p class="note">Size above the entropy floor at 16 million symbols, measured against what the true odds pay on the same text. gzip <code>-9</code>, bzip2 <code>-9</code>, xz preset 9, zstd level 19, headers and checksums stripped where the format allows. Counting model: ideal code length, which an arithmetic coder gets within a couple of bits of.</p>
+
+      <h2>gzip and bzip2 forget</h2>
+
+      <p>Look at the gzip and bzip2 lines in the chart: by a megabyte they're flat. gzip at one megabyte and at sixteen differ by less than a percentage point on every source. That's by design. gzip only looks back 32 KB for repeats, and bzip2 works in blocks of 900 KB and starts each block from scratch. Once they've seen a window's worth of text, more text teaches them nothing. Universal compression needs an unbounded memory, and these two bounded theirs on purpose, for speed and for streaming.</p>
+
+      <h2>xz keeps learning, very slowly</h2>
+
+      <p>xz is the one compressor here whose window (64 MB at its top setting) is bigger than the whole text, so it's the closest to the textbook. On the three sources with memory it does keep improving, all the way to 16 million. But look at how. On "8 symbols, memory 1", the gap above the floor times the number of doublings of text (log₂ <i>n</i>) is almost exactly constant from a million symbols on:</p>
+
+      <div class="table-wrap"><table class="compact">
+        <thead><tr><th>Symbols</th><th>256k</th><th>512k</th><th>1M</th><th>2M</th><th>4M</th><th>8M</th><th>16M</th></tr></thead>
+        <tbody><tr><td>gap × log₂ <i>n</i></td><td>6.58</td><td>6.49</td><td>6.43</td><td>6.41</td><td>6.40</td><td>6.40</td><td>6.40</td></tr></tbody>
+      </table></div>
+      <p class="note">Gap in bits per symbol, xz preset 9, average of three samples.</p>
+
+      <p>So the gap shrinks like 1/log <i>n</i>, which is roughly the speed theory gives for this family of compressors. Doubling the text, from a million to two million symbols, cuts the gap by 5%. To get from 14% above the floor down to 1%, you'd need log₂ <i>n</i> ≈ 346, about 10<sup>104</sup> symbols. The observable universe has around 10<sup>80</sup> atoms. That's an extrapolation, and the other two memory sources drift a bit below the 1/log <i>n</i> line, so take the exponent loosely. But nothing in these curves looks like it gets to the floor in any amount of text that exists.</p>
+
+      <p>On the source with no memory at all, xz gets <em>worse</em> as it sees more: 3.9% above the floor at 256k symbols, 4.9% at 16 million. With a bigger window there are more accidental repeats to find, and every one it uses is a coincidence it pays to describe. On a fresh 16-million-symbol sample, xz with its window cut to 32 KB lands 4.0% above the floor; with the full window, 4.9%. On text with no memory, remembering more is pure cost.</p>
+
+      <p>zstd is the odd one out in the other direction. It codes each letter that isn't part of a repeat with a table built from the letter counts, so on the fair coin and the 26 letters with no memory, it gets within 1%. (Not the 90/10 coin: a table like that spends at least a whole bit per letter, and that coin carries less than half a bit.) But where it has to learn context, it does no better than xz.</p>
+
+      <h2>The counting model, and the one thing it needs</h2>
+
+      <p>The blue line is a model you can write in twenty lines. For each context (the last <i>k</i> letters), it keeps a count of what came next, and predicts the next letter in proportion to those counts, plus a half for every letter so nothing is ever impossible. Each prediction turns into bits with an arithmetic coder. It's a standard estimator from the 1980s (Krichevsky–Trofimov), and it gets within 1% of the floor after 16 thousand symbols on "memory 1" and within 0.01% by 16 million. You can watch it do that in the chart at the top.</p>
+
+      <p>The catch is that I told it <i>k</i>. Give it the wrong amount of memory and it falls apart in both directions:</p>
+
+      <div class="table-wrap"><table class="compact">
+        <thead><tr><th>Source</th><th>Memory 0</th><th>Memory 1</th><th>Memory 2</th><th>Memory 3</th></tr></thead>
+        <tbody>
+          <tr><td>26 letters, no memory</td><td><b>0.00%</b></td><td>0.07%</td><td>0.94%</td><td>4.9%</td></tr>
+          <tr><td>8 symbols, memory 1</td><td>51%</td><td><b>0.00%</b></td><td>0.08%</td><td>0.40%</td></tr>
+          <tr><td>4 symbols, memory 3</td><td>61%</td><td>58%</td><td>46%</td><td><b>0.09%</b></td></tr>
+          <tr><td>26 letters, memory 2</td><td>110%</td><td>98%</td><td><b>2.4%</b></td><td>11%</td></tr>
+        </tbody>
+      </table></div>
+      <p class="note">Counting model with a fixed amount of memory, above the floor at one million symbols. Bold is the right amount.</p>
+
+      <p>Too little memory and it can never learn the structure: 51–110% above the floor, worse than gzip. Too much and it spreads the same text across too many contexts, each of which has to be learned separately: on the 26-letter source, memory 3 has 17,576 contexts and is still 11% above the floor at a million symbols. Knowing the right amount of context is most of the battle, and a general-purpose compressor doesn't get told.</p>
+
+      <p>bzip2 is the interesting middle case. Its core trick, the Burrows–Wheeler transform, sorts the text by what follows each position, which groups letters with the same context together. That's a context model in disguise, and on the 26-letter, memory 2 source it's the best of the four real compressors at 23%, ahead of xz at 34%. Its 900 KB blocks are what stop it going further.</p>
+
+      <h2>What I take from it</h2>
+
+      <p>"Universal" is a statement about the limit, and the limit is a long way off. On the textbook kind of source, the gap for the best of these closes like 1/log <i>n</i>, which in practice means it doesn't close. Real compressors get their wins elsewhere: long exact repeats, which real files are full of and these sources never have. Random text with memory is close to their worst case, and that's the point of using it: it shows what they can't learn rather than what they can copy.</p>
+
+      <p>Compressors that do learn context, the PPM and context-mixing families, work by blending counting models with several amounts of memory and letting the data pick the mix. That's the obvious next experiment.</p>
+
+      <p>The sources, entropy and counting model are in <a href="/js/comp.js">one small file</a>. The big runs used three samples per source, 16 million symbols each, with the same models in Python and each compressor at its strongest standard setting.</p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+  <script src="/js/comp.js"></script>
+  <script src="/js/comp-ui.js"></script>
+</body>
+</html>

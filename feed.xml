@@ -8,6 +8,122 @@
   <updated>2026-10-07T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
   <entry>
+    <title>Most Compressors Stop Learning</title>
+    <link href="https://wickkit.cc/posts/2026-10-07-most-compressors-stop-learning.html"/>
+    <id>https://wickkit.cc/posts/2026-10-07-most-compressors-stop-learning.html</id>
+    <updated>2026-10-07T00:00:00Z</updated>
+    <summary>Random text with a known entropy, 16 million symbols, four compressors. gzip and bzip2 stall 14–60% above the floor; xz closes the gap like 1/log n. A twenty-line counting model wins, if you tell it one thing.</summary>
+    <content type="html">&lt;p&gt;Every compressor is up against a floor. Shannon showed that text from a random source can't be squeezed below its &lt;em&gt;entropy&lt;/em&gt;, on average, no matter how clever you are. The textbook result for gzip's family of compressors is that they're &lt;em&gt;universal&lt;/em&gt;: given enough data, they get down to that floor on any source, without being told anything about it.&lt;/p&gt;
+
+      &lt;p&gt;"Given enough data" is doing a lot of work in that sentence. For real text you can't check how close a compressor gets, because nobody knows the entropy of English. But you can make up a random source where you know the entropy exactly, generate text from it, and measure how far above the floor each compressor lands, and how that gap shrinks as the text gets longer.&lt;/p&gt;
+
+      &lt;p&gt;So I did that for gzip, bzip2, xz and zstd, each at its strongest setting, on six sources and up to 16 million characters. The short answer: gzip and bzip2 stop improving after about a megabyte and sit 14–60% above the floor forever. xz keeps improving, but slowly enough that the numbers are a little absurd. And a twenty-line counting model beats all four by a mile, as long as you tell it one thing.&lt;/p&gt;
+
+      &lt;div class="viz" id="cz"&gt;
+        &lt;div class="viz-presets" role="group" aria-label="Source"&gt;
+          &lt;button type="button" data-p="coin" aria-pressed="false"&gt;fair coin&lt;/button&gt;
+          &lt;button type="button" data-p="biased" aria-pressed="false"&gt;90/10 coin&lt;/button&gt;
+          &lt;button type="button" data-p="zipf" aria-pressed="false"&gt;26 letters, no memory&lt;/button&gt;
+          &lt;button type="button" data-p="m1" aria-pressed="true"&gt;8 symbols, memory 1&lt;/button&gt;
+          &lt;button type="button" data-p="m3" aria-pressed="false"&gt;4 symbols, memory 3&lt;/button&gt;
+          &lt;button type="button" data-p="m2" aria-pressed="false"&gt;26 letters, memory 2&lt;/button&gt;
+          &lt;button type="button" id="cz-new"&gt;new random source&lt;/button&gt;
+        &lt;/div&gt;
+        &lt;div class="viz-controls"&gt;
+          &lt;label&gt;Text length &lt;output id="cz-len-out"&gt;&lt;/output&gt;
+            &lt;input id="cz-len" type="range" min="14" max="20" step="1" value="18"&gt;&lt;/label&gt;
+        &lt;/div&gt;
+        &lt;div class="viz-stats" aria-live="polite"&gt;
+          &lt;div&gt;&lt;b id="cz-h"&gt;–&lt;/b&gt;entropy, bits per symbol&lt;/div&gt;
+          &lt;div&gt;&lt;b id="cz-kt"&gt;–&lt;/b&gt;counting model, above the floor&lt;/div&gt;
+          &lt;div&gt;&lt;b id="cz-gz"&gt;–&lt;/b&gt;gzip, above the floor&lt;/div&gt;
+          &lt;div&gt;&lt;b id="cz-flat"&gt;–&lt;/b&gt;gzip after only 32k symbols&lt;/div&gt;
+        &lt;/div&gt;
+        &lt;figure class="viz-chart"&gt;
+          &lt;div class="viz-legend"&gt;&lt;span style="--c: var(--s1)"&gt;counting model&lt;/span&gt;&lt;span style="--c: var(--s2)"&gt;gzip&lt;/span&gt;&lt;span class="cz-leg-h"&gt;entropy&lt;/span&gt;&lt;/div&gt;
+          &lt;svg id="cz-chart" role="img" aria-label="Bits per symbol against text length, for the counting model and gzip, with the entropy as a dashed line"&gt;&lt;/svg&gt;
+          &lt;figcaption&gt;Bits per symbol on the first &lt;i&gt;n&lt;/i&gt; symbols of one sample. The dashed line is the floor. Everything runs in your browser; gzip here is the browser's built-in one at its default level, which does noticeably worse than the &lt;code&gt;-9&lt;/code&gt; I used below.&lt;/figcaption&gt;
+        &lt;/figure&gt;
+        &lt;p class="note" id="cz-nogz" hidden&gt;Your browser has no built-in compressor, so only the counting model is shown.&lt;/p&gt;
+        &lt;noscript&gt;&lt;p class="note"&gt;The chart needs JavaScript.&lt;/p&gt;&lt;/noscript&gt;
+      &lt;/div&gt;
+
+      &lt;h2&gt;The sources&lt;/h2&gt;
+
+      &lt;p&gt;Each source writes one letter per byte, which is wasteful on purpose: there's slack for the compressor to take up. The first three have no memory. Every letter is drawn fresh from a fixed set of odds: a fair coin (exactly 1 bit per letter), a 90/10 coin (0.47 bits), and 26 letters with uneven odds like a long-tailed word list (3.93 bits).&lt;/p&gt;
+
+      &lt;p&gt;The other three have memory. The odds for the next letter depend on the last one, two or three letters, and each of those contexts gets its own random table of odds. "Memory 1" over 8 letters has 8 tables; "memory 2" over 26 letters has 676, which is a crude imitation of how English spelling depends on the letters just before. For a source like that, the entropy is the average uncertainty of the next letter given the ones before it, weighted by how often each context comes up. It takes a few lines to compute exactly.&lt;/p&gt;
+
+      &lt;p&gt;Before trusting any of it I checked the generator: scoring the text with the true odds that made it gives the entropy back, to within 0.1% at a million letters on every source. The browser version and the one I ran the big batch with agree on the entropy to 13 decimal places.&lt;/p&gt;
+
+      &lt;h2&gt;What they managed&lt;/h2&gt;
+
+      &lt;figure class="fig smooth"&gt;&lt;img src="https://wickkit.cc/img/comp-curves.png" width="1650" height="990" alt="Six small charts, one per source, showing how far above the entropy floor each compressor lands as the text grows from 256 to 16 million symbols, on log scales. The counting model's line falls steeply in every panel, to 0.01% or below on five of the six. gzip and bzip2 level off between about 14% and 60% after a megabyte. xz keeps sloping down slowly on the three sources with memory but rises on the 26-letter source without memory. zstd gets under 1% on the fair coin and on the 26 letters without memory, and runs alongside xz elsewhere."&gt;
+        &lt;figcaption&gt;How far above the floor each compressor lands, against how much text it was given. Both axes are logarithmic. Averages of three samples; the samples agree to well under a percent.&lt;/figcaption&gt;&lt;/figure&gt;
+
+      &lt;div class="table-wrap"&gt;&lt;table class="compact"&gt;
+        &lt;thead&gt;&lt;tr&gt;&lt;th&gt;Source&lt;/th&gt;&lt;th&gt;gzip&lt;/th&gt;&lt;th&gt;bzip2&lt;/th&gt;&lt;th&gt;xz&lt;/th&gt;&lt;th&gt;zstd&lt;/th&gt;&lt;th&gt;Counting model&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;
+        &lt;tbody&gt;
+          &lt;tr&gt;&lt;td&gt;fair coin&lt;/td&gt;&lt;td&gt;19.3%&lt;/td&gt;&lt;td&gt;28.1%&lt;/td&gt;&lt;td&gt;7.5%&lt;/td&gt;&lt;td&gt;0.7%&lt;/td&gt;&lt;td&gt;0.000%&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;90/10 coin&lt;/td&gt;&lt;td&gt;38.8%&lt;/td&gt;&lt;td&gt;16.2%&lt;/td&gt;&lt;td&gt;22.4%&lt;/td&gt;&lt;td&gt;20.6%&lt;/td&gt;&lt;td&gt;0.000%&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;26 letters, no memory&lt;/td&gt;&lt;td&gt;15.2%&lt;/td&gt;&lt;td&gt;13.7%&lt;/td&gt;&lt;td&gt;4.9%&lt;/td&gt;&lt;td&gt;0.8%&lt;/td&gt;&lt;td&gt;0.000%&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;8 symbols, memory 1&lt;/td&gt;&lt;td&gt;26.6%&lt;/td&gt;&lt;td&gt;19.8%&lt;/td&gt;&lt;td&gt;14.3%&lt;/td&gt;&lt;td&gt;13.9%&lt;/td&gt;&lt;td&gt;0.002%&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;4 symbols, memory 3&lt;/td&gt;&lt;td&gt;35.7%&lt;/td&gt;&lt;td&gt;27.7%&lt;/td&gt;&lt;td&gt;18.0%&lt;/td&gt;&lt;td&gt;17.8%&lt;/td&gt;&lt;td&gt;0.007%&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;26 letters, memory 2&lt;/td&gt;&lt;td&gt;59.6%&lt;/td&gt;&lt;td&gt;23.1%&lt;/td&gt;&lt;td&gt;34.1%&lt;/td&gt;&lt;td&gt;33.9%&lt;/td&gt;&lt;td&gt;0.24%&lt;/td&gt;&lt;/tr&gt;
+        &lt;/tbody&gt;
+      &lt;/table&gt;&lt;/div&gt;
+      &lt;p class="note"&gt;Size above the entropy floor at 16 million symbols, measured against what the true odds pay on the same text. gzip &lt;code&gt;-9&lt;/code&gt;, bzip2 &lt;code&gt;-9&lt;/code&gt;, xz preset 9, zstd level 19, headers and checksums stripped where the format allows. Counting model: ideal code length, which an arithmetic coder gets within a couple of bits of.&lt;/p&gt;
+
+      &lt;h2&gt;gzip and bzip2 forget&lt;/h2&gt;
+
+      &lt;p&gt;Look at the gzip and bzip2 lines in the chart: by a megabyte they're flat. gzip at one megabyte and at sixteen differ by less than a percentage point on every source. That's by design. gzip only looks back 32 KB for repeats, and bzip2 works in blocks of 900 KB and starts each block from scratch. Once they've seen a window's worth of text, more text teaches them nothing. Universal compression needs an unbounded memory, and these two bounded theirs on purpose, for speed and for streaming.&lt;/p&gt;
+
+      &lt;h2&gt;xz keeps learning, very slowly&lt;/h2&gt;
+
+      &lt;p&gt;xz is the one compressor here whose window (64 MB at its top setting) is bigger than the whole text, so it's the closest to the textbook. On the three sources with memory it does keep improving, all the way to 16 million. But look at how. On "8 symbols, memory 1", the gap above the floor times the number of doublings of text (log₂ &lt;i&gt;n&lt;/i&gt;) is almost exactly constant from a million symbols on:&lt;/p&gt;
+
+      &lt;div class="table-wrap"&gt;&lt;table class="compact"&gt;
+        &lt;thead&gt;&lt;tr&gt;&lt;th&gt;Symbols&lt;/th&gt;&lt;th&gt;256k&lt;/th&gt;&lt;th&gt;512k&lt;/th&gt;&lt;th&gt;1M&lt;/th&gt;&lt;th&gt;2M&lt;/th&gt;&lt;th&gt;4M&lt;/th&gt;&lt;th&gt;8M&lt;/th&gt;&lt;th&gt;16M&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;
+        &lt;tbody&gt;&lt;tr&gt;&lt;td&gt;gap × log₂ &lt;i&gt;n&lt;/i&gt;&lt;/td&gt;&lt;td&gt;6.58&lt;/td&gt;&lt;td&gt;6.49&lt;/td&gt;&lt;td&gt;6.43&lt;/td&gt;&lt;td&gt;6.41&lt;/td&gt;&lt;td&gt;6.40&lt;/td&gt;&lt;td&gt;6.40&lt;/td&gt;&lt;td&gt;6.40&lt;/td&gt;&lt;/tr&gt;&lt;/tbody&gt;
+      &lt;/table&gt;&lt;/div&gt;
+      &lt;p class="note"&gt;Gap in bits per symbol, xz preset 9, average of three samples.&lt;/p&gt;
+
+      &lt;p&gt;So the gap shrinks like 1/log &lt;i&gt;n&lt;/i&gt;, which is roughly the speed theory gives for this family of compressors. Doubling the text, from a million to two million symbols, cuts the gap by 5%. To get from 14% above the floor down to 1%, you'd need log₂ &lt;i&gt;n&lt;/i&gt; ≈ 346, about 10&lt;sup&gt;104&lt;/sup&gt; symbols. The observable universe has around 10&lt;sup&gt;80&lt;/sup&gt; atoms. That's an extrapolation, and the other two memory sources drift a bit below the 1/log &lt;i&gt;n&lt;/i&gt; line, so take the exponent loosely. But nothing in these curves looks like it gets to the floor in any amount of text that exists.&lt;/p&gt;
+
+      &lt;p&gt;On the source with no memory at all, xz gets &lt;em&gt;worse&lt;/em&gt; as it sees more: 3.9% above the floor at 256k symbols, 4.9% at 16 million. With a bigger window there are more accidental repeats to find, and every one it uses is a coincidence it pays to describe. On a fresh 16-million-symbol sample, xz with its window cut to 32 KB lands 4.0% above the floor; with the full window, 4.9%. On text with no memory, remembering more is pure cost.&lt;/p&gt;
+
+      &lt;p&gt;zstd is the odd one out in the other direction. It codes each letter that isn't part of a repeat with a table built from the letter counts, so on the fair coin and the 26 letters with no memory, it gets within 1%. (Not the 90/10 coin: a table like that spends at least a whole bit per letter, and that coin carries less than half a bit.) But where it has to learn context, it does no better than xz.&lt;/p&gt;
+
+      &lt;h2&gt;The counting model, and the one thing it needs&lt;/h2&gt;
+
+      &lt;p&gt;The blue line is a model you can write in twenty lines. For each context (the last &lt;i&gt;k&lt;/i&gt; letters), it keeps a count of what came next, and predicts the next letter in proportion to those counts, plus a half for every letter so nothing is ever impossible. Each prediction turns into bits with an arithmetic coder. It's a standard estimator from the 1980s (Krichevsky–Trofimov), and it gets within 1% of the floor after 16 thousand symbols on "memory 1" and within 0.01% by 16 million. You can watch it do that in the chart at the top.&lt;/p&gt;
+
+      &lt;p&gt;The catch is that I told it &lt;i&gt;k&lt;/i&gt;. Give it the wrong amount of memory and it falls apart in both directions:&lt;/p&gt;
+
+      &lt;div class="table-wrap"&gt;&lt;table class="compact"&gt;
+        &lt;thead&gt;&lt;tr&gt;&lt;th&gt;Source&lt;/th&gt;&lt;th&gt;Memory 0&lt;/th&gt;&lt;th&gt;Memory 1&lt;/th&gt;&lt;th&gt;Memory 2&lt;/th&gt;&lt;th&gt;Memory 3&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;
+        &lt;tbody&gt;
+          &lt;tr&gt;&lt;td&gt;26 letters, no memory&lt;/td&gt;&lt;td&gt;&lt;b&gt;0.00%&lt;/b&gt;&lt;/td&gt;&lt;td&gt;0.07%&lt;/td&gt;&lt;td&gt;0.94%&lt;/td&gt;&lt;td&gt;4.9%&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;8 symbols, memory 1&lt;/td&gt;&lt;td&gt;51%&lt;/td&gt;&lt;td&gt;&lt;b&gt;0.00%&lt;/b&gt;&lt;/td&gt;&lt;td&gt;0.08%&lt;/td&gt;&lt;td&gt;0.40%&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;4 symbols, memory 3&lt;/td&gt;&lt;td&gt;61%&lt;/td&gt;&lt;td&gt;58%&lt;/td&gt;&lt;td&gt;46%&lt;/td&gt;&lt;td&gt;&lt;b&gt;0.09%&lt;/b&gt;&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;26 letters, memory 2&lt;/td&gt;&lt;td&gt;110%&lt;/td&gt;&lt;td&gt;98%&lt;/td&gt;&lt;td&gt;&lt;b&gt;2.4%&lt;/b&gt;&lt;/td&gt;&lt;td&gt;11%&lt;/td&gt;&lt;/tr&gt;
+        &lt;/tbody&gt;
+      &lt;/table&gt;&lt;/div&gt;
+      &lt;p class="note"&gt;Counting model with a fixed amount of memory, above the floor at one million symbols. Bold is the right amount.&lt;/p&gt;
+
+      &lt;p&gt;Too little memory and it can never learn the structure: 51–110% above the floor, worse than gzip. Too much and it spreads the same text across too many contexts, each of which has to be learned separately: on the 26-letter source, memory 3 has 17,576 contexts and is still 11% above the floor at a million symbols. Knowing the right amount of context is most of the battle, and a general-purpose compressor doesn't get told.&lt;/p&gt;
+
+      &lt;p&gt;bzip2 is the interesting middle case. Its core trick, the Burrows–Wheeler transform, sorts the text by what follows each position, which groups letters with the same context together. That's a context model in disguise, and on the 26-letter, memory 2 source it's the best of the four real compressors at 23%, ahead of xz at 34%. Its 900 KB blocks are what stop it going further.&lt;/p&gt;
+
+      &lt;h2&gt;What I take from it&lt;/h2&gt;
+
+      &lt;p&gt;"Universal" is a statement about the limit, and the limit is a long way off. On the textbook kind of source, the gap for the best of these closes like 1/log &lt;i&gt;n&lt;/i&gt;, which in practice means it doesn't close. Real compressors get their wins elsewhere: long exact repeats, which real files are full of and these sources never have. Random text with memory is close to their worst case, and that's the point of using it: it shows what they can't learn rather than what they can copy.&lt;/p&gt;
+
+      &lt;p&gt;Compressors that do learn context, the PPM and context-mixing families, work by blending counting models with several amounts of memory and letting the data pick the mix. That's the obvious next experiment.&lt;/p&gt;
+
+      &lt;p&gt;The sources, entropy and counting model are in &lt;a href="https://wickkit.cc/js/comp.js"&gt;one small file&lt;/a&gt;. The big runs used three samples per source, 16 million symbols each, with the same models in Python and each compressor at its strongest standard setting.&lt;/p&gt;</content>
+  </entry>
+  <entry>
     <title>Straight Line, Wrong Slope</title>
     <link href="https://wickkit.cc/posts/2026-10-07-straight-line-wrong-slope.html"/>
     <id>https://wickkit.cc/posts/2026-10-07-straight-line-wrong-slope.html</id>

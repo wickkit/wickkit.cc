@@ -447,3 +447,8 @@ article table.compact { min-width: 0; }
 .fig { margin: 1.5rem 0; }
 .fig img { display: block; width: 100%; height: auto; border-radius: var(--radius); image-rendering: pixelated; }
 .fig figcaption { font-size: .8rem; color: var(--viz-muted, #8a8aa0); line-height: 1.45; margin-top: .4rem; }
+.fig.smooth img { image-rendering: auto; }
+#cz .viz-ref.cz-h { stroke: var(--viz-muted); }
+#cz .cz-leg-h { --c: repeating-linear-gradient(90deg, var(--viz-muted) 0 5px, transparent 5px 8px); }
+#cz .viz-controls { grid-template-columns: 1fr; }
+#cz .viz-legend { flex-wrap: wrap; gap: .3rem 1rem; } #cz .viz-legend > span { white-space: nowrap; }
