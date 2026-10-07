@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>A Riffle Can Be Too Neat — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+    <article>
+      <h1>A Riffle Can Be Too Neat</h1>
+      <div class="meta">2026-10-07 · Kit Wickham</div>
+
+      <p>The famous "seven shuffles" result is about a sloppy riffle. Its model (Gilbert, Shannon and Reeds) has cards falling from the two halves in clumps, the way an amateur's thumbs let them go. Casino dealers riffle neatly, close to one card from each side at a time. Is that better or worse?</p>
+
+      <p>Both, depending on how neat. For a riffle that switches sides about three times in four, the best I can prove is that it needs at least 6 shuffles, against 8 for the textbook model. Past that it turns bad fast. A riffle that alternates 97% of the time needs at least 17 shuffles for 52 cards, and one that alternates 99% of the time needs at least 29. The proof of that last part is a counting argument, and needs no simulation at all.</p>
+
+      <h2>The model</h2>
+
+      <p>The deck is cut near the middle (give or take about two cards). Cards then drop one at a time from the bottoms of the two halves. After each card, the next one comes from the other half with probability <i>q</i>, and from the same half otherwise. When one half runs out, the rest of the other half drops on top. So <i>q</i> = 0.5 is a fair coin per card, and <i>q</i> = 1 is a perfect interleave, a faro shuffle.</p>
+
+      <p>A perfect faro doesn't mix at all: it's a fixed permutation, and eight perfect faros (keeping the top card on top) put a 52-card deck back in its starting order. So somewhere between the coin and the faro there has to be a best <i>q</i>.</p>
+
+      <p>"Mixed" here means total variation distance below 0.25: no event is more than 25 percentage points likelier with the shuffled deck than with a truly random one. The textbook riffle gets there in 8 shuffles (7 leaves it at 0.33).</p>
+
+      <h2>Two lower bounds</h2>
+
+      <p>For 52 cards the distance can't be computed exactly; there are 8 × 10<sup>67</sup> orders. As in <a href="/posts/2026-10-07-the-overhand-shuffle-depends-on-your-thumb.html">the overhand post</a>, I simulated the shuffle and measured the distance for features of the deck: rising sequences, where each card lands, neighbours that stay together, inversions. Each feature gives a lower bound: if the feature isn't random yet, neither is the deck.</p>
+
+      <p>For near-perfect riffles those features go blind. On a 9-card deck, where I can compute the true distance exactly over all 362,880 orders, three riffles at <i>q</i> = 0.9 leave the deck at 0.71, but the best feature reports 0.12. A near-faro deck is highly structured, but not in a way any single card or pair shows. I tried a feature aimed at the faro pattern (whether consecutive cards end up a fixed distance apart), and it barely helped.</p>
+
+      <p>What does work is counting. A neat riffle doesn't use much randomness. At <i>q</i> = 0.97 almost every card just alternates, and the choices that do vary (the cut, which half starts, and the rare double drop) add up to about 14 bits per shuffle. A random 52-card order needs 226 bits. If <i>k</i> shuffles produce at most 2<sup><i>h</i></sup> likely outcomes, then the deck sits in a set covering a fraction 2<sup><i>h</i></sup>/52! of all orders, and the distance is at least the chance of landing in that set minus that fraction. Working this out exactly from the distribution of each shuffle's random choices gives a rigorous floor: 17 shuffles at <i>q</i> = 0.97. At <i>q</i> = 0.5 it only says 5, because each shuffle then uses about 55 bits; there, the features do better.</p>
+
+      <figure class="fig smooth"><img src="/img/shuffle-neat.png" width="1650" height="750" alt="Left: 52 cards. Riffles needed (at least) against the chance the next card comes from the other half, from 0.3 to 0.99. Statistical tests give 14 at 0.3, 9 at 0.5, 8 at 0.6, 6 from 0.75 to 0.9, rising to 8 at 0.97. The counting bound is 5 up to 0.7, 6 at 0.75 and 0.8, 7 at 0.85, 9 at 0.9, 13 at 0.95, 17 at 0.97, 29 at 0.99. The textbook riffle needs 8. Right: 9 cards. The exact answer is 8 at 0.3, 5 at 0.5, 4 from 0.6 to 0.85, 5 at 0.9 and 7 at 0.97; the best lower bound is 1 below at 0.3, matches from 0.5 to 0.65, and is 1 to 2 below beyond that."></figure>
+
+      <h2>Results</h2>
+
+      <table class="compact">
+        <tr><th>chance of switching sides</th><th>features say at least</th><th>counting says at least</th><th>52 cards need at least</th></tr>
+        <tr><td>0.3 (clumpy)</td><td>14</td><td>5</td><td>14</td></tr>
+        <tr><td>0.5 (coin flip)</td><td>9</td><td>5</td><td>9</td></tr>
+        <tr><td>0.6</td><td>8</td><td>5</td><td>8</td></tr>
+        <tr><td>0.7</td><td>7</td><td>5</td><td>7</td></tr>
+        <tr><td>0.75 to 0.8</td><td>6</td><td>6</td><td>6</td></tr>
+        <tr><td>0.85</td><td>6</td><td>7</td><td>7</td></tr>
+        <tr><td>0.9</td><td>6</td><td>9</td><td>9</td></tr>
+        <tr><td>0.95</td><td>7</td><td>13</td><td>13</td></tr>
+        <tr><td>0.97</td><td>8</td><td>17</td><td>17</td></tr>
+        <tr><td>0.99</td><td>not run</td><td>29</td><td>29</td></tr>
+      </table>
+
+      <p>These are floors. To see how far below the truth they sit, I ran the same two methods on 9 cards, where the exact answer is computable (cut give or take one card). From <i>q</i> = 0.5 to 0.65 the floor equals the exact answer, and at 0.3 it's one under. From 0.7 to 0.9 it's one or two shuffles under, and at 0.97 it's two under (5 against 7). So for 52 cards, read the dip at 0.75–0.8 as "probably 6 or 7", and the right-hand side as a floor that's likely to be beaten.</p>
+
+      <p>The small deck shows the same shape: exactly 8 shuffles at <i>q</i> = 0.3, 5 at 0.5, 4 anywhere from 0.6 to 0.85, then 5 at 0.9 and 7 at 0.97. The bottom of the curve is wide and flat. Being somewhat neat helps, and the exact amount doesn't matter much. Being nearly perfect hurts a lot.</p>
+
+      <h2>What doesn't matter</h2>
+
+      <p>How precisely you cut. The counting floor at <i>q</i> = 0.97 is 22 shuffles with a perfect half-and-half cut, 17 with a cut that wanders about two cards, and 16 with one that wanders about four. The cut is one random choice per shuffle; the drops are fifty-one. Nearly all the randomness in a riffle comes from the drops, so that's where neatness costs.</p>
+
+      <h2>So</h2>
+
+      <p>A neat riffle, about three alternations in four, mixes about as fast as the clumpy textbook model, maybe a shuffle faster at 52 cards. On 9 cards both need exactly 4. The real danger is at the other end: a dealer who gets close to faro-perfect needs at least two to nearly four times as many shuffles, for the simple reason that a perfect shuffle has nothing random in it. Magicians who can do perfect faros use that on purpose.</p>
+
+      <p class="note">Method: Monte Carlo with 200,000 decks per setting for 52 cards (each feature's noise floor is about 0.01), compared against 10 million uniformly shuffled decks; exact distances for 7 to 9 cards by evolving the full distribution over all orders; the counting bound computed exactly from the per-shuffle distribution of random choices, rounding each shuffle's information up so the bound stays valid. All numbers are for total variation below 0.25.</p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+</body>
+</html>
