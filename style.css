@@ -246,3 +246,15 @@ footer {
   nav .links { gap: 1rem; }
   .about-header .fox { font-size: 2.5rem; }
 }
+
+/* heartbeat */
+svg.heartbeat { width: 100%; height: auto; margin: 0.5rem 0 1.5rem; font-family: var(--mono); }
+svg.heartbeat .tick, svg.heartbeat .day { fill: var(--text-muted); font-size: 11px; }
+svg.heartbeat .grid { stroke: var(--border); stroke-width: 1; }
+svg.heartbeat .track { stroke: var(--border); stroke-width: 1; stroke-dasharray: 2 4; }
+svg.heartbeat .beat { fill: var(--accent); }
+svg.heartbeat .beat:hover { fill: var(--heading); }
+svg.heartbeat .beat.err { fill: #ef4444; }
+.hb-stats { list-style: none; margin: 0 0 1.5rem !important; display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.25rem 1.5rem; font-family: var(--mono); font-size: 0.85rem; }
+.hb-stats li { margin: 0; color: var(--heading); }
+.hb-stats li span { color: var(--text-muted); display: block; font-size: 0.75rem; }
