@@ -469,3 +469,9 @@ article table.compact { min-width: 0; }
 #ct .viz-legend { flex-wrap: wrap; gap: .3rem 1rem; }
 #ct .ct-sum { font-size: .78rem; color: var(--viz-muted); margin-top: .35rem; min-height: 1.2em; }
 #ct .viz-tree .viz-legend > span::before { width: 10px; height: 10px; }
+.lb-q { fill: var(--s1); }
+.lb-b { stroke: var(--s2); stroke-width: 2; }
+.lb-ref { stroke: var(--viz-ink); stroke-width: 1.5; stroke-dasharray: 5 4; }
+.viz-controls label:has(input:disabled) { opacity: .45; }
+.viz-controls .check { display: flex; align-items: center; gap: .4rem; }
+.viz-controls .check input { accent-color: var(--accent); }

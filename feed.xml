@@ -8,6 +8,126 @@
   <updated>2026-10-07T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
   <entry>
+    <title>The Least Loaded Server Is a Rumor</title>
+    <link href="https://wickkit.cc/posts/2026-10-07-the-least-loaded-server-is-a-rumor.html"/>
+    <id>https://wickkit.cc/posts/2026-10-07-the-least-loaded-server-is-a-rumor.html</id>
+    <updated>2026-10-07T00:00:00Z</updated>
+    <summary>Send each job to the shortest queue, using load numbers that are a little old, and it herds worse than random. Round robin is the baseline to beat. Counting your own sends fixes it, until there are three of you. Watch 100 queues live.</summary>
+    <content type="html">&lt;p&gt;You have a hundred servers and a stream of jobs. Where should each job go? The obvious answer is the server with the shortest queue. The famous answer from the theory of load balancing is better than obvious: pick &lt;em&gt;two&lt;/em&gt; servers at random and send the job to the shorter of the two. That one comparison takes you most of the way from random to perfect. It's called the power of two choices.&lt;/p&gt;
+
+      &lt;p&gt;Both answers assume you know the queue lengths right now. You usually don't. In a real system the load numbers come from somewhere: a report every few seconds, a shared table that's refreshed now and then. By the time you read it, it's old. Michael Mitzenmacher asked what that does in a 2000 paper, "How useful is old information?", and the answer was: least loaded turns into a disaster, and two choices holds up much better.&lt;/p&gt;
+
+      &lt;p&gt;I rebuilt his setup to see the numbers myself, and then tried two things he didn't put front and centre: comparing against round robin instead of random, and the obvious fix of counting the jobs you sent yourself. The first changes the scorecard a lot. The second works well for one dispatcher and blows up spectacularly for three.&lt;/p&gt;
+
+      &lt;div class="viz" id="lb"&gt;
+        &lt;div class="viz-presets" role="group" aria-label="Where each job goes"&gt;
+          &lt;button type="button" data-p="random" aria-pressed="false"&gt;random&lt;/button&gt;
+          &lt;button type="button" data-p="rr" aria-pressed="false"&gt;round robin&lt;/button&gt;
+          &lt;button type="button" data-p="two" aria-pressed="false"&gt;best of two&lt;/button&gt;
+          &lt;button type="button" data-p="all" aria-pressed="true"&gt;least loaded&lt;/button&gt;
+          &lt;button type="button" id="lb-play"&gt;pause&lt;/button&gt;
+        &lt;/div&gt;
+        &lt;div class="viz-controls"&gt;
+          &lt;label&gt;Load &lt;output id="lb-load-out"&gt;90%&lt;/output&gt;
+            &lt;input id="lb-load" type="range" min="50" max="95" step="5" value="90"&gt;&lt;/label&gt;
+          &lt;label&gt;Load board refreshed &lt;output id="lb-T-out"&gt;every 10 service times&lt;/output&gt;
+            &lt;input id="lb-T" type="range" min="0" max="13" step="1" value="7"&gt;&lt;/label&gt;
+          &lt;label&gt;Dispatchers &lt;output id="lb-k-out"&gt;1&lt;/output&gt;
+            &lt;input id="lb-k" type="range" min="1" max="10" step="1" value="1"&gt;&lt;/label&gt;
+          &lt;label class="check"&gt;&lt;input id="lb-own" type="checkbox"&gt; each dispatcher adds the jobs it sent since the refresh&lt;/label&gt;
+        &lt;/div&gt;
+        &lt;div class="viz-stats" aria-live="polite"&gt;
+          &lt;div&gt;&lt;b id="lb-mean"&gt;–&lt;/b&gt;mean time in system, in service times&lt;/div&gt;
+          &lt;div&gt;&lt;b id="lb-rand"&gt;10.0&lt;/b&gt;what random would give&lt;/div&gt;
+          &lt;div&gt;&lt;b id="lb-now"&gt;0&lt;/b&gt;jobs in the system now&lt;/div&gt;
+          &lt;div&gt;&lt;b id="lb-t"&gt;0&lt;/b&gt;service times simulated&lt;/div&gt;
+        &lt;/div&gt;
+        &lt;figure class="viz-chart"&gt;
+          &lt;div class="viz-legend"&gt;&lt;span style="--c: var(--s1)"&gt;queue right now&lt;/span&gt;&lt;span style="--c: var(--s2)"&gt;what the load board says&lt;/span&gt;&lt;/div&gt;
+          &lt;svg id="lb-bars" role="img" aria-label="Bar chart of the queue at each of the 100 servers, with the stale board's value for each drawn as a short line"&gt;&lt;/svg&gt;
+        &lt;/figure&gt;
+        &lt;figure class="viz-chart"&gt;
+          &lt;svg id="lb-chart" role="img" aria-label="Average jobs per server over recent time, with a dashed line for what random dispatching averages"&gt;&lt;/svg&gt;
+          &lt;figcaption&gt;A hundred servers, each finishing a job in one service time on average (exponentially distributed). Jobs arrive at random. The mean is measured after a warm-up and starts over when you change anything. With a stale board, the simulation runs faster so you can see the swings.&lt;/figcaption&gt;
+        &lt;/figure&gt;
+        &lt;noscript&gt;&lt;p class="note"&gt;The demo needs JavaScript.&lt;/p&gt;&lt;/noscript&gt;
+      &lt;/div&gt;
+
+      &lt;h2&gt;The setup&lt;/h2&gt;
+
+      &lt;p&gt;A hundred identical servers, each with its own queue, each serving one job at a time. Service times are random (exponential) with a mean of one unit, so I'll measure everything in &lt;em&gt;service times&lt;/em&gt;. Jobs arrive at random at a rate that keeps the servers busy 50%, 70%, 90% or 95% of the time. The score is the average time a job spends in the system, waiting plus being served. A perfect balancer approaches 1.&lt;/p&gt;
+
+      &lt;p&gt;The dispatcher reads queue lengths from a &lt;em&gt;load board&lt;/em&gt; that's refreshed every &lt;i&gt;T&lt;/i&gt; service times, all at once (Mitzenmacher's "periodic update" model). Between refreshes the board doesn't change, however many jobs pour in.&lt;/p&gt;
+
+      &lt;p&gt;First I checked the simulator against the known answers with live information. Random dispatching is a set of independent single queues, so at 90% load the mean is 1/(1 − 0.9) = 10; I got 10.08 ± 0.08. For two choices there's an exact formula for very many servers (Vvedenskaya, Dobrushin and Karpelevich, 1996): 2.614 at 90% load; with 1,000 servers I got 2.616 ± 0.012. Three choices and other loads agreed similarly, within about 1%.&lt;/p&gt;
+
+      &lt;h2&gt;Stale information, one dispatcher&lt;/h2&gt;
+
+      &lt;figure class="fig smooth"&gt;&lt;img src="https://wickkit.cc/img/lb-stale.png" width="1650" height="690" alt="Two log-log charts of mean time in system against time between board refreshes, at 90% load. Left: least loaded starts near 1 and climbs past random at about 4 service times, reaching 1,000 by 100. Best of two starts at 2.6 and passes random at about 30. Least loaded plus its own sends stays below round robin throughout. Right: with several dispatchers each counting its own sends, 2 dispatchers stays near round robin, while 3, 5 and 10 climb far above random and then drop sharply at 200, 500 and 1,000 service times, back to between round robin and random."&gt;
+        &lt;figcaption&gt;90% load, 100 servers. Each point is one run of 40,000 service times or more; away from the cliffs, the statistical error is smaller than the dots. Dashed: random. Dotted: round robin.&lt;/figcaption&gt;&lt;/figure&gt;
+
+      &lt;p&gt;The left panel reproduces Mitzenmacher's picture. With live information, least loaded is almost perfect: 1.07 service times at 90% load. Make the board a little old and it degrades fast. Every job that arrives between refreshes sees the same board, so they all go to the same few servers that looked empty. A herd. Once the board is refreshed every few service times, least loaded is worse than picking at random, and it keeps getting worse: 55 at 20, over 1,400 at 100.&lt;/p&gt;
+
+      &lt;p&gt;Best of two degrades much more gently. Picking two servers at random spreads the herd out: a server that looked empty only gets the jobs whose random pair happened to include it. It stays better than random until the board is refreshed only every 20 to 100 service times, depending on the load.&lt;/p&gt;
+
+      &lt;div class="table-wrap"&gt;&lt;table class="compact"&gt;
+        &lt;thead&gt;&lt;tr&gt;&lt;th&gt;Load&lt;/th&gt;&lt;th&gt;Least loaded worse than random once &lt;i&gt;T&lt;/i&gt; is&lt;/th&gt;&lt;th&gt;Best of two worse than random once &lt;i&gt;T&lt;/i&gt; is&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;
+        &lt;tbody&gt;
+          &lt;tr&gt;&lt;td&gt;50%&lt;/td&gt;&lt;td&gt;2–5&lt;/td&gt;&lt;td&gt;5–10&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;70%&lt;/td&gt;&lt;td&gt;2–5&lt;/td&gt;&lt;td&gt;10–20&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;90%&lt;/td&gt;&lt;td&gt;2–5&lt;/td&gt;&lt;td&gt;20–50&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;95%&lt;/td&gt;&lt;td&gt;2–5&lt;/td&gt;&lt;td&gt;50–100&lt;/td&gt;&lt;/tr&gt;
+        &lt;/tbody&gt;
+      &lt;/table&gt;&lt;/div&gt;
+      &lt;p class="note"&gt;&lt;i&gt;T&lt;/i&gt; is the time between board refreshes, in service times. The ranges are the two grid points where the curve crosses.&lt;/p&gt;
+
+      &lt;p&gt;So far, that's the paper's lesson: with old information, use fewer choices. But I think the comparison is rigged in a way that flatters every policy here.&lt;/p&gt;
+
+      &lt;h2&gt;Random is the wrong baseline&lt;/h2&gt;
+
+      &lt;p&gt;Random dispatching uses no information, so it looks like the natural floor. It isn't. Round robin also uses no information about queues, only a counter, and it's much better. Each server gets every hundredth job, so its arrivals are almost perfectly regular instead of bunched, and regular arrivals queue far less. At 90% load, round robin averages 5.2 service times against random's 9.9. That's close to the textbook answer for perfectly regular arrivals (5.18).&lt;/p&gt;
+
+      &lt;p&gt;Against that baseline, the budget for staleness shrinks:&lt;/p&gt;
+
+      &lt;div class="table-wrap"&gt;&lt;table class="compact"&gt;
+        &lt;thead&gt;&lt;tr&gt;&lt;th&gt;Load&lt;/th&gt;&lt;th&gt;Round robin&lt;/th&gt;&lt;th&gt;Least loaded worse once &lt;i&gt;T&lt;/i&gt; is&lt;/th&gt;&lt;th&gt;Best of two worse once &lt;i&gt;T&lt;/i&gt; is&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;
+        &lt;tbody&gt;
+          &lt;tr&gt;&lt;td&gt;50%&lt;/td&gt;&lt;td&gt;1.26&lt;/td&gt;&lt;td&gt;0.5–1&lt;/td&gt;&lt;td&gt;never better (1.27 live)&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;70%&lt;/td&gt;&lt;td&gt;1.89&lt;/td&gt;&lt;td&gt;1–2&lt;/td&gt;&lt;td&gt;1–2&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;90%&lt;/td&gt;&lt;td&gt;5.19&lt;/td&gt;&lt;td&gt;1–2&lt;/td&gt;&lt;td&gt;10–20&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;95%&lt;/td&gt;&lt;td&gt;10.2&lt;/td&gt;&lt;td&gt;1–2&lt;/td&gt;&lt;td&gt;20–50&lt;/td&gt;&lt;/tr&gt;
+        &lt;/tbody&gt;
+      &lt;/table&gt;&lt;/div&gt;
+
+      &lt;p&gt;At half load, round robin with no information at all ties two choices with &lt;em&gt;perfect, live&lt;/em&gt; information. That isn't a fluke of my simulator. Using the exact formulas for very many servers, round robin (regular arrivals) beats live two-choice whenever the load is below about 52%; above that, two choices pulls ahead, and by 95% it's three times better. Least loaded with a board older than a service time or two loses to the counter at every load I tried.&lt;/p&gt;
+
+      &lt;h2&gt;The fix: count what you sent&lt;/h2&gt;
+
+      &lt;p&gt;The herd happens because the dispatcher ignores something it knows for certain: where it just sent jobs. So keep a private tally since the last refresh and add it to the board. A server that looked empty stops looking empty after the dispatcher has sent it a few jobs.&lt;/p&gt;
+
+      &lt;p&gt;With one dispatcher, this works beautifully (the green line on the left). Least loaded plus its own tally stays below round robin at every staleness I tried at 90% and 95% load, and with a very old board it smoothly becomes round robin, since then the tally is the only thing that changes. At 50% and 70% load it ends slightly worse than round robin with a very stale board (1.33 vs 1.26 at 50%), but never by much. That's a policy that's never terrible.&lt;/p&gt;
+
+      &lt;p&gt;Then I added more dispatchers. Real systems rarely have just one: several front ends share a load board, each knowing only its own sends. Each job goes to a random one of them.&lt;/p&gt;
+
+      &lt;p&gt;With two, it stays tame: at worst about a third slower than round robin (at 70% load), and always better than random. With three or more, the herd comes back, and worse than before (the right panel). At 90% load with three dispatchers the mean passes random once the board is refreshed every 20 service times, and reaches 42 at 100. Five dispatchers reach 133; ten reach 590. That's still better than plain least loaded with no tally at all, but far worse than best of two with no tally, which stays between 5 and 21 over the same range.&lt;/p&gt;
+
+      &lt;p&gt;Then, past a certain staleness, the curve falls off a cliff to near round robin. Three dispatchers at 90% load: 42 at &lt;i&gt;T&lt;/i&gt; = 100, 6.4 at 200. Ten: 590 at 500, 10 at 1,000. Two independent runs agree within a few percent at nearly every point; right at the edge they can differ (133 vs 82 for five dispatchers at 200), which is what you'd expect next to a tipping point. The drop itself shows up in every run.&lt;/p&gt;
+
+      &lt;p&gt;I scanned finely around the cliff to see where it sits. For five dispatchers the peak came at 31, 77 and 307 service times at 70%, 80% and 90% load. Multiply by (1 − load)² and you get 2.8, 3.1 and 3.1: the same number. For three dispatchers at 90% it's 0.9. That (1 − load)² is also how the time a single queue needs to forget where it started grows with load, so the cliff seems to be tied to how fast queues drain. I measured the scaling, but I don't have an explanation of the cliff that I'd trust yet, so take this as a regularity, not a theory.&lt;/p&gt;
+
+      &lt;p&gt;One more unpleasant detail: with many dispatchers the tally makes best of two worse too. At 90% load, a board refreshed every 10 service times, best of two with no tally averages 5.1. With ten dispatchers each adding their own tally, 6.8.&lt;/p&gt;
+
+      &lt;h2&gt;What I take from it&lt;/h2&gt;
+
+      &lt;ul&gt;
+        &lt;li&gt;Compare against round robin, not random. A load balancer that uses queue information should have to beat the policy that uses none but is still smart. Below about half load, live two-choice doesn't.&lt;/li&gt;
+        &lt;li&gt;With old information, sample a few servers at random. Best of two degraded gently in every run and never became the catastrophe least loaded did.&lt;/li&gt;
+        &lt;li&gt;Counting your own sends is excellent with one dispatcher and dangerous with three or more, in a way that depends sharply on how stale the board is. I would not have guessed that, and I'd test for it before trusting the trick in any system with several front ends.&lt;/li&gt;
+      &lt;/ul&gt;
+
+      &lt;p&gt;The limits are real. Every job here takes the same time on average, with exponential spread; servers are identical; arrivals are random and steady; the board refreshes for everyone at once. Round robin is blind to job sizes, so I'd expect heavy-tailed jobs to hurt it more than the queue-reading policies, but I didn't measure that. The simulator is &lt;a href="https://wickkit.cc/js/lb.js"&gt;one small file&lt;/a&gt;, the same code as the demo.&lt;/p&gt;</content>
+  </entry>
+  <entry>
     <title>Not Knowing Costs 85 Bits</title>
     <link href="https://wickkit.cc/posts/2026-10-07-not-knowing-costs-85-bits.html"/>
     <id>https://wickkit.cc/posts/2026-10-07-not-knowing-costs-85-bits.html</id>
