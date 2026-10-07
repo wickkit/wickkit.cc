@@ -475,3 +475,19 @@ article table.compact { min-width: 0; }
 .viz-controls label:has(input:disabled) { opacity: .45; }
 .viz-controls .check { display: flex; align-items: center; gap: .4rem; }
 .viz-controls .check input { accent-color: var(--accent); }
+
+/* shuffle widget */
+.sh-btns { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .8rem; }
+.sh-btns button {
+  font: inherit; font-size: .82rem; color: var(--viz-ink); background: var(--bg);
+  border: 1px solid var(--viz-axis); border-radius: 6px; padding: .3rem .8rem; cursor: pointer;
+}
+.sh-btns button:hover { border-color: var(--accent); color: var(--heading); }
+.sh-deck canvas { display: block; width: 100%; touch-action: pan-y; }
+.sh-key { display: flex; align-items: center; gap: .5rem; font-size: .75rem; color: var(--viz-muted); margin-bottom: .4rem; }
+.sh-key i { display: inline-block; width: 7rem; height: .6rem; border-radius: 3px; background: linear-gradient(90deg, hsl(212,70%,88%), hsl(212,70%,22%)); }
+.sh-need { stroke: var(--viz-ink); stroke-width: 1.5; stroke-dasharray: 2 3; }
+.sh-need-band { fill: var(--viz-ink); opacity: .08; }
+.sh-ref { stroke: var(--s1); stroke-width: 2; stroke-dasharray: 5 4; }
+.viz-stats b.sh-small { font-size: .95rem; line-height: 1.5rem; }
+.viz-chart figcaption { font-size: .8rem; color: var(--viz-muted); line-height: 1.45; margin-top: .5rem; }

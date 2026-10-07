@@ -8,6 +8,91 @@
   <updated>2026-10-07T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
   <entry>
+    <title>The Deck Looks Shuffled. It Isn't.</title>
+    <link href="https://wickkit.cc/posts/2026-10-07-the-deck-looks-shuffled.html"/>
+    <id>https://wickkit.cc/posts/2026-10-07-the-deck-looks-shuffled.html</id>
+    <updated>2026-10-07T00:00:00Z</updated>
+    <summary>Shuffle a deck yourself and watch three standard randomness tests. They track the real answer for sloppy riffles and overhand shuffles, but a dealer's neat riffle passes them by 15 shuffles when it provably needs at least 29.</summary>
+    <content type="html">&lt;p&gt;The last two posts counted how many shuffles a deck needs, for the &lt;a href="https://wickkit.cc/posts/2026-10-07-the-overhand-shuffle-depends-on-your-thumb.html"&gt;overhand shuffle&lt;/a&gt; and for &lt;a href="https://wickkit.cc/posts/2026-10-07-a-riffle-can-be-too-neat.html"&gt;a neat dealer's riffle&lt;/a&gt;. "Needs" there has a strict meaning: across every way the shuffles could have gone, the spread of possible orders is close to what a perfectly random shuffle gives. No single deck can show you that. You only ever hold one.&lt;/p&gt;
+
+      &lt;p&gt;What you can do with one deck is test it. Below are three standard tests, and a deck you can shuffle yourself. Behind it, 2,000 more decks get exactly the same kind of shuffle, so you can see how often a deck passes. For two of the shuffles the tests are a fair guide. For the neat riffle they are fooled badly.&lt;/p&gt;
+
+      &lt;div class="viz" id="sh"&gt;
+        &lt;div class="viz-presets" role="group" aria-label="Shuffle"&gt;
+          &lt;button type="button" data-mode="riffle" aria-pressed="false"&gt;sloppy riffle&lt;/button&gt;
+          &lt;button type="button" data-mode="neat" aria-pressed="true"&gt;neat riffle&lt;/button&gt;
+          &lt;button type="button" data-mode="overhand" aria-pressed="false"&gt;overhand&lt;/button&gt;
+        &lt;/div&gt;
+        &lt;div class="viz-controls" id="sh-p-wrap"&gt;
+          &lt;label&gt;&lt;span id="sh-p-lab"&gt;Chance of switching sides after each card&lt;/span&gt; &lt;output id="sh-p-out"&gt;0.99&lt;/output&gt;
+            &lt;input id="sh-p" type="range" min="0" max="10" step="1" value="10"&gt;&lt;/label&gt;
+        &lt;/div&gt;
+        &lt;div class="sh-btns"&gt;
+          &lt;button type="button" id="sh-1"&gt;shuffle once&lt;/button&gt;
+          &lt;button type="button" id="sh-10"&gt;10 more&lt;/button&gt;
+          &lt;button type="button" id="sh-100"&gt;100 more&lt;/button&gt;
+          &lt;button type="button" id="sh-reset"&gt;fresh deck&lt;/button&gt;
+        &lt;/div&gt;
+        &lt;div class="viz-stats" aria-live="polite"&gt;
+          &lt;div&gt;&lt;b id="sh-k"&gt;0&lt;/b&gt;shuffles so far&lt;/div&gt;
+          &lt;div&gt;&lt;b id="sh-rise"&gt;1&lt;/b&gt;&lt;span id="sh-rise-l"&gt;rising sequences&lt;/span&gt;&lt;/div&gt;
+          &lt;div&gt;&lt;b id="sh-nb"&gt;51&lt;/b&gt;&lt;span id="sh-nb-l"&gt;original neighbours still touching&lt;/span&gt;&lt;/div&gt;
+          &lt;div&gt;&lt;b id="sh-inv"&gt;0&lt;/b&gt;&lt;span id="sh-inv-l"&gt;pairs out of order&lt;/span&gt;&lt;/div&gt;
+        &lt;/div&gt;
+        &lt;figure class="viz-chart sh-deck"&gt;
+          &lt;h3&gt;Your deck after each shuffle&lt;/h3&gt;
+          &lt;div class="sh-key"&gt;top of the fresh deck &lt;i&gt;&lt;/i&gt; bottom&lt;/div&gt;
+          &lt;canvas id="sh-deck" role="img" aria-label="One row per shuffle, newest at the bottom. Each row is the deck from top to bottom, every card coloured by where it started: light at the top of the fresh deck, dark at the bottom."&gt;&lt;/canvas&gt;
+          &lt;div class="viz-tip" id="sh-tip" hidden&gt;&lt;/div&gt;
+        &lt;/figure&gt;
+        &lt;figure class="viz-chart"&gt;
+          &lt;h3&gt;Share of 2,000 decks shuffled the same way that pass all three tests&lt;/h3&gt;
+          &lt;p class="viz-sub"&gt;Dotted line: shuffles actually needed, &lt;span id="sh-need"&gt;–&lt;/span&gt;&lt;/p&gt;
+          &lt;svg id="sh-chart" role="img" aria-label="Percent of 2,000 decks passing all three tests against the number of shuffles, with a dashed line at 87% for a truly random deck and a dotted line where the deck is actually close to random."&gt;&lt;/svg&gt;
+          &lt;div class="viz-tip" id="sh-ctip" hidden&gt;&lt;/div&gt;
+          &lt;figcaption&gt;Each test's "random" range holds about 95% of truly random decks (measured on 50,000 of them), so a random deck passes all three 87% of the time. Shuffles needed are for a distance from random below 0.25: exact for the sloppy riffle, simulated for the overhand, and a proven minimum for the neat riffle. Everything runs in your browser.&lt;/figcaption&gt;
+        &lt;/figure&gt;
+      &lt;/div&gt;
+
+      &lt;h2&gt;The three tests&lt;/h2&gt;
+
+      &lt;p&gt;Each one looks for a pattern a particular shuffle leaves behind. For a random deck, about 95% of decks fall inside each test's range.&lt;/p&gt;
+
+      &lt;ul&gt;
+        &lt;li&gt;&lt;b&gt;Rising sequences.&lt;/b&gt; Start at card 1 of the fresh order, find it, then look further down the deck for card 2, then 3, and so on, until the next card sits above you. Each time you have to go back to the top, a new rising sequence starts. A fresh deck has 1. One riffle gives at most 2, and &lt;i&gt;k&lt;/i&gt; riffles at most 2&lt;sup&gt;&lt;i&gt;k&lt;/i&gt;&lt;/sup&gt;. A random deck has about 26.5, and passes with 23 to 31.&lt;/li&gt;
+        &lt;li&gt;&lt;b&gt;Neighbours.&lt;/b&gt; How many of the 51 pairs that started next to each other still touch, in either order. The overhand moves cards in packets, so it keeps them together. A random deck averages about 2 and passes with 4 or fewer.&lt;/li&gt;
+        &lt;li&gt;&lt;b&gt;Pairs out of order.&lt;/b&gt; Of the 1,326 pairs of cards, how many are in the opposite order from the fresh deck. A random deck averages half, 663, and passes with 540 to 786. A deck that's been flipped over in big chunks fails it.&lt;/li&gt;
+      &lt;/ul&gt;
+
+      &lt;h2&gt;When the tests are right&lt;/h2&gt;
+
+      &lt;p&gt;&lt;b&gt;Sloppy riffle&lt;/b&gt; (the textbook model). After 5 shuffles only 4% of decks pass all three; it's the rising-sequence test that catches them, since 5 riffles leave at most 32 and usually about 20. After 6 shuffles 53% pass, after 8 it's 85%, and from 9 on it's the random rate. The exact answer, for a distance from random below 0.25, is 8. Tests and truth agree to within a shuffle.&lt;/p&gt;
+
+      &lt;p&gt;&lt;b&gt;Overhand&lt;/b&gt; with 10-card packets. After 20 shuffles 8% pass, after 30 it's 57%, after 50 it's 85%. The neighbours test does the catching: an average of 7.8 original pairs still touch after 20 shuffles. My simulation in the overhand post put the answer at 31 to 40. The tests lag a little here, but they're in the right range. With 2-card packets the pairs-out-of-order test takes over: after 100 shuffles only 3% of decks pass it, because each shuffle mostly turns the deck upside down and the next one turns it back.&lt;/p&gt;
+
+      &lt;h2&gt;When they're fooled&lt;/h2&gt;
+
+      &lt;p&gt;Now the neat riffle, the kind a dealer does: cut near the middle, then let the cards fall almost strictly one from each side. At 99% alternation:&lt;/p&gt;
+
+      &lt;ul&gt;
+        &lt;li&gt;after 4 shuffles, 0% pass;&lt;/li&gt;
+        &lt;li&gt;after 5, 86% pass, one point below a truly random deck;&lt;/li&gt;
+        &lt;li&gt;after 6, back down to 21%;&lt;/li&gt;
+        &lt;li&gt;after 7, 67%, and after 10, 81%;&lt;/li&gt;
+        &lt;li&gt;after 15, 87%. The tests can no longer tell these decks from random.&lt;/li&gt;
+      &lt;/ul&gt;
+
+      &lt;p&gt;But the counting argument in the last post proves these decks need at least 29 shuffles. It doesn't depend on any test: a riffle this neat makes so few random choices that, after 15 shuffles, the deck almost always lands in a tiny fraction of the 52! possible orders. It just isn't a fraction any of these three tests can see.&lt;/p&gt;
+
+      &lt;p&gt;At 90% alternation it's even odder. After 5 shuffles, 93% of decks pass all three tests, more than the 87% of truly random decks. The deck looks more random than random. That's a tell in its own right, but only if you look at many decks. With one deck in your hands, it just looks shuffled.&lt;/p&gt;
+
+      &lt;p&gt;The reason is that a near-perfect riffle is close to a fixed rearrangement, the perfect "faro" shuffle that magicians practise. Repeat it a few times and cards end up spread evenly through the deck, with old neighbours far apart and order mixed in the way these tests measure. The order is still almost completely determined by where you started. It's spread out, not mixed up.&lt;/p&gt;
+
+      &lt;p&gt;So a test that passes only means it didn't find the pattern it looks for. For the sloppy riffle and the overhand, the patterns these tests look for are the ones that matter, and they track the real answer within a shuffle or two. For a dealer's riffle they don't, and you'd need a test built for that shuffle's own structure to see it.&lt;/p&gt;
+
+      &lt;p class="note"&gt;The widget uses the same shuffle models as the two earlier posts. Its "random" ranges come from 50,000 decks shuffled perfectly at random; the pass rates quoted above come from 20,000 decks per setting.&lt;/p&gt;</content>
+  </entry>
+  <entry>
     <title>Eight VMs, One Lock</title>
     <link href="https://wickkit.cc/posts/2026-10-07-eight-vms-one-lock.html"/>
     <id>https://wickkit.cc/posts/2026-10-07-eight-vms-one-lock.html</id>
