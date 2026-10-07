@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Aim at the Light, Mostly — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+
+    <article>
+      <h1>Aim at the Light, Mostly</h1>
+      <div class="meta">2026-10-07 · Kit Wickham</div>
+
+      <p>I wrote a small path tracer: a Cornell box, a matte ball, a shiny ball and a square light in the ceiling, about 260 lines of JavaScript. A path tracer makes an image by following random light paths backwards from the camera and averaging them. Every pixel is an average of random guesses, so a fresh render is grainy, and the grain fades as more paths pile up.</p>
+
+      <p>There are three textbook ways to find the light from a point on a surface, and the textbook says which wins when. I wanted numbers, so I measured all three on the same scene across a range of light sizes and shininess. Here they are, live. All three are rendering the same image. Only the grain differs.</p>
+
+      <div class="viz" id="pt">
+        <div class="viz-presets" role="group" aria-label="How shiny the right-hand ball is">
+          <button type="button" data-gloss="10" aria-pressed="false">satin ball</button>
+          <button type="button" data-gloss="100" aria-pressed="true">glossy ball</button>
+          <button type="button" data-gloss="1000" aria-pressed="false">mirror-ish ball</button>
+          <button type="button" id="pt-restart">restart</button>
+        </div>
+        <div class="viz-controls pt-controls">
+          <label>Light size <output id="pt-light-out"></output>
+            <input id="pt-light" type="range" min="0" max="100" value="45" aria-label="Light size"></label>
+        </div>
+        <div class="pt-panels">
+          <figure><canvas id="pt-c0" role="img" aria-label="Render using random bounces only"></canvas>
+            <figcaption><b>Bounce</b><span id="pt-v0">…</span></figcaption></figure>
+          <figure><canvas id="pt-c1" role="img" aria-label="Render that aims a ray at the light from every bounce"></canvas>
+            <figcaption><b>Aim at light</b><span id="pt-v1">…</span></figcaption></figure>
+          <figure><canvas id="pt-c2" role="img" aria-label="Render that does both and blends them"></canvas>
+            <figcaption><b>Both, blended</b><span id="pt-v2">…</span></figcaption></figure>
+        </div>
+        <p class="note">Samples per pixel: <span id="pt-spp">0</span>. The number under each image is its noise power (variance) relative to the blended one, measured over every pixel that isn't the light itself. Noise power is what sets the cost: twice the noise power takes twice the samples to clean up. Stops at 4,096 samples.</p>
+        <noscript><p class="note">The renderer needs JavaScript.</p></noscript>
+      </div>
+
+      <h2>The three ways</h2>
+
+      <ul>
+        <li><strong>Bounce.</strong> At each surface, pick a random new direction, the way the surface itself would scatter light, and keep going. If the path happens to hit the light, it carries light back. Otherwise it carries nothing.</li>
+        <li><strong>Aim at the light.</strong> At each surface, also pick a random point on the light and fire a ray at it. If nothing's in the way, add that light directly. Bounced paths that hit the light are ignored, since the aimed ray already counted it. Renderers call this next event estimation.</li>
+        <li><strong>Both, blended.</strong> Do both and keep both answers, but weight each by how good its method is at finding that particular bit of light. That's multiple importance sampling, from Eric Veach's 1997 thesis. Each sample's weight compares how likely the two methods were to produce it, and the weights always add up to one, so nothing gets counted twice.</li>
+      </ul>
+
+      <p>Each method is <em>unbiased</em>: on average it gives exactly the right image, and only the noise differs. That's also a free correctness test, since three independent ways of computing the same thing have to agree. Across 63 runs of all three (7 light sizes, 3 levels of shininess, 3 seeds each), I made 378 comparisons of average brightness between methods. The differences were sized just as the noise predicts: 5.3% landed beyond two standard errors, where pure chance gives about 4.6%.</p>
+
+      <h2>Small lights: aim</h2>
+
+      <p>With a small light, bouncing is hopeless. A random bounce has to land on a target that fills a tiny part of the sky. The light's power stays fixed as it shrinks, so the rare hit carries a huge value. That's what fireflies are: single bright pixels that are bounces getting lucky.</p>
+
+      <p>On the matte surfaces, with the light at 2% of the ceiling's width, bouncing needed <strong>about 14,000 times</strong> as long as aiming to reach the same noise. Each halving of the light's width roughly quadrupled it.</p>
+
+      <h2>Big lights on shiny things: bounce</h2>
+
+      <p>The other way round, aiming loses badly. A shiny surface reflects in a narrow cone. Aim at a random spot on a big light and you almost always pick a spot outside that cone, so the sample is worth almost nothing. Once in a while it lands inside and is worth a fortune. Bouncing instead follows the cone, so it hits the light whenever the cone points at it.</p>
+
+      <p>On the mirror-ish ball under a light that fills the ceiling, aiming needed <strong>about 1,000 times</strong> as long as the best method.</p>
+
+      <p>Two things surprised me here.</p>
+
+      <p>First, the shiny ball made the <em>walls</em> noisier for aiming. Light that reaches a wall by way of the ball has to go through that same narrow cone at the ball. With the mirror-ish ball and a light 40% of the ceiling's width, aiming was 16 times noisier than blending on the matte surfaces, not just on the ball.</p>
+
+      <p>Second, aiming loses even on plain matte walls when the light is huge. With the light filling the ceiling, aiming was about 44 times noisier there. I mapped where that noise was: 79 to 91% of it, depending on the seed, came from the band of wall just under the ceiling (the top 5% of the room's height). A point in that band is almost touching the light, and aimed light gets divided by the distance squared. Pick a spot on the light a hair away and the sample explodes. Bouncing doesn't care: from there, the light fills half the sky, so half of all bounces hit it.</p>
+
+      <h2>Both: never far from the best</h2>
+
+      <p>Time to reach the same noise as the best method, for each of the three. Bouncing is cheaper per sample (no extra ray), about 0.66 times the cost, and that's counted.</p>
+
+      <div class="table-wrap"><table class="compact">
+        <thead><tr><th>Light width</th><th>Bounce</th><th>Aim</th><th>Both</th></tr></thead>
+        <tbody>
+          <tr><td colspan="4"><em>Matte surfaces, with a satin ball</em></td></tr>
+          <tr><td>2%</td><td>14,047×</td><td>1.00×</td><td>1.03×</td></tr>
+          <tr><td>10%</td><td>566×</td><td>1.00×</td><td>1.01×</td></tr>
+          <tr><td>40%</td><td>28×</td><td>1.03×</td><td>1.00×</td></tr>
+          <tr><td>80%</td><td>3.9×</td><td>2.1×</td><td>1.00×</td></tr>
+          <tr><td>99%</td><td>2.3×</td><td>44×</td><td>1.00×</td></tr>
+          <tr><td colspan="4"><em>The mirror-ish ball</em></td></tr>
+          <tr><td>2%</td><td>20×</td><td>1.00×</td><td>1.15×</td></tr>
+          <tr><td>10%</td><td>1.2×</td><td>2.2×</td><td>1.00×</td></tr>
+          <tr><td>20%</td><td>1.02×</td><td>11×</td><td>1.00×</td></tr>
+          <tr><td>40%</td><td>1.3×</td><td>86×</td><td>1.00×</td></tr>
+          <tr><td>80%</td><td>1.5×</td><td>683×</td><td>1.00×</td></tr>
+          <tr><td>99%</td><td>1.5×</td><td>1,014×</td><td>1.00×</td></tr>
+        </tbody>
+      </table></div>
+      <p class="note">Each cell is the time to reach equal noise, divided by the best of the three for that row. Averaged over 3 seeds at 96×96 pixels and 512 samples per pixel, with up to five bounces.</p>
+
+      <p>Over all 42 cases (7 light sizes, 3 levels of shininess, matte surfaces and the shiny ball), blending was within <strong>15%</strong> of the best method every time. Its worst case was the tiny light reflected in the mirror-ish ball, where aiming alone did a little better. Bouncing alone lost by up to 19,000×, and aiming alone by up to 1,000×.</p>
+
+      <p>The tidy story says aiming beats bouncing for small lights and loses for big ones. Mostly true, but the crossover depends on where you look, and both pure methods are exposed to cases where they're catastrophically bad, often in a corner of the image you weren't watching. Blending gives up at most a few percent anywhere to be bad nowhere. That's why every serious renderer does it.</p>
+
+      <p>The renderer is <a href="/js/pt.js">one file</a>. Most of what makes real renderers hard is missing: glass, textures, many lights, anything smarter than random for picking directions. But this part, deciding where to look for light, is the core of it, and the blend is only about ten lines.</p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+  <script src="/js/pt.js"></script>
+  <script src="/js/pt-ui.js"></script>
+</body>
+</html>

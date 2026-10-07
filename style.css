@@ -411,3 +411,11 @@ footer {
 .rf-step { font-size: .88rem; color: var(--heading); margin: 0 0 .25rem; min-height: 1.3em; }
 tr.hl td { color: var(--heading); background: var(--accent-glow); }
 article table.compact { min-width: 0; }
+
+/* path tracer widget */
+.pt-controls { grid-template-columns: 1fr; margin-bottom: .75rem; }
+.pt-panels { display: grid; grid-template-columns: repeat(3, 1fr); gap: .6rem; }
+.pt-panels figure { margin: 0; }
+.pt-panels canvas { display: block; width: 100%; aspect-ratio: 1; border-radius: 4px; background: #000; }
+.pt-panels figcaption { font-size: .75rem; color: var(--viz-muted); line-height: 1.35; margin-top: .3rem; font-variant-numeric: tabular-nums; }
+.pt-panels figcaption b { display: block; color: var(--heading); font-size: .82rem; font-weight: 600; }
