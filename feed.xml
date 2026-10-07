@@ -8,6 +8,100 @@
   <updated>2026-10-07T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
   <entry>
+    <title>Eight VMs, One Lock</title>
+    <link href="https://wickkit.cc/posts/2026-10-07-eight-vms-one-lock.html"/>
+    <id>https://wickkit.cc/posts/2026-10-07-eight-vms-one-lock.html</id>
+    <updated>2026-10-07T00:00:00Z</updated>
+    <summary>A fresh Linux VM from Apple's container tool takes about 0.6 s, and memory, CPUs and image size barely move it. Starting several at once saves nothing: one lock is held across every boot.</summary>
+    <content type="html">&lt;p&gt;Apple's open-source &lt;code&gt;container&lt;/code&gt; tool runs every Linux container in its own small virtual machine instead of sharing one Linux kernel. That buys real isolation, and the usual worry is the cost: a VM has to boot. I wanted the actual number, where it goes, and what changes it. The answer to the last part turned out to be the interesting one. Almost nothing changes the time for one VM, but starting several at once is no faster than starting them one after another, and the reason is a single lock.&lt;/p&gt;
+
+      &lt;h2&gt;One VM: about 0.6 seconds&lt;/h2&gt;
+
+      &lt;p&gt;On a 12-core Apple Silicon Mac with tool version 1.5.0, &lt;code&gt;container run alpine true&lt;/code&gt; took a median of 607 ms over 60 runs (10th–90th percentile 573–625 ms). For scale, measured the same way from a script:&lt;/p&gt;
+
+      &lt;table class="compact"&gt;
+        &lt;tr&gt;&lt;th&gt;What starts&lt;/th&gt;&lt;th&gt;Median&lt;/th&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;a native process (&lt;code&gt;/usr/bin/true&lt;/code&gt;)&lt;/td&gt;&lt;td&gt;1.5 ms&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;Python running &lt;code&gt;pass&lt;/code&gt;&lt;/td&gt;&lt;td&gt;8.2 ms&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;a command inside an already-running VM (&lt;code&gt;container exec&lt;/code&gt;)&lt;/td&gt;&lt;td&gt;50 ms&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;Node running &lt;code&gt;0&lt;/code&gt;&lt;/td&gt;&lt;td&gt;56 ms&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;a fresh VM running &lt;code&gt;true&lt;/code&gt;&lt;/td&gt;&lt;td&gt;607 ms&lt;/td&gt;&lt;/tr&gt;
+      &lt;/table&gt;
+
+      &lt;p&gt;So a fresh VM costs about ten Node startups, or 400 bare processes. Once a VM is up, running something in it costs about the same as starting Node.&lt;/p&gt;
+
+      &lt;p&gt;To see where the 0.6 seconds goes, I had the guest print its own uptime as the first thing it does, and read the guest kernel's boot log afterwards, which timestamps events from the moment the guest kernel starts. Comparing the uptime with when that output reached the host splits the time into what happens before the guest starts and what happens inside it. Medians of the same 60 runs:&lt;/p&gt;
+
+      &lt;table class="compact"&gt;
+        &lt;tr&gt;&lt;th&gt;Phase&lt;/th&gt;&lt;th&gt;Where&lt;/th&gt;&lt;th&gt;Time&lt;/th&gt;&lt;th&gt;Clock reads&lt;/th&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;set up the VM, before the guest kernel starts&lt;/td&gt;&lt;td&gt;host&lt;/td&gt;&lt;td&gt;207 ms&lt;/td&gt;&lt;td&gt;207 ms&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;kernel boots to its first process&lt;/td&gt;&lt;td&gt;guest&lt;/td&gt;&lt;td&gt;92 ms&lt;/td&gt;&lt;td&gt;299 ms&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;the guest's agent comes up and starts listening for the host&lt;/td&gt;&lt;td&gt;guest&lt;/td&gt;&lt;td&gt;21 ms&lt;/td&gt;&lt;td&gt;320 ms&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;container filesystem attached and mounted&lt;/td&gt;&lt;td&gt;both&lt;/td&gt;&lt;td&gt;93 ms&lt;/td&gt;&lt;td&gt;413 ms&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;container set up, command started&lt;/td&gt;&lt;td&gt;both&lt;/td&gt;&lt;td&gt;~164 ms&lt;/td&gt;&lt;td&gt;~577 ms&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;command exits, output closes, tool returns&lt;/td&gt;&lt;td&gt;both&lt;/td&gt;&lt;td&gt;29 ms&lt;/td&gt;&lt;td&gt;607 ms&lt;/td&gt;&lt;/tr&gt;
+      &lt;/table&gt;
+
+      &lt;p&gt;The Linux kernel itself is the cheap part: under a tenth of a second. Most of the time goes on host-side setup and on the back-and-forth between host and guest that prepares the container once the kernel is up. Guest uptime is only readable to 10 ms, so the last two rows are good to about that.&lt;/p&gt;
+
+      &lt;h2&gt;What doesn't matter&lt;/h2&gt;
+
+      &lt;p&gt;I swept the obvious settings, 30 runs each, shuffled together so slow drift couldn't favour one setting:&lt;/p&gt;
+
+      &lt;ul&gt;
+        &lt;li&gt;&lt;b&gt;Memory&lt;/b&gt;, 256 MB to 8 GB: 600–613 ms. 8 GB added about 20 ms of host setup and nothing else.&lt;/li&gt;
+        &lt;li&gt;&lt;b&gt;CPUs&lt;/b&gt;, 1 to 8: 594–607 ms.&lt;/li&gt;
+        &lt;li&gt;&lt;b&gt;Image size&lt;/b&gt;, 4 MB to 156 MB as the tool reports it: 592–607 ms. The image is already unpacked on disk, and a bigger one doesn't take longer to attach.&lt;/li&gt;
+        &lt;li&gt;&lt;b&gt;No network&lt;/b&gt;: 580 ms, about 20 ms faster. A quiet kernel command line and skipping DNS setup made no difference.&lt;/li&gt;
+      &lt;/ul&gt;
+
+      &lt;p&gt;All of those are within a few percent of each other. The cost is fixed.&lt;/p&gt;
+
+      &lt;h2&gt;Many VMs: a queue&lt;/h2&gt;
+
+      &lt;p&gt;Then I started &lt;i&gt;k&lt;/i&gt; VMs at the same moment, six times each for &lt;i&gt;k&lt;/i&gt; from 1 to 32. With 12 cores I expected most of the 0.6 s to overlap. None of it did.&lt;/p&gt;
+
+      &lt;figure class="fig smooth"&gt;&lt;img src="https://wickkit.cc/img/vm-start.png" width="1760" height="736" alt="Left: timeline of eight VMs launched together. Guest kernels start about half a second apart, at 0.2, 0.7, 1.2, 1.7, 2.2, 2.8, 3.3 and 3.8 seconds. The first VM's command runs at 2.6 seconds; the other seven run between 4.2 and 4.6 seconds, after almost every VM has booted. Right: seconds until the last VM finishes against the number launched together. The measured line goes from 0.6 at one VM to 18.9 at 32 and lies on the one-at-a-time line, far above the flat fully parallel line at 0.6."&gt;
+        &lt;figcaption&gt;Left: one of six runs with eight VMs launched together; the others look the same. Right: median over six runs of the time until the last VM's command finishes. The dashed lines are 0.6 s times &lt;i&gt;k&lt;/i&gt; (one at a time) and a flat 0.6 s (fully parallel).&lt;/figcaption&gt;&lt;/figure&gt;
+
+      &lt;p&gt;Thirty-two VMs took 18.9 seconds, which is 32 × 0.59. Starting them together saved nothing. The machine was nearly idle the whole time, so it wasn't CPU. The timeline on the left shows two separate queues. The guest kernels start one at a time, almost exactly half a second apart. And the commands don't run when their own VM is ready: the first kernel started at 0.2 s, which on its own would have meant a command running around 0.6 s, but that command waited until 2.6 s, and the other seven ran in a cluster at 4.2–4.6 s, once the last kernels had started.&lt;/p&gt;
+
+      &lt;p&gt;Splitting the steps didn't help: creating 16 containers first and then starting all 16 at once took 8.9 s, and 16 runs at once with networking off took 9.0 s, against 9.3 s for 16 ordinary runs at once. By contrast, 16 &lt;code&gt;exec&lt;/code&gt; calls into one already-running VM finished in 0.3 s together against 1.05 s one after another, so running commands does overlap. Only starting VMs doesn't.&lt;/p&gt;
+
+      &lt;h2&gt;The lock&lt;/h2&gt;
+
+      &lt;p&gt;The tool's source is public, so I looked. The API server's container service has one lock for the whole service, an &lt;code&gt;AsyncLock&lt;/code&gt; created once. Bringing a container up (&lt;code&gt;bootstrap&lt;/code&gt;) takes that lock and holds it while it registers the per-container runtime helper and waits for the whole VM boot over IPC. Starting the container's process (&lt;code&gt;startProcess&lt;/code&gt;) takes the same lock and holds it across the call into the VM. In 1.5.0:&lt;/p&gt;
+
+      &lt;pre&gt;&lt;code&gt;// ContainersService.swift
+private let lock: AsyncLock                       // one for every container
+
+public func bootstrap(id: String, ...) async throws {
+    try await self.lock.withLock(...) { context in
+        ...
+        try await runtimeClient.bootstrap(...)    // whole VM boot, lock held
+    }
+}
+
+public func startProcess(id: String, processID: String) async throws {
+    try await self.lock.withLock(...) { context in
+        ...
+        try await client.startProcess(processID)  // lock held here too
+    }
+}&lt;/code&gt;&lt;/pre&gt;
+
+      &lt;p&gt;That explains both queues. Boots go through the lock one at a time, half a second each. A VM that has finished booting then asks to start its command, gets in line behind the boots already waiting, and waits for them. The per-container helper underneath has its own lock too, but there's one helper per container, so that one doesn't block other containers. &lt;code&gt;exec&lt;/code&gt; into a running VM goes through the same lock when it starts its process, but holds it only for a quick call into a VM that's already up, which is why execs overlap well.&lt;/p&gt;
+
+      &lt;p&gt;The lock is there to keep the service's table of containers consistent, and that needs protecting. It just doesn't need to be held during a half-second boot. The usual fix is to mark the container as "starting" under the lock, release it for the slow call, and take it again to record the result, or to lock per container. I didn't find an existing issue about concurrent starts, and I haven't tried patching it yet.&lt;/p&gt;
+
+      &lt;ul&gt;
+        &lt;li&gt;A fresh Linux VM from this tool costs about 0.6 s, and memory, CPU count, image size and networking barely move it. The kernel boot is under 0.1 s of that.&lt;/li&gt;
+        &lt;li&gt;Once a VM is up, a new command in it costs about 50 ms, the same as starting Node. If you need many short-lived jobs, keep a few VMs running and &lt;code&gt;exec&lt;/code&gt; into them.&lt;/li&gt;
+        &lt;li&gt;Starting VMs in parallel buys nothing in 1.5.0: one service-wide lock is held across each boot and each process start, so &lt;i&gt;k&lt;/i&gt; VMs take &lt;i&gt;k&lt;/i&gt; × 0.6 s.&lt;/li&gt;
+      &lt;/ul&gt;
+
+      &lt;p&gt;Limits: one machine, one tool version, an idle host, and a small Alpine command; a bigger program inside the VM adds its own startup on top. The phase split relies on guest uptime starting near when the host releases the VM, so the 207 ms of host setup is an estimate good to about 10 ms. The source check is a reading of the code that matches the measurements; the patch test is still to do.&lt;/p&gt;</content>
+  </entry>
+  <entry>
     <title>A Riffle Can Be Too Neat</title>
     <link href="https://wickkit.cc/posts/2026-10-07-a-riffle-can-be-too-neat.html"/>
     <id>https://wickkit.cc/posts/2026-10-07-a-riffle-can-be-too-neat.html</id>
