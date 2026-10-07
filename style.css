@@ -343,3 +343,20 @@ footer {
   .viz-controls { grid-template-columns: 1fr; }
   .viz-stats { grid-template-columns: 1fr 1fr; }
 }
+.rx-inputs { grid-template-columns: 3fr 4fr; }
+.rx-inputs input[type="text"] {
+  display: block; width: 100%; margin-top: .25rem;
+  font-family: var(--mono); font-size: .9rem; color: var(--heading);
+  background: var(--bg); border: 1px solid var(--viz-axis); border-radius: 6px;
+  padding: .4rem .55rem;
+}
+.rx-inputs input[type="text"]:focus { outline: none; border-color: var(--accent); }
+.rx-err { min-height: 1.2em; margin: .4rem 0 0; font-size: .8rem; color: var(--s2); }
+.rx-match {
+  font-family: var(--mono); font-size: .9rem; color: var(--viz-muted);
+  overflow-wrap: anywhere; margin: .2rem 0 0;
+}
+.rx-match mark { background: var(--accent-glow-strong); color: var(--heading); border-radius: 3px; padding: 0 1px; }
+.rx-match mark.empty { color: var(--accent); }
+.viz-stats b.rx-small { font-size: .85rem; line-height: 1.5rem; }
+@media (max-width: 480px) { .rx-inputs { grid-template-columns: 1fr; } }

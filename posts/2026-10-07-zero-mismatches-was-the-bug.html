@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Zero Mismatches Was the Bug — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+
+    <article>
+      <h1>Zero Mismatches Was the Bug</h1>
+      <div class="meta">2026-10-07 · Kit Wickham</div>
+
+      <p>I wrote two regex engines from scratch, about 300 lines of JavaScript between them. One is a <strong>backtracker</strong>, the design behind the regexes in JavaScript, Python, Perl and PCRE. The other is a <strong>Thompson NFA</strong>, the design behind RE2, Go and Rust. They share a parser for a small subset: literals, <code>.</code>, character classes, <code>* + ?</code>, <code>|</code> and parentheses.</p>
+
+      <p>The speed difference is the famous part, and it showed up right on cue. What I actually learned came from the testing.</p>
+
+      <h2>The famous part</h2>
+
+      <p>Give <code>(a+)+b</code> a string of <em>n</em> a's and no b. There's no match, but a backtracker has to prove it by trying every way to split the a's between the inner and outer <code>+</code>. That's 2<sup>n</sup> ways. The NFA engine never picks a path. It walks all of them at once, keeping a set of the states it could be in, so its work is at most (states × length).</p>
+
+      <div class="table-wrap"><table>
+        <thead><tr><th>n</th><th>my backtracker, steps</th><th>V8's RegExp</th><th>my NFA, steps</th></tr></thead>
+        <tbody>
+          <tr><td>20</td><td>4,194,304</td><td>3.4 ms</td><td>121</td></tr>
+          <tr><td>25</td><td>134,217,728</td><td>106 ms</td><td>151</td></tr>
+          <tr><td>30</td><td>gave up at 200M</td><td>3,342 ms</td><td>181</td></tr>
+        </tbody>
+      </table></div>
+      <p class="note">Steps are function calls for the backtracker and states visited for the NFA. V8 times are one run in Node; my NFA took under 0.1 ms on every row.</p>
+
+      <p>Five more a's make V8 thirty-two times slower. That's the bug class behind real outages, where one bad pattern meets one long input and a server pins its CPU.</p>
+
+      <h2>A fuzzer that never failed</h2>
+
+      <p>To check both engines, I wrote a differential fuzzer. It generates random patterns over the letters a and b, nested up to four levels, plus random short strings. Then it asks my two engines and JavaScript's own <code>RegExp</code> whether the whole string matches, and complains about any disagreement.</p>
+
+      <p>First run: 200,000 cases, zero mismatches.</p>
+
+      <p>That should have felt good. It didn't, because code I just wrote is never that right. So I tested the test: I planted eight bugs in the engines, one at a time, and reran the fuzzer against each. This is called mutation testing. If a planted bug survives, the tests can't see that kind of mistake.</p>
+
+      <p>Six of the eight were caught. Two survived:</p>
+
+      <ul>
+        <li><strong>Deleting an end-of-input check in the NFA.</strong> It survived because the check was dead code. An earlier line already guaranteed it. Nervous code, not wrong code. I deleted it.</li>
+        <li><strong>Making <code>*</code> lazy instead of greedy.</strong> That's a real change in meaning, and the fuzzer couldn't see it at all.</li>
+      </ul>
+
+      <p>The second one is the lesson. I was asking a yes/no question: does the whole string match? Greediness never changes that answer. It only changes <em>which</em> match you get. A whole dimension of regex behavior was invisible to my test, and "zero mismatches" was measuring that blind spot, not the code.</p>
+
+      <h2>Asking a better question</h2>
+
+      <p>So I changed what gets compared. Both engines now do what <code>exec</code> does: find the leftmost match and report where it starts and ends. Greedy and lazy give different ends, so the fuzzer can see them now.</p>
+
+      <p>For the NFA, that meant upgrading to a Pike VM. Its threads are kept in the order a backtracker would try them, each remembers where it started, and the first one to finish wins.</p>
+
+      <p>Rerun: out of 100,000 cases, the backtracker disagreed with JavaScript 405 times and the NFA 675 times. Here's the smallest:</p>
+
+      <pre><code>/b(a*|b)?/.exec("bb")    JavaScript: "bb"    both mine: "b"</code></pre>
+
+      <p>My engines reasoned like this: the <code>?</code> tries its body first. The body is <code>a*|b</code>, its first choice is <code>a*</code>, and <code>a*</code> happily matches nothing. Done, the match is <code>"b"</code>.</p>
+
+      <p>JavaScript has a rule I only half knew. When a <code>?</code>, a <code>*</code>, or any repeat after the first of a <code>+</code> makes a pass that consumes nothing, that pass counts as a <em>failure</em>, and the engine backtracks to look for a pass that does consume something. Here, that means <code>b</code>, so the match is <code>"bb"</code>. The spec says it in one line: if <em>min</em> is zero and the pass ended where it started, return failure. <code>?</code> is just a repeat of zero or one, so the rule applies to it too.</p>
+
+      <p>I knew the rule for <code>*</code>, because without it <code>(a*)*</code> loops forever, and my backtracker already had it there. I hadn't applied it to <code>?</code>, where there's no loop to protect, so it never occurred to me. A one-line fix.</p>
+
+      <h2>Teaching the NFA to remember</h2>
+
+      <p>The NFA was harder, and more interesting. A backtracker follows one path at a time, so "did this pass consume anything?" is just a comparison of two positions. The NFA's whole trick is that it <em>forgets</em> paths. It only tracks which states are live, and two paths that reach the same state get merged. But "this pass was empty" is a fact about the path, not the state.</p>
+
+      <p>The fix was to put a little path back. Each thread now carries a list of loops it has entered since it last consumed a character. Reaching the end of a loop's body while that loop is still on the list means the pass was empty, so that path dies. Consuming a character clears the list. Two threads only merge if they're in the same state <em>and</em> have the same list.</p>
+
+      <p>That costs something. The live set can grow by a factor of two for each level of loop nesting. That factor depends on the pattern, not the input, so the engine stays linear in the length of the string, which was the whole point.</p>
+
+      <p>A nice surprise from mutation testing: deleting that new check doesn't produce wrong answers. It makes the engine recurse forever, because every loop around the empty cycle adds the loop to the list again. The rule that makes the answers right is also what makes the walk finish.</p>
+
+      <h2>After</h2>
+
+      <p>700,000 random cases across five seeds, zero mismatches for both engines, and this time I believe it. I reran all eleven planted bugs against the final code. The lazy-<code>*</code> one that used to slip through now trips about one case in six.</p>
+
+      <p>One survived, and it's my favorite. Delete the line that merges NFA threads sitting in the same state, and every answer stays correct. What changes is the cost: on <code>(a|aa)*c</code> against 22 a's, the NFA's work goes from 159 steps to 1.3 million, growing about tenfold every five characters. Without the merge, the NFA is a backtracker in disguise, trying every path. Its answers are fine. A correctness fuzzer can't see speed, so this one needs a different kind of test: a step count that has to stay small on inputs like the ones in the table above.</p>
+
+      <p>The general lesson, which I'll forget and relearn: <strong>a test that has never failed hasn't told you anything yet.</strong> Before trusting a green run, break the code on purpose and watch it go red.</p>
+
+      <h2>Try it</h2>
+
+      <p>Both engines, live. Type a pattern (same small syntax: no anchors, captures, or <code>\d</code>-style shortcuts) and a subject. The chart runs both engines on every prefix of the subject and plots the work on a log scale. A straight line going up on a log scale means exponential.</p>
+
+      <div class="viz" id="rx">
+        <div class="viz-presets" role="group" aria-label="Examples">
+          <button type="button" data-preset="nested" aria-pressed="true">(a+)+b</button>
+          <button type="button" data-preset="alt" aria-pressed="false">(a|aa)*c</button>
+          <button type="button" data-preset="words" aria-pressed="false">words, then !</button>
+          <button type="button" data-preset="empty" aria-pressed="false">the ? rule</button>
+        </div>
+        <div class="viz-controls rx-inputs">
+          <label>Pattern <input id="rx-pat" type="text" spellcheck="false" autocomplete="off" maxlength="60"></label>
+          <label>Subject <input id="rx-str" type="text" spellcheck="false" autocomplete="off" maxlength="40"></label>
+        </div>
+        <p class="rx-err" id="rx-err" role="alert"></p>
+        <p class="rx-match" id="rx-match" aria-live="polite"></p>
+        <div class="viz-stats" aria-live="polite">
+          <div><b id="rx-bt">–</b>backtracker steps</div>
+          <div><b id="rx-vm">–</b>NFA steps</div>
+          <div><b id="rx-states">–</b>NFA states</div>
+          <div><b id="rx-agree" class="rx-small">–</b>check</div>
+        </div>
+        <div class="viz-chart">
+          <h3>Work per prefix of the subject</h3>
+          <div class="viz-legend"><span style="--c: var(--s2)">backtracker</span><span style="--c: var(--s1)">NFA</span></div>
+          <svg id="rx-chart" role="img" aria-label="Steps taken by each engine as the subject gets longer, log scale"></svg>
+        </div>
+        <noscript><p class="note">The engines need JavaScript.</p></noscript>
+      </div>
+
+      <p>The source is <a href="/js/regex.js">one file</a>. Everything I left out (captures, anchors, lookaround, backreferences) is real work. Backreferences are the one an NFA can't do at all: matching "the same text as group 1" needs memory of the path, which is exactly what the NFA throws away. That's why backtracking engines are still everywhere.</p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+  <script src="/js/regex.js"></script>
+  <script src="/js/regex-ui.js"></script>
+</body>
+</html>

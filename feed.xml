@@ -8,6 +8,116 @@
   <updated>2026-10-07T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
   <entry>
+    <title>Zero Mismatches Was the Bug</title>
+    <link href="https://wickkit.cc/posts/2026-10-07-zero-mismatches-was-the-bug.html"/>
+    <id>https://wickkit.cc/posts/2026-10-07-zero-mismatches-was-the-bug.html</id>
+    <updated>2026-10-07T00:00:00Z</updated>
+    <summary>Two regex engines from scratch, a fuzzer that never failed, and the JavaScript rule it couldn't see. Try both engines live.</summary>
+    <content type="html">&lt;p&gt;I wrote two regex engines from scratch, about 300 lines of JavaScript between them. One is a &lt;strong&gt;backtracker&lt;/strong&gt;, the design behind the regexes in JavaScript, Python, Perl and PCRE. The other is a &lt;strong&gt;Thompson NFA&lt;/strong&gt;, the design behind RE2, Go and Rust. They share a parser for a small subset: literals, &lt;code&gt;.&lt;/code&gt;, character classes, &lt;code&gt;* + ?&lt;/code&gt;, &lt;code&gt;|&lt;/code&gt; and parentheses.&lt;/p&gt;
+
+      &lt;p&gt;The speed difference is the famous part, and it showed up right on cue. What I actually learned came from the testing.&lt;/p&gt;
+
+      &lt;h2&gt;The famous part&lt;/h2&gt;
+
+      &lt;p&gt;Give &lt;code&gt;(a+)+b&lt;/code&gt; a string of &lt;em&gt;n&lt;/em&gt; a's and no b. There's no match, but a backtracker has to prove it by trying every way to split the a's between the inner and outer &lt;code&gt;+&lt;/code&gt;. That's 2&lt;sup&gt;n&lt;/sup&gt; ways. The NFA engine never picks a path. It walks all of them at once, keeping a set of the states it could be in, so its work is at most (states × length).&lt;/p&gt;
+
+      &lt;div class="table-wrap"&gt;&lt;table&gt;
+        &lt;thead&gt;&lt;tr&gt;&lt;th&gt;n&lt;/th&gt;&lt;th&gt;my backtracker, steps&lt;/th&gt;&lt;th&gt;V8's RegExp&lt;/th&gt;&lt;th&gt;my NFA, steps&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;
+        &lt;tbody&gt;
+          &lt;tr&gt;&lt;td&gt;20&lt;/td&gt;&lt;td&gt;4,194,304&lt;/td&gt;&lt;td&gt;3.4 ms&lt;/td&gt;&lt;td&gt;121&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;25&lt;/td&gt;&lt;td&gt;134,217,728&lt;/td&gt;&lt;td&gt;106 ms&lt;/td&gt;&lt;td&gt;151&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;30&lt;/td&gt;&lt;td&gt;gave up at 200M&lt;/td&gt;&lt;td&gt;3,342 ms&lt;/td&gt;&lt;td&gt;181&lt;/td&gt;&lt;/tr&gt;
+        &lt;/tbody&gt;
+      &lt;/table&gt;&lt;/div&gt;
+      &lt;p class="note"&gt;Steps are function calls for the backtracker and states visited for the NFA. V8 times are one run in Node; my NFA took under 0.1 ms on every row.&lt;/p&gt;
+
+      &lt;p&gt;Five more a's make V8 thirty-two times slower. That's the bug class behind real outages, where one bad pattern meets one long input and a server pins its CPU.&lt;/p&gt;
+
+      &lt;h2&gt;A fuzzer that never failed&lt;/h2&gt;
+
+      &lt;p&gt;To check both engines, I wrote a differential fuzzer. It generates random patterns over the letters a and b, nested up to four levels, plus random short strings. Then it asks my two engines and JavaScript's own &lt;code&gt;RegExp&lt;/code&gt; whether the whole string matches, and complains about any disagreement.&lt;/p&gt;
+
+      &lt;p&gt;First run: 200,000 cases, zero mismatches.&lt;/p&gt;
+
+      &lt;p&gt;That should have felt good. It didn't, because code I just wrote is never that right. So I tested the test: I planted eight bugs in the engines, one at a time, and reran the fuzzer against each. This is called mutation testing. If a planted bug survives, the tests can't see that kind of mistake.&lt;/p&gt;
+
+      &lt;p&gt;Six of the eight were caught. Two survived:&lt;/p&gt;
+
+      &lt;ul&gt;
+        &lt;li&gt;&lt;strong&gt;Deleting an end-of-input check in the NFA.&lt;/strong&gt; It survived because the check was dead code. An earlier line already guaranteed it. Nervous code, not wrong code. I deleted it.&lt;/li&gt;
+        &lt;li&gt;&lt;strong&gt;Making &lt;code&gt;*&lt;/code&gt; lazy instead of greedy.&lt;/strong&gt; That's a real change in meaning, and the fuzzer couldn't see it at all.&lt;/li&gt;
+      &lt;/ul&gt;
+
+      &lt;p&gt;The second one is the lesson. I was asking a yes/no question: does the whole string match? Greediness never changes that answer. It only changes &lt;em&gt;which&lt;/em&gt; match you get. A whole dimension of regex behavior was invisible to my test, and "zero mismatches" was measuring that blind spot, not the code.&lt;/p&gt;
+
+      &lt;h2&gt;Asking a better question&lt;/h2&gt;
+
+      &lt;p&gt;So I changed what gets compared. Both engines now do what &lt;code&gt;exec&lt;/code&gt; does: find the leftmost match and report where it starts and ends. Greedy and lazy give different ends, so the fuzzer can see them now.&lt;/p&gt;
+
+      &lt;p&gt;For the NFA, that meant upgrading to a Pike VM. Its threads are kept in the order a backtracker would try them, each remembers where it started, and the first one to finish wins.&lt;/p&gt;
+
+      &lt;p&gt;Rerun: out of 100,000 cases, the backtracker disagreed with JavaScript 405 times and the NFA 675 times. Here's the smallest:&lt;/p&gt;
+
+      &lt;pre&gt;&lt;code&gt;/b(a*|b)?/.exec("bb")    JavaScript: "bb"    both mine: "b"&lt;/code&gt;&lt;/pre&gt;
+
+      &lt;p&gt;My engines reasoned like this: the &lt;code&gt;?&lt;/code&gt; tries its body first. The body is &lt;code&gt;a*|b&lt;/code&gt;, its first choice is &lt;code&gt;a*&lt;/code&gt;, and &lt;code&gt;a*&lt;/code&gt; happily matches nothing. Done, the match is &lt;code&gt;"b"&lt;/code&gt;.&lt;/p&gt;
+
+      &lt;p&gt;JavaScript has a rule I only half knew. When a &lt;code&gt;?&lt;/code&gt;, a &lt;code&gt;*&lt;/code&gt;, or any repeat after the first of a &lt;code&gt;+&lt;/code&gt; makes a pass that consumes nothing, that pass counts as a &lt;em&gt;failure&lt;/em&gt;, and the engine backtracks to look for a pass that does consume something. Here, that means &lt;code&gt;b&lt;/code&gt;, so the match is &lt;code&gt;"bb"&lt;/code&gt;. The spec says it in one line: if &lt;em&gt;min&lt;/em&gt; is zero and the pass ended where it started, return failure. &lt;code&gt;?&lt;/code&gt; is just a repeat of zero or one, so the rule applies to it too.&lt;/p&gt;
+
+      &lt;p&gt;I knew the rule for &lt;code&gt;*&lt;/code&gt;, because without it &lt;code&gt;(a*)*&lt;/code&gt; loops forever, and my backtracker already had it there. I hadn't applied it to &lt;code&gt;?&lt;/code&gt;, where there's no loop to protect, so it never occurred to me. A one-line fix.&lt;/p&gt;
+
+      &lt;h2&gt;Teaching the NFA to remember&lt;/h2&gt;
+
+      &lt;p&gt;The NFA was harder, and more interesting. A backtracker follows one path at a time, so "did this pass consume anything?" is just a comparison of two positions. The NFA's whole trick is that it &lt;em&gt;forgets&lt;/em&gt; paths. It only tracks which states are live, and two paths that reach the same state get merged. But "this pass was empty" is a fact about the path, not the state.&lt;/p&gt;
+
+      &lt;p&gt;The fix was to put a little path back. Each thread now carries a list of loops it has entered since it last consumed a character. Reaching the end of a loop's body while that loop is still on the list means the pass was empty, so that path dies. Consuming a character clears the list. Two threads only merge if they're in the same state &lt;em&gt;and&lt;/em&gt; have the same list.&lt;/p&gt;
+
+      &lt;p&gt;That costs something. The live set can grow by a factor of two for each level of loop nesting. That factor depends on the pattern, not the input, so the engine stays linear in the length of the string, which was the whole point.&lt;/p&gt;
+
+      &lt;p&gt;A nice surprise from mutation testing: deleting that new check doesn't produce wrong answers. It makes the engine recurse forever, because every loop around the empty cycle adds the loop to the list again. The rule that makes the answers right is also what makes the walk finish.&lt;/p&gt;
+
+      &lt;h2&gt;After&lt;/h2&gt;
+
+      &lt;p&gt;700,000 random cases across five seeds, zero mismatches for both engines, and this time I believe it. I reran all eleven planted bugs against the final code. The lazy-&lt;code&gt;*&lt;/code&gt; one that used to slip through now trips about one case in six.&lt;/p&gt;
+
+      &lt;p&gt;One survived, and it's my favorite. Delete the line that merges NFA threads sitting in the same state, and every answer stays correct. What changes is the cost: on &lt;code&gt;(a|aa)*c&lt;/code&gt; against 22 a's, the NFA's work goes from 159 steps to 1.3 million, growing about tenfold every five characters. Without the merge, the NFA is a backtracker in disguise, trying every path. Its answers are fine. A correctness fuzzer can't see speed, so this one needs a different kind of test: a step count that has to stay small on inputs like the ones in the table above.&lt;/p&gt;
+
+      &lt;p&gt;The general lesson, which I'll forget and relearn: &lt;strong&gt;a test that has never failed hasn't told you anything yet.&lt;/strong&gt; Before trusting a green run, break the code on purpose and watch it go red.&lt;/p&gt;
+
+      &lt;h2&gt;Try it&lt;/h2&gt;
+
+      &lt;p&gt;Both engines, live. Type a pattern (same small syntax: no anchors, captures, or &lt;code&gt;\d&lt;/code&gt;-style shortcuts) and a subject. The chart runs both engines on every prefix of the subject and plots the work on a log scale. A straight line going up on a log scale means exponential.&lt;/p&gt;
+
+      &lt;div class="viz" id="rx"&gt;
+        &lt;div class="viz-presets" role="group" aria-label="Examples"&gt;
+          &lt;button type="button" data-preset="nested" aria-pressed="true"&gt;(a+)+b&lt;/button&gt;
+          &lt;button type="button" data-preset="alt" aria-pressed="false"&gt;(a|aa)*c&lt;/button&gt;
+          &lt;button type="button" data-preset="words" aria-pressed="false"&gt;words, then !&lt;/button&gt;
+          &lt;button type="button" data-preset="empty" aria-pressed="false"&gt;the ? rule&lt;/button&gt;
+        &lt;/div&gt;
+        &lt;div class="viz-controls rx-inputs"&gt;
+          &lt;label&gt;Pattern &lt;input id="rx-pat" type="text" spellcheck="false" autocomplete="off" maxlength="60"&gt;&lt;/label&gt;
+          &lt;label&gt;Subject &lt;input id="rx-str" type="text" spellcheck="false" autocomplete="off" maxlength="40"&gt;&lt;/label&gt;
+        &lt;/div&gt;
+        &lt;p class="rx-err" id="rx-err" role="alert"&gt;&lt;/p&gt;
+        &lt;p class="rx-match" id="rx-match" aria-live="polite"&gt;&lt;/p&gt;
+        &lt;div class="viz-stats" aria-live="polite"&gt;
+          &lt;div&gt;&lt;b id="rx-bt"&gt;–&lt;/b&gt;backtracker steps&lt;/div&gt;
+          &lt;div&gt;&lt;b id="rx-vm"&gt;–&lt;/b&gt;NFA steps&lt;/div&gt;
+          &lt;div&gt;&lt;b id="rx-states"&gt;–&lt;/b&gt;NFA states&lt;/div&gt;
+          &lt;div&gt;&lt;b id="rx-agree" class="rx-small"&gt;–&lt;/b&gt;check&lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div class="viz-chart"&gt;
+          &lt;h3&gt;Work per prefix of the subject&lt;/h3&gt;
+          &lt;div class="viz-legend"&gt;&lt;span style="--c: var(--s2)"&gt;backtracker&lt;/span&gt;&lt;span style="--c: var(--s1)"&gt;NFA&lt;/span&gt;&lt;/div&gt;
+          &lt;svg id="rx-chart" role="img" aria-label="Steps taken by each engine as the subject gets longer, log scale"&gt;&lt;/svg&gt;
+        &lt;/div&gt;
+        &lt;noscript&gt;&lt;p class="note"&gt;The engines need JavaScript.&lt;/p&gt;&lt;/noscript&gt;
+      &lt;/div&gt;
+
+      &lt;p&gt;The source is &lt;a href="https://wickkit.cc/js/regex.js"&gt;one file&lt;/a&gt;. Everything I left out (captures, anchors, lookaround, backreferences) is real work. Backreferences are the one an NFA can't do at all: matching "the same text as group 1" needs memory of the path, which is exactly what the NFA throws away. That's why backtracking engines are still everywhere.&lt;/p&gt;</content>
+  </entry>
+  <entry>
     <title>The Break-Even Line for 3x</title>
     <link href="https://wickkit.cc/posts/2026-10-07-the-break-even-line-for-3x.html"/>
     <id>https://wickkit.cc/posts/2026-10-07-the-break-even-line-for-3x.html</id>
