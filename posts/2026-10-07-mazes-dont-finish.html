@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mazes Don't Finish — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+
+    <article>
+      <h1>Mazes Don't Finish</h1>
+      <div class="meta">2026-10-07 · Kit Wickham</div>
+
+      <p>Gray-Scott is two imaginary chemicals on a grid. One, U, is fed in everywhere at a steady rate. The other, V, eats U to make more of itself, and is removed at its own steady rate. Both spread to their neighbours, U twice as fast as V. That's the whole model: two lines of arithmetic per cell, and two knobs, the feed rate F and the kill rate k. Depending on the knobs, it grows spots, mazes, coral, worms and things that look like cells dividing. It's the standard example of how patterns like a leopard's spots could come out of plain chemistry.</p>
+
+      <p>Most pictures of it are still images, so I assumed the patterns settle. I wrote one, swept the knobs to map what each setting makes, and then checked whether the patterns ever stop. Mostly they don't.</p>
+
+      <div class="viz" id="gs" data-classes='{"s":"spots","S":"spots, from two of three starts","h":"holes","H":"holes, from two of three starts","w":"stripes and mazes","W":"stripes and mazes, from two of three starts","n":"nothing survives","N":"nothing survives, from two of three starts","u":"an even wash, no pattern","U":"an even wash, from two of three starts","m":"something different from every start","b":"blows up"}' data-map="nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn|nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn|nnnnnnnnnnnnnnSsmnnnnnnnnnnnnnnnnnnnnnnnn|WnnnnnnnnnnnnnnSsssnnnnnnnnnnnnnnnnnnnnnn|uuuWNnnnnnnnnnnnsssssSnnnnnnnnnnnnnnnnnnn|uuuuuuwwnnnnnnnnnnsssssSnnnnnnnnnnnnnnnnn|uuuuuuuuuwWWnnnnnnSssssssnnnnnnnnnnnnnnnn|uuuuuuuuuuuwwwwnNNWWsssssssnnnnnnnnnnnnnn|uuuuuuuuuuuuunwwwwwwSsssssssnnnnnnnnnnnnn|uuuuuuuuuuuuuuunwWwwWssssssssNnnnnnnnnnnn|uuuuuuuuuuuuuuuuuWwwWwwwssssssNnnnnnnnnnn|uuuuuuuuuuuuuuuuuuuwwSWwwwSssssSnnnnnnnnn|uuuuuuuuuuuuuuuuuuuuuwHHwwwwssssSnnnnnnnn|uuuuuuuuuuuuuuuuuuuuuuwHhwwwWsSssSnnnnnnn|uuuuuuuuuuuuuuuuuuuuuuunWhwwwwsssssSnnnnn|uuuuuuuuuuuuuuuuuuuuuuuuuWhwwwwsssssssssW|uuuuuuuuuuuuuuuuuuuuuuuuuuWhwwwwsssssssss|uuuuuuuuuuuuuuuuuuuuuuuuuuuhhwwwwssssssss|uuuuuuuuuuuuuuuuuuuuuuuuuuuuhwwwwWsssssss|uuuuuuuuuuuuuuuuuuuuuuuuuuuuuHwwwWsssssss|uuuuuuuuuuuuuuuuuuuuuuuuuuuuuhwwwwsssssss|uuuuuuuuuuuuuuuuuuuuuuuuuuuuuhhwwwWssssss|uuuuuuuuuuuuuuuuuuuuuuuuuuuuuuhwwwWssssss|uuuuuuuuuuuuuuuuuuuuuuuuuuuuuuhwwwwsssssn|uuuuuuuuuuuuuuuuuuuuuuuuuuuuuuhwwwwwsssnn|uuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuwwwwwssNnn|uuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuWwwwwsWnnn|uuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuWwwwwmnnnn|uuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuWwwwWnnnnn|uuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuwwwWnnnnnn|uuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuwwNnnnnnnn|uuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuwnnnnnnnnn|uuuuuuuuuuuuuuuuuuuuuuuuuuuuuuunnnnnnnnnn|uuuuuuuuuuuuuuuuuuuuuuuuuuuuuunnnnnnnnnnn|uuuuuuuuuuuuuuuuuuuuuuuuuuuuunnnnnnnnnnnn|uuuuuuuuuuuuuuuuuuuuuuuuuuuunnnnnnnnnnnnn|uuuuuuuuuuuuuuuuuuuuuuuuuuUnnnnnnnnnnnnnn|uuuuuuuuuuuuuuuuuuuuuuuuuNnnnnnnnnnnnnnnn|uuuuuuuuuuuuuuuuuuuuuuuunnnnnnnnnnnnnnnnn|uuuuuuuuuuuuuuuuuuuuuuunnnnnnnnnnnnnnnnnn|uuuuuuuuuuuuuuuuuuuuuUnnnnnnnnnnnnnnnnnnn|uuuuuuuuuuuuuuuuuuuunnnnnnnnnnnnnnnnnnnnn|uuuuuuuuuuuuuuuuuuunnnnnnnnnnnnnnnnnnnnnn|uuuuuuuuuuuuuuuuuunnnnnnnnnnnnnnnnnnnnnnn|uuuuuuuuuuuuuuuuNnnnnnnnnnnnnnnnnnnnnnnnn" data-motion=".........................................|.........................................|..............cxx........................|c..............cccc......................|...c............xccccc...................|......cc..........cccccc.................|.........ccc......xcccccc................|...........cccc.ccxcccccccc..............|..............cccccccccccccc.............|................cccccccccccccc...........|..................cccsccccccccc..........|...................ccccccccccccs.........|.....................ccccccccccxs........|......................ccsccgcsssss.......|........................ccccggscssss.....|.........................cscccccsssssssss|..........................cscggccssssssss|...........................sgccggcsssssss|............................sccgggsssssss|.............................gccggcssssss|.............................sccgggssssss|.............................xcccggcsssss|..............................ccccccsssss|..............................sccgggssss.|..............................sccggccss..|...............................ccgggss...|...............................cccggss...|...............................cccggs....|...............................ccccs.....|...............................cccc......|...............................gc........|...............................c.........|.........................................|.........................................|.........................................|.........................................|.........................................|.........................................|.........................................|.........................................|.........................................|.........................................|.........................................|.........................................|.........................................">
+        <div class="viz-presets" role="group" aria-label="Pattern presets">
+          <button type="button" data-f="0.036" data-k="0.065" aria-pressed="true">spots</button>
+          <button type="button" data-f="0.030" data-k="0.057">maze</button>
+          <button type="button" data-f="0.054" data-k="0.062">coral</button>
+          <button type="button" data-f="0.056" data-k="0.065">sliding worms</button>
+          <button type="button" data-f="0.026" data-k="0.053">breathing holes</button>
+          <button type="button" data-f="0.018" data-k="0.051">chaos</button>
+          <button type="button" id="gs-reset">restart</button>
+          <button type="button" id="gs-pause" aria-pressed="false">pause</button>
+        </div>
+        <div class="gs-panels">
+          <figure><canvas id="gs-sim" role="img" aria-label="The live simulation. Drag on it to drop more chemical."></canvas>
+            <figcaption><b>Live</b> · F <span id="gs-f"></span> · k <span id="gs-k"></span> · step <span id="gs-t">0</span>. Drag to paint.</figcaption></figure>
+          <figure><div class="gs-mapbox"><img id="gs-map" src="/img/gs-map.png" alt="Map of the pattern each setting settles into: feed rate F up the side, kill rate k along the bottom."><span id="gs-mark"></span></div>
+            <figcaption><b>Map</b> · k left to right, F bottom to top. Click to move there.</figcaption></figure>
+        </div>
+        <p class="gs-what" id="gs-what" aria-live="polite"></p>
+        <noscript><p class="note">The simulation needs JavaScript.</p></noscript>
+      </div>
+
+
+      <h2>The map</h2>
+
+      <p>I ran 1,845 settings (45 feed rates × 41 kill rates, the region where the interesting things live), each from three different random starts, on a 128×128 grid that wraps around at the edges, for 40,000 steps each. The map in the widget is one tile per setting: what the first start looked like at the end.</p>
+
+      <p>Most of the map is boring. At 31% of settings nothing survives: V dies out and the grid goes back to plain U. At 53%, V takes over everywhere in an even wash, with no pattern. Only <strong>16%</strong> make a pattern at all, in a thin curved band between those two. Every famous picture comes from that band.</p>
+
+      <p>The start mostly doesn't matter. All three starts landed in the same kind of pattern (spots, holes, stripes, or nothing) at 97% of settings. Within the patterned band, though, that drops to 83%: near the edges of the band, one start makes stripes and another makes spots.</p>
+
+      <h2>They don't stop</h2>
+
+      <p>To see whether a pattern had finished, I counted how many cells flip between "has V" and "hasn't" over the last 1,000 steps. A finished pattern scores zero. At step 40,000, <strong>68%</strong> of the patterned runs were still flipping more than 1% of the grid every 1,000 steps.</p>
+
+      <p>Maybe 40,000 steps just wasn't long enough. So I took every patterned setting (first start only) and ran it to 200,000 steps, five times longer, then compared the grid across two more windows of 10,000 steps each.</p>
+
+      <div class="table-wrap"><table class="compact">
+        <thead><tr><th>At 200,000 steps</th><th>Spots</th><th>Holes</th><th>Stripes and mazes</th><th>All</th></tr></thead>
+        <tbody>
+          <tr><td>Stopped</td><td>74</td><td>8</td><td>4</td><td>86&nbsp;(30%)</td></tr>
+          <tr><td>Sliding as a whole</td><td>2</td><td>2</td><td>28</td><td>32&nbsp;(11%)</td></tr>
+          <tr><td>Still rearranging</td><td>68</td><td>10</td><td>91</td><td>169&nbsp;(59%)</td></tr>
+        </tbody>
+      </table></div>
+      <p class="note">287 settings still had a pattern at 200,000 steps (7 of the original 294 had died out or washed over by then). "Stopped" means the average cell's V changed by less than 0.002 over 10,000 steps, in both windows (V runs from 0 to about 0.4).</p>
+
+      <p>Spots are the only thing that reliably settles, and only about half of them do. The rest are mostly spots that keep splitting and dying, the chaotic churn at the low-feed end of the band. Stripes and mazes almost never finish: <strong>4 of 123</strong>.</p>
+
+      <p>I followed three of them a million steps, 25 times longer than the map. None stopped. In the last 10,000 steps the maze still flipped 1.6% of its cells, the coral 5.7% and the holes 12%. The maze is the slowest: it's mostly locked in, and the changes are small and local. The coral and holes keep moving much more.</p>
+
+      <h2>The whole pattern slides</h2>
+
+      <p>The holes surprised me. Watching two frames 8,000 steps apart, the pattern looked almost unchanged, yet 12% of the cells had flipped. So I tested a different idea: maybe it's the same pattern, moved. I tried every small shift of the earlier frame and kept the one that best matched the later frame. Shifted one pixel left, the earlier frame accounted for 73% of the difference. Over longer gaps it got cleaner: with 20,000 steps between frames, a single shift explained 93% of it.</p>
+
+      <p>The whole pattern was gliding across the grid as one rigid thing, about one pixel every 6,500 to 9,000 steps depending on the start. Nothing in the model points in any direction, so I checked two things that would make it fake:</p>
+
+      <ul>
+        <li><strong>A bias in my grid code.</strong> Then every run would slide the same way. Three different starts slid in three different directions, at similar speeds. The direction comes from the random start, not the code.</li>
+        <li><strong>An artifact of the time step.</strong> The simulation moves forward in fixed steps, and too big a step can create motion that isn't in the real equations. With the step halved, the slide was the same speed, in the same direction, to within 1%.</li>
+      </ul>
+
+      <p>So it's real. The pattern starts out symmetric, the random start tips it slightly one way, and it keeps going. Across the map, <strong>32</strong> settings glide like this, nearly all of them in the worm-and-stripe region at the high-kill side of the band. The "sliding worms" preset is one. Watch the worm tips.</p>
+
+      <p>One caveat that matters. On a grid four times the area (256×256), the same settings still move, but not as one piece. Patches of stripes facing different ways each crawl their own way, and the best single shift explains only about a third of the change (in both settings I tried). On the small grid, which wraps around, a single patch fills everything, so the whole thing can slide. "The pattern glides" is partly a fact about the grid's size. "The stripes crawl" isn't.</p>
+
+      <h2>What I take from it</h2>
+
+      <p>A still picture of Gray-Scott is a frame from a film, and for most of the map the film doesn't end. The usual names for the regions (spots, mazes, coral, worms) describe what the frame looks like. They don't say whether it's moving. Two settings a hair apart can look the same and be completely different: one finished, one sliding at a steady speed forever.</p>
+
+      <p>The breathing holes preset is a fourth kind of motion my sliding test can't see: the pattern stays put and pulses. And a pattern that oscillated with a period that happened to match my 10,000-step windows would come back to the same frame and count as stopped. I didn't look for that.</p>
+
+      <p>The simulator is <a href="/js/gs.js">one small file</a>: plain JavaScript, a 9-point Laplacian, one explicit step at a time, with the diffusion rates (1.0 and 0.5) and step size (1.0) most people use for this. A different Laplacian or a different step would move the borders of the map slightly. I'd expect the moving to survive that, since it survived halving the step.</p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+  <script src="/js/gs.js"></script>
+  <script src="/js/gs-ui.js"></script>
+</body>
+</html>
