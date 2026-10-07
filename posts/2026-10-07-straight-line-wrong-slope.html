@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Straight Line, Wrong Slope — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+
+    <article>
+      <h1>Straight Line, Wrong Slope</h1>
+      <div class="meta">2026-10-07 · Kit Wickham</div>
+
+      <p>The sandpile is the textbook example of a power law. Take a square grid and drop grains of sand on random squares, one at a time. When a square holds four grains it topples: it gives one grain to each of its four neighbours, which may make them topple too. Grains that fall off the edge are gone. That's the whole model, from Bak, Tang and Wiesenfeld in 1987.</p>
+
+      <p>Most grains do nothing. Some set off a few topplings. Once in a while one sets off an avalanche across half the grid. Plot how often each avalanche size happens on log-log axes and you get something close to a straight line, which is what a power law looks like. Nobody tunes anything to get there, and that was the exciting part: the pile finds its own critical state. It became the standard story for why earthquakes, forest fires and stock crashes might come in power laws too.</p>
+
+      <p>I wanted to see the straight line for myself, and then check whether it holds up when the grid gets bigger. It's straight on every grid. But it isn't one power law, and the reason why is a nice little piece of physics.</p>
+
+      <div class="viz" id="sp">
+        <div class="viz-presets" role="group" aria-label="Model and speed">
+          <button type="button" data-model="btw" aria-pressed="true">sandpile</button>
+          <button type="button" data-model="manna" aria-pressed="false">random sandpile</button>
+          <button type="button" data-speed="slow" aria-pressed="true">one grain at a time</button>
+          <button type="button" data-speed="fast" aria-pressed="false">fast</button>
+          <button type="button" id="sp-reset">restart</button>
+          <button type="button" id="sp-pause" aria-pressed="false">pause</button>
+        </div>
+        <div class="sp-panels">
+          <figure><canvas id="sp-sim" role="img" aria-label="A 96 by 96 sandpile. Darker squares hold fewer grains; squares that just toppled glow orange. Click a square to drop a grain there."></canvas>
+            <figcaption><b>The pile</b> · 96×96. Darker = fewer grains; orange = just toppled. Click to drop a grain.</figcaption></figure>
+          <figure class="viz-chart"><svg id="sp-chart" role="img" aria-label="Log-log histogram of avalanche sizes so far"></svg>
+            <figcaption><b>Avalanche sizes so far</b> · share of avalanches per unit of size, log-log. The dashed line is a straight-line fit through the middle.</figcaption></figure>
+        </div>
+        <div class="viz-stats">
+          <div><b id="sp-n">0</b>grains dropped</div>
+          <div><b id="sp-zero">–</b>did nothing</div>
+          <div><b id="sp-big">0</b>biggest avalanche</div>
+          <div><b id="sp-slope">–</b>slope of the dashed line</div>
+        </div>
+        <noscript><p class="note">The simulation needs JavaScript.</p></noscript>
+      </div>
+
+      <p>Size here means the number of topplings. A square can topple more than once in the same avalanche, so it's not the same as the area covered. That difference turns out to be the whole story. (The random sandpile button is a variant I'll get to below.)</p>
+
+      <h2>First, is the simulator right?</h2>
+
+      <p>There's a neat exact answer to check against. Each grain does a random walk: every toppling moves one grain one square, and the four grains a toppling sends out are interchangeable. So the average avalanche size is the average number of steps a random walk takes to get off the grid, divided by four. That's a linear equation you can solve exactly for any grid.</p>
+
+      <div class="table-wrap"><table class="compact">
+        <thead><tr><th>Grid</th><th>Exact average</th><th>Simulated</th><th>Off by</th></tr></thead>
+        <tbody><tr><td>64×64</td><td>153.0</td><td>153.1</td><td>+0.06%</td></tr><tr><td>128×128</td><td>593.9</td><td>594.1</td><td>+0.04%</td></tr><tr><td>256×256</td><td>2,339.3</td><td>2,339.0</td><td>−0.01%</td></tr><tr><td>512×512</td><td>9,284.9</td><td>9,284.6</td><td>0.00%</td></tr><tr><td>1024×1024</td><td>36,995.5</td><td>36,993.4</td><td>−0.01%</td></tr></tbody>
+      </table></div>
+
+      <p>Within a tenth of a percent at every size, about what a million random drops should give. The pile's average works. Now the shape.</p>
+
+      <h2>A straight line with a moving slope</h2>
+
+      <p>I ran grids from 64×64 up to 1024×1024, a million grains on each (200,000 on the biggest), after letting each pile settle into its steady state. On every grid the histogram is a straight line over a wide middle range, then it falls off at the size where avalanches start hitting the edges. That's expected. A power law with a cutoff set by the grid is the normal picture.</p>
+
+      <p>The problem is the slope of the straight part. If the pile really follows one power law, the slope is a property of the rules, and a bigger grid should just extend the line further before it drops. Instead:</p>
+
+      <div class="table-wrap"><table class="compact">
+        <thead><tr><th>Grid</th><th>Sandpile slope</th><th>Random sandpile slope</th></tr></thead>
+        <tbody><tr><td>64×64</td><td>1.05</td><td>1.20</td></tr><tr><td>128×128</td><td>1.07</td><td>1.22</td></tr><tr><td>256×256</td><td>1.10</td><td>1.24</td></tr><tr><td>512×512</td><td>1.12</td><td>1.25</td></tr><tr><td>1024×1024</td><td>1.13</td><td>–</td></tr></tbody>
+      </table></div>
+      <p class="note">Slope of a straight-line fit to the log-log histogram, for sizes from 10 up to a thirtieth of the grid's area, written as a positive number. Avalanches of size zero are left out.</p>
+
+      <p>The slope steepens every time the grid doubles. So any single number I quoted for "the" exponent would partly be a statement about the grid size I happened to pick.</p>
+
+      <p>That alone doesn't damn the sandpile, though. For comparison I ran a close cousin, the random sandpile (the Manna model): a square topples at two grains instead of four, and throws both grains to neighbours picked at random. Its slope drifts too, by a bit less. Some drift is normal. Just before the cutoff, the histogram has a small bump, and the bump moves outward as the grid grows, so a straight-line fit gets dragged around by it. Fitting a slope by eye or by least squares is a bad way to measure an exponent. There's a better test.</p>
+
+      <h2>Can the curves be made to line up?</h2>
+
+      <p>A power law with a size cutoff has a precise meaning: the histograms from every grid should be the same curve, stretched. If P(size) = size<sup>−τ</sup> × f(size ÷ grid<sup>D</sup>), then multiplying each histogram by size<sup>τ</sup> and dividing each size by grid<sup>D</sup> should land all of them on top of each other. Two numbers, τ and D, and every grid collapses onto one curve. Try it:</p>
+
+      <div class="viz" id="sp-fit" data-curves='{"btw-s":{"best":[1.192242558002473,2.5744648611545564],"spread":0.05488919446825261,"curves":{"64":[[0.0,-0.913],[0.301,-1.171],[0.477,-1.388],[0.602,-1.483],[0.739,-1.631],[0.9,-1.794],[1.04,-1.931],[1.159,-2.05],[1.286,-2.181],[1.419,-2.316],[1.552,-2.453],[1.682,-2.595],[1.806,-2.723],[1.932,-2.86],[2.06,-2.998],[2.185,-3.131],[2.31,-3.269],[2.437,-3.404],[2.561,-3.539],[2.687,-3.68],[2.812,-3.821],[2.937,-3.963],[3.062,-4.105],[3.187,-4.271],[3.312,-4.493],[3.437,-4.767],[3.562,-5.037],[3.687,-5.357],[3.812,-5.738],[3.937,-6.229],[4.062,-6.87],[4.187,-7.695]],"128":[[0.0,-0.937],[0.301,-1.2],[0.477,-1.425],[0.602,-1.521],[0.739,-1.67],[0.9,-1.831],[1.04,-1.979],[1.159,-2.1],[1.286,-2.23],[1.419,-2.369],[1.552,-2.515],[1.682,-2.65],[1.806,-2.781],[1.932,-2.919],[2.06,-3.056],[2.185,-3.195],[2.31,-3.332],[2.437,-3.468],[2.561,-3.604],[2.687,-3.739],[2.812,-3.88],[2.937,-4.012],[3.062,-4.152],[3.187,-4.295],[3.312,-4.424],[3.437,-4.573],[3.562,-4.712],[3.687,-4.861],[3.812,-5.033],[3.937,-5.243],[4.062,-5.493],[4.187,-5.719],[4.312,-5.988],[4.437,-6.298],[4.562,-6.628],[4.687,-7.05],[4.812,-7.532],[4.937,-8.253],[5.062,-9.07]],"256":[[0.0,-0.952],[0.301,-1.218],[0.477,-1.441],[0.602,-1.544],[0.739,-1.688],[0.9,-1.859],[1.04,-2.007],[1.159,-2.126],[1.286,-2.256],[1.419,-2.405],[1.552,-2.544],[1.682,-2.678],[1.806,-2.814],[1.932,-2.959],[2.06,-3.096],[2.185,-3.238],[2.31,-3.375],[2.437,-3.517],[2.561,-3.657],[2.687,-3.793],[2.812,-3.933],[2.937,-4.07],[3.062,-4.212],[3.187,-4.346],[3.312,-4.49],[3.437,-4.619],[3.562,-4.765],[3.687,-4.903],[3.812,-5.035],[3.937,-5.18],[4.062,-5.325],[4.187,-5.463],[4.312,-5.61],[4.437,-5.785],[4.562,-6.003],[4.687,-6.203],[4.812,-6.429],[4.937,-6.663],[5.062,-6.927],[5.187,-7.201],[5.312,-7.53],[5.437,-7.884],[5.562,-8.323],[5.687,-8.873],[5.812,-9.513]],"512":[[0.0,-0.962],[0.301,-1.23],[0.477,-1.448],[0.602,-1.549],[0.739,-1.701],[0.9,-1.872],[1.04,-2.011],[1.159,-2.137],[1.286,-2.279],[1.419,-2.425],[1.552,-2.56],[1.682,-2.705],[1.806,-2.84],[1.932,-2.982],[2.06,-3.12],[2.185,-3.259],[2.31,-3.404],[2.437,-3.543],[2.561,-3.687],[2.687,-3.824],[2.812,-3.969],[2.937,-4.115],[3.062,-4.255],[3.187,-4.392],[3.312,-4.537],[3.437,-4.672],[3.562,-4.811],[3.687,-4.956],[3.812,-5.083],[3.937,-5.237],[4.062,-5.363],[4.187,-5.508],[4.312,-5.648],[4.437,-5.789],[4.562,-5.927],[4.687,-6.068],[4.812,-6.211],[4.937,-6.361],[5.062,-6.542],[5.187,-6.74],[5.312,-6.937],[5.437,-7.138],[5.562,-7.372],[5.687,-7.602],[5.812,-7.844],[5.937,-8.111],[6.062,-8.394],[6.187,-8.777],[6.312,-9.109],[6.437,-9.619],[6.562,-10.216],[6.687,-10.796]],"1024":[[0.0,-0.965],[0.301,-1.238],[0.477,-1.448],[0.602,-1.569],[0.739,-1.71],[0.9,-1.881],[1.04,-2.009],[1.159,-2.154],[1.286,-2.284],[1.419,-2.427],[1.552,-2.574],[1.682,-2.721],[1.806,-2.855],[1.932,-2.999],[2.06,-3.115],[2.185,-3.271],[2.31,-3.426],[2.437,-3.564],[2.561,-3.712],[2.687,-3.837],[2.812,-3.987],[2.937,-4.126],[3.062,-4.287],[3.187,-4.422],[3.312,-4.55],[3.437,-4.71],[3.562,-4.854],[3.687,-4.997],[3.812,-5.16],[3.937,-5.272],[4.062,-5.418],[4.187,-5.545],[4.312,-5.698],[4.437,-5.828],[4.562,-5.976],[4.687,-6.118],[4.812,-6.255],[4.937,-6.368],[5.062,-6.542],[5.187,-6.71],[5.312,-6.84],[5.437,-6.959],[5.562,-7.094],[5.687,-7.279],[5.812,-7.49],[5.937,-7.678],[6.062,-7.85],[6.187,-8.099],[6.312,-8.27],[6.437,-8.547],[6.562,-8.783],[6.687,-9.061],[6.812,-9.279],[6.937,-9.6],[7.062,-10.093],[7.187,-10.256]]}},"btw-a":{"best":[1.1800701731443404,2.022665990889072],"spread":0.019648808739435246,"curves":{"64":[[0.0,-0.913],[0.301,-1.171],[0.477,-1.388],[0.602,-1.483],[0.739,-1.629],[0.9,-1.787],[1.04,-1.923],[1.159,-2.041],[1.286,-2.171],[1.419,-2.305],[1.552,-2.441],[1.682,-2.582],[1.806,-2.709],[1.932,-2.846],[2.06,-2.981],[2.185,-3.114],[2.31,-3.253],[2.437,-3.384],[2.561,-3.517],[2.687,-3.66],[2.812,-3.798],[2.937,-3.935],[3.062,-4.064],[3.187,-4.231],[3.312,-4.481],[3.437,-4.969],[3.562,-6.294]],"128":[[0.0,-0.937],[0.301,-1.2],[0.477,-1.425],[0.602,-1.521],[0.739,-1.668],[0.9,-1.826],[1.04,-1.97],[1.159,-2.092],[1.286,-2.22],[1.419,-2.357],[1.552,-2.504],[1.682,-2.638],[1.806,-2.769],[1.932,-2.906],[2.06,-3.044],[2.185,-3.181],[2.31,-3.314],[2.437,-3.453],[2.561,-3.586],[2.687,-3.72],[2.812,-3.863],[2.937,-3.993],[3.062,-4.131],[3.187,-4.266],[3.312,-4.402],[3.437,-4.544],[3.562,-4.678],[3.687,-4.813],[3.812,-4.981],[3.937,-5.234],[4.062,-5.744],[4.187,-7.16]],"256":[[0.0,-0.952],[0.301,-1.218],[0.477,-1.441],[0.602,-1.544],[0.739,-1.686],[0.9,-1.853],[1.04,-1.999],[1.159,-2.117],[1.286,-2.246],[1.419,-2.394],[1.552,-2.531],[1.682,-2.67],[1.806,-2.804],[1.932,-2.946],[2.06,-3.083],[2.185,-3.228],[2.31,-3.36],[2.437,-3.504],[2.561,-3.646],[2.687,-3.777],[2.812,-3.917],[2.937,-4.058],[3.062,-4.193],[3.187,-4.329],[3.312,-4.462],[3.437,-4.599],[3.562,-4.739],[3.687,-4.88],[3.812,-5.01],[3.937,-5.152],[4.062,-5.282],[4.187,-5.422],[4.312,-5.556],[4.437,-5.731],[4.562,-5.993],[4.687,-6.561],[4.812,-8.253]],"512":[[0.0,-0.962],[0.301,-1.23],[0.477,-1.448],[0.602,-1.549],[0.739,-1.699],[0.9,-1.865],[1.04,-2.004],[1.159,-2.128],[1.286,-2.27],[1.419,-2.415],[1.552,-2.55],[1.682,-2.693],[1.806,-2.83],[1.932,-2.969],[2.06,-3.109],[2.185,-3.249],[2.31,-3.393],[2.437,-3.532],[2.561,-3.672],[2.687,-3.818],[2.812,-3.954],[2.937,-4.103],[3.062,-4.24],[3.187,-4.383],[3.312,-4.519],[3.437,-4.654],[3.562,-4.797],[3.687,-4.935],[3.812,-5.068],[3.937,-5.207],[4.062,-5.339],[4.187,-5.486],[4.312,-5.616],[4.437,-5.757],[4.562,-5.897],[4.687,-6.027],[4.812,-6.165],[4.937,-6.301],[5.062,-6.485],[5.187,-6.772],[5.312,-7.397],[5.437,-9.505]],"1024":[[0.0,-0.965],[0.301,-1.238],[0.477,-1.448],[0.602,-1.569],[0.739,-1.709],[0.9,-1.872],[1.04,-2.005],[1.159,-2.144],[1.286,-2.275],[1.419,-2.416],[1.552,-2.567],[1.682,-2.705],[1.806,-2.844],[1.932,-2.983],[2.06,-3.116],[2.185,-3.258],[2.31,-3.421],[2.437,-3.551],[2.561,-3.688],[2.687,-3.837],[2.812,-3.974],[2.937,-4.123],[3.062,-4.263],[3.187,-4.415],[3.312,-4.548],[3.437,-4.701],[3.562,-4.83],[3.687,-4.995],[3.812,-5.143],[3.937,-5.254],[4.062,-5.388],[4.187,-5.529],[4.312,-5.673],[4.437,-5.817],[4.562,-5.953],[4.687,-6.118],[4.812,-6.236],[4.937,-6.355],[5.062,-6.499],[5.187,-6.656],[5.312,-6.783],[5.437,-6.91],[5.562,-7.041],[5.687,-7.215],[5.812,-7.562],[5.937,-8.311]]}},"manna-s":{"best":[1.2801083689928054,2.7579662194848047],"spread":0.01638508715536935,"curves":{"64":[[0.0,-1.092],[0.301,-1.037],[0.477,-1.329],[0.602,-1.322],[0.739,-1.506],[0.9,-1.676],[1.04,-1.812],[1.159,-1.949],[1.286,-2.095],[1.419,-2.251],[1.552,-2.409],[1.682,-2.568],[1.806,-2.722],[1.932,-2.88],[2.06,-3.038],[2.185,-3.197],[2.31,-3.36],[2.437,-3.519],[2.561,-3.683],[2.687,-3.847],[2.812,-4.011],[2.937,-4.179],[3.062,-4.351],[3.187,-4.516],[3.312,-4.692],[3.437,-4.872],[3.562,-5.047],[3.687,-5.236],[3.812,-5.429],[3.937,-5.656],[4.062,-5.928],[4.187,-6.304],[4.312,-6.825],[4.437,-7.634],[4.562,-8.993]],"128":[[0.0,-1.141],[0.301,-1.066],[0.477,-1.36],[0.602,-1.352],[0.739,-1.535],[0.9,-1.699],[1.04,-1.836],[1.159,-1.973],[1.286,-2.117],[1.419,-2.27],[1.552,-2.431],[1.682,-2.588],[1.806,-2.736],[1.932,-2.891],[2.06,-3.053],[2.185,-3.205],[2.31,-3.366],[2.437,-3.521],[2.561,-3.686],[2.687,-3.842],[2.812,-3.998],[2.937,-4.162],[3.062,-4.329],[3.187,-4.49],[3.312,-4.65],[3.437,-4.813],[3.562,-4.985],[3.687,-5.146],[3.812,-5.318],[3.937,-5.483],[4.062,-5.655],[4.187,-5.834],[4.312,-6.016],[4.437,-6.186],[4.562,-6.386],[4.687,-6.578],[4.812,-6.822],[4.937,-7.131],[5.062,-7.556],[5.187,-8.148],[5.312,-9.216]],"256":[[0.0,-1.164],[0.301,-1.083],[0.477,-1.378],[0.602,-1.367],[0.739,-1.552],[0.9,-1.714],[1.04,-1.849],[1.159,-1.987],[1.286,-2.132],[1.419,-2.284],[1.552,-2.44],[1.682,-2.599],[1.806,-2.746],[1.932,-2.907],[2.06,-3.06],[2.185,-3.217],[2.31,-3.377],[2.437,-3.534],[2.561,-3.688],[2.687,-3.846],[2.812,-4.005],[2.937,-4.161],[3.062,-4.334],[3.187,-4.49],[3.312,-4.648],[3.437,-4.814],[3.562,-4.972],[3.687,-5.123],[3.812,-5.295],[3.937,-5.454],[4.062,-5.61],[4.187,-5.786],[4.312,-5.95],[4.437,-6.11],[4.562,-6.277],[4.687,-6.438],[4.812,-6.622],[4.937,-6.795],[5.062,-6.967],[5.187,-7.143],[5.312,-7.321],[5.437,-7.51],[5.562,-7.737],[5.687,-7.985],[5.812,-8.338],[5.937,-8.841],[6.062,-9.55],[6.187,-10.523]],"512":[[0.0,-1.178],[0.301,-1.095],[0.477,-1.385],[0.602,-1.378],[0.739,-1.561],[0.9,-1.724],[1.04,-1.857],[1.159,-1.997],[1.286,-2.142],[1.419,-2.295],[1.552,-2.45],[1.682,-2.604],[1.806,-2.758],[1.932,-2.91],[2.06,-3.071],[2.185,-3.222],[2.31,-3.379],[2.437,-3.54],[2.561,-3.695],[2.687,-3.85],[2.812,-4.008],[2.937,-4.173],[3.062,-4.327],[3.187,-4.493],[3.312,-4.652],[3.437,-4.808],[3.562,-4.967],[3.687,-5.132],[3.812,-5.291],[3.937,-5.451],[4.062,-5.605],[4.187,-5.776],[4.312,-5.932],[4.437,-6.088],[4.562,-6.257],[4.687,-6.414],[4.812,-6.573],[4.937,-6.746],[5.062,-6.909],[5.187,-7.065],[5.312,-7.243],[5.437,-7.399],[5.562,-7.559],[5.687,-7.759],[5.812,-7.9],[5.937,-8.108],[6.062,-8.268],[6.187,-8.465],[6.312,-8.657],[6.437,-8.884],[6.562,-9.145],[6.687,-9.54],[6.812,-10.096],[6.937,-11.022]]}}}'>
+        <div class="viz-presets" role="group" aria-label="Which data">
+          <button type="button" data-fit="btw-s" aria-pressed="true">sandpile, size</button>
+          <button type="button" data-fit="btw-a" aria-pressed="false">sandpile, area</button>
+          <button type="button" data-fit="manna-s" aria-pressed="false">random sandpile, size</button>
+          <button type="button" id="sp-to-best">best fit</button>
+          <button type="button" id="sp-reset-fit">reset</button>
+        </div>
+        <div class="viz-controls">
+          <label>τ (how steep) <output id="sp-tau-out"></output>
+            <input type="range" id="sp-tau" min="0.9" max="1.5" step="0.01" value="1.00"></label>
+          <label>D (how the cutoff grows with the grid) <output id="sp-d-out"></output>
+            <input type="range" id="sp-d" min="1.6" max="3.2" step="0.01" value="2.00"></label>
+        </div>
+        <div class="viz-stats">
+          <div><b id="sp-spread">–</b>gap between curves (rms, log₁₀)</div>
+          <div><b id="sp-best">–</b>gap at the best fit</div>
+        </div>
+        <div class="viz-chart">
+          <div class="viz-legend" id="sp-legend"></div>
+          <svg id="sp-fit-chart" role="img" aria-label="Avalanche histograms from five grid sizes, rescaled by the chosen tau and D"></svg>
+          <p class="viz-sub">Up: log₁₀ (share × size<sup>τ</sup>). Sizes below 10 are left out; they're dominated by the grid's squareness.</p>
+        </div>
+        <details><summary>Best fits as a table</summary>
+          <div class="table-wrap"><table class="compact">
+            <thead><tr><th>Data</th><th>τ</th><th>D</th><th>Gap left</th><th>Seed-to-seed gap</th></tr></thead>
+            <tbody><tr><td>Sandpile, size</td><td>1.19</td><td>2.57</td><td>0.055</td><td>0.010</td></tr><tr><td>Sandpile, area</td><td>1.18</td><td>2.02</td><td>0.020</td><td>0.005</td></tr><tr><td>Random sandpile, size</td><td>1.28</td><td>2.76</td><td>0.016</td><td>0.011</td></tr><tr><td>Random sandpile, area</td><td>1.33</td><td>2.02</td><td>0.019</td><td>0.004</td></tr></tbody>
+          </table></div>
+        </details>
+      </div>
+
+      <p>For the random sandpile, it works. The best fit is τ = 1.28 and D = 2.76, close to published estimates for this model (around 1.28 and 2.75), and the rescaled curves sit on top of each other. The gap left over is 0.016 on a log scale, not far above the 0.011 you get just from comparing two runs on the same grid.</p>
+
+      <p>For the original sandpile, no pair of numbers works. The best is τ = 1.19 and D = 2.57, and it still leaves a gap of 0.055, about 3 times the random sandpile's. Look at the hump before the cutoff: line up the straight parts and the humps come out at different heights; line up the humps and the straight parts fan out.</p>
+
+      <p>Now switch to <em>area</em>, the number of different squares an avalanche touched. Same pile, same avalanches. That collapses fine, with D = 2.02: the biggest avalanches cover a fixed share of the grid, which is what you'd expect.</p>
+
+      <p>There's a second test that doesn't need any curve-matching. If one power law with one cutoff describes everything, then the average of size<sup>q</sup> grows with the grid in a way that pins down D the same for every q. Ask the average of size, size², or size³ and you should get the same D. Here's D measured that way, across all the grids from 128×128 up:</p>
+
+      <div class="table-wrap"><table class="compact">
+        <thead><tr><th>D from…</th><th>size</th><th>size²</th><th>size³</th></tr></thead>
+        <tbody><tr><td>Random sandpile, size</td><td>2.760 ± 0.007</td><td>2.758 ± 0.009</td><td>2.754 ± 0.012</td></tr><tr><td>Sandpile, area</td><td>2.025 ± 0.004</td><td>2.024 ± 0.004</td><td>2.023 ± 0.004</td></tr><tr><td>Sandpile, size</td><td>2.685 ± 0.024</td><td>2.780 ± 0.031</td><td>2.788 ± 0.033</td></tr></tbody>
+      </table></div>
+      <p class="note">Each D is how fast the next average grows with grid size, minus how fast the one before it grows, fitted across grids from 128×128 up (128–1024 for the sandpile, 128–512 for the random one). The ± is one standard deviation from resampling the avalanches. Area columns use area in place of size.</p>
+
+      <p>The random sandpile gives the same D whatever you ask, and so does the original sandpile's area. The original sandpile's size doesn't: the D from size² comes out 0.095 higher than the D from plain size, with an uncertainty of 0.016 on that difference (both from resampling), so about six standard errors. For the random sandpile the same difference is −0.003 ± 0.005. Size³ and size² don't separate clearly in my data; the biggest grid only got 200,000 grains, and the high averages are dominated by a handful of huge avalanches. But one mismatch is enough. A single power law with a single cutoff can't produce it.</p>
+
+      <h2>Why: the middle topples again and again</h2>
+
+      <p>Here's one big avalanche from each model on a 256×256 grid, coloured by how many times each square toppled. Brighter means more.</p>
+
+      <figure class="fig"><img src="/img/sand-counts.png" width="1040" height="512" alt="Two avalanches side by side. Left, the sandpile: flat terraces of solid colour nested inside each other, brightest in the middle. Right, the random sandpile: a speckled, noisy cloud with no clear steps.">
+        <figcaption>Left: the sandpile, where the middle toppled 6 times, once per wave. Right: the random sandpile (the busiest square toppled 64 times).</figcaption></figure>
+
+      <p>The sandpile's avalanche is a stack of terraces. That isn't a rendering choice; it's how the model works. An avalanche in the original sandpile happens in <em>waves</em>: the square where the grain landed topples, everything that becomes unstable topples once, and the wave dies out. Then, if the starting square has four grains again, it topples again and sends out the next wave. Within one wave no square topples twice. So the number of times a square topples is just the number of waves that reached it, and the picture is a set of nested regions.</p>
+
+      <p>Area counts each square once. Size counts it once per wave. On bigger grids the big avalanches have more waves stacked up:</p>
+
+      <div class="table-wrap"><table class="compact">
+        <thead><tr><th>Grid</th><th>Waves</th><th>Topplings per square covered</th></tr></thead>
+        <tbody><tr><td>64×64</td><td>9</td><td>3.6</td></tr><tr><td>128×128</td><td>13</td><td>5.2</td></tr><tr><td>256×256</td><td>21</td><td>7.6</td></tr><tr><td>512×512</td><td>32</td><td>11.2</td></tr></tbody>
+      </table></div>
+      <p class="note">Averages over the biggest 0.1% of avalanches on each grid (a separate run of a million grains per grid, 400,000 on the biggest).</p>
+
+      <p>The random sandpile re-topples too, more in fact, but it's smooth: noise rather than terraces, and its sizes collapse fine. In the original, how many waves stack up, and how far each one reaches, depends on more than the avalanche's area. Tebaldi, De Menech and Stella <a href="https://arxiv.org/abs/cond-mat/9903270">worked this out in 1999</a>: areas follow a clean power law, toppling counts don't follow any single one, and the biggest culprits are large avalanches that run into the edge of the grid and lose grains there. I came in not knowing that and measured my way to the same split, which was a nice way to learn it.</p>
+
+      <h2>What I take from it</h2>
+
+      <p>A straight line on a log-log plot is weak evidence. Every grid I ran gave me one, for both models. The useful tests are whether different system sizes collapse onto one curve, and whether different averages agree on one D. The random sandpile passes both. The famous one passes both for area and fails both for the thing everyone plots, the number of topplings.</p>
+
+      <p>So "sandpile avalanches follow a power law" is true for one way of measuring an avalanche and not for another, and the slope you'd quote depends on the grid. That's worth knowing before reaching for the sandpile to explain earthquakes or market crashes, where nobody gets to choose the grid.</p>
+
+      <p>The simulator is <a href="/js/sand.js">one small file</a> of plain JavaScript. Grains are dropped on uniformly random squares and the edges are open. Each pile was run for three grains per square before measuring, to forget its starting state, and I checked the average avalanche size against the exact answer above. The 1024×1024 grid got fewer grains than the others, so its numbers are noisier.</p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+  <script src="/js/sand.js"></script>
+  <script src="/js/sand-ui.js"></script>
+</body>
+</html>

@@ -434,3 +434,16 @@ article table.compact { min-width: 0; }
 .gs-panels figcaption b { color: var(--heading); font-weight: 600; }
 .gs-what { font-size: .82rem; color: var(--viz-ink); min-height: 1.3em; margin: .5rem 0 0; }
 @media (max-width: 480px) { .gs-panels { grid-template-columns: 1fr; } }
+
+/* sandpile post */
+.sp-panels { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; align-items: start; }
+.sp-panels figure { margin: 0; }
+.sp-panels .viz-chart { margin-top: 0; }
+#sp-sim { display: block; width: 100%; aspect-ratio: 1; border-radius: 4px; background: #121220; image-rendering: pixelated; cursor: crosshair; }
+.sp-panels figcaption { font-size: .75rem; color: var(--viz-muted); line-height: 1.4; margin-top: .3rem; }
+.sp-panels figcaption b { color: var(--heading); font-weight: 600; }
+#sp-fit .viz-stats { grid-template-columns: repeat(2, 1fr); }
+@media (max-width: 480px) { .sp-panels { grid-template-columns: 1fr; } }
+.fig { margin: 1.5rem 0; }
+.fig img { display: block; width: 100%; height: auto; border-radius: var(--radius); image-rendering: pixelated; }
+.fig figcaption { font-size: .8rem; color: var(--viz-muted, #8a8aa0); line-height: 1.45; margin-top: .4rem; }
