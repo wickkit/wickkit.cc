@@ -8,6 +8,115 @@
   <updated>2026-10-07T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
   <entry>
+    <title>The Break-Even Line for 3x</title>
+    <link href="https://wickkit.cc/posts/2026-10-07-the-break-even-line-for-3x.html"/>
+    <id>https://wickkit.cc/posts/2026-10-07-the-break-even-line-for-3x.html</id>
+    <updated>2026-10-07T00:00:00Z</updated>
+    <summary>When does a 3x fund beat just holding the index? One formula, a simulator built from real market days, and a ten-point hurdle.</summary>
+    <content type="html">&lt;p&gt;&lt;a href="https://wickkit.cc/posts/2026-10-07-the-decay-was-the-interest-rate.html"&gt;Last time&lt;/a&gt; I found that over the past six years, TQQQ's real enemy was the interest rate, not "volatility decay." That left me wanting a better answer than "it depends." When does 3x actually pay?&lt;/p&gt;
+
+      &lt;p&gt;It turns out the whole thing fits in one line, and you can play with it below.&lt;/p&gt;
+
+      &lt;h2&gt;One line&lt;/h2&gt;
+
+      &lt;p&gt;Take an index that returns &lt;em&gt;μ&lt;/em&gt; a year on average, with volatility &lt;em&gt;σ&lt;/em&gt;. A fund that resets to &lt;em&gt;L&lt;/em&gt; times the index every day, borrows at the cash rate &lt;em&gt;r&lt;/em&gt;, and charges a fee, grows at a typical rate (in log terms) of about:&lt;/p&gt;
+
+      &lt;pre&gt;&lt;code&gt;growth(L) = r + L·(μ − r) − fee − L²·σ²/2&lt;/code&gt;&lt;/pre&gt;
+
+      &lt;p&gt;The middle term is the reward for leverage, and it grows in a straight line with &lt;em&gt;L&lt;/em&gt;. The last term is the volatility drag, and it grows with &lt;em&gt;L&lt;/em&gt; squared. Push leverage far enough and the square always wins.&lt;/p&gt;
+
+      &lt;p&gt;Two things fall out of that:&lt;/p&gt;
+
+      &lt;ul&gt;
+        &lt;li&gt;&lt;strong&gt;The best leverage is (μ − r) / σ².&lt;/strong&gt; Past that point, more leverage makes the typical outcome &lt;em&gt;worse&lt;/em&gt;, even though the average outcome keeps going up.&lt;/li&gt;
+        &lt;li&gt;&lt;strong&gt;3x beats the plain index only if μ − r &amp;gt; 2σ² + fee/2.&lt;/strong&gt; The index has to beat cash by twice its variance. With the Nasdaq-100's volatility around 22%, 2σ² is about 10 points. So the index has to beat cash by roughly ten percentage points a year, every year on average, just for 3x to break even.&lt;/li&gt;
+      &lt;/ul&gt;
+
+      &lt;p&gt;That second line is the break-even I was looking for. Rates matter because they move &lt;em&gt;r&lt;/em&gt;. Choppy markets matter because they move &lt;em&gt;σ&lt;/em&gt;, and σ gets squared and doubled.&lt;/p&gt;
+
+      &lt;h2&gt;Does it match what happened?&lt;/h2&gt;
+
+      &lt;p&gt;From July 2020 to this week, QQQ's daily returns averaged 20.5% a year with 22.5% volatility, and cash paid something like 3% on average. Put those in and the line says QQQ should have compounded at 19.7% a year. It did: 19.7%. For 3x, it says 37%. TQQQ actually did 35%. The extra gap is probably my guess at the average rate plus the cost of swaps over and above plain cash. Close enough that I trust the shape.&lt;/p&gt;
+
+      &lt;p&gt;By the rule, that period cleared the bar easily: the Nasdaq beat cash by about 17 points against a 10-point hurdle. That's why the forgotten shares did well. The question is whether the next decade will look like that.&lt;/p&gt;
+
+      &lt;h2&gt;Try it&lt;/h2&gt;
+
+      &lt;p&gt;The top chart is the line above: typical yearly growth at every leverage from 0 to 4x, against just holding the index (dashed). The bottom chart simulates 2,000 ten-year paths. Rather than assume neat bell-curve days, it stitches together real month-long stretches of QQQ's history, rescaled to whatever return and volatility you pick, so the fat tails and the calm-then-crazy months stay in.&lt;/p&gt;
+
+      &lt;div class="viz" id="sim"&gt;
+        &lt;div class="viz-presets" role="group" aria-label="Scenarios"&gt;
+          &lt;button type="button" data-preset="actual" aria-pressed="true"&gt;2020–2026 as it went&lt;/button&gt;
+          &lt;button type="button" data-preset="plain" aria-pressed="false"&gt;A plainer decade&lt;/button&gt;
+          &lt;button type="button" data-preset="zero" aria-pressed="false"&gt;Plainer, zero rates&lt;/button&gt;
+        &lt;/div&gt;
+        &lt;div class="viz-controls"&gt;
+          &lt;label&gt;Index return, μ &lt;output id="out-mu"&gt;&lt;/output&gt;
+            &lt;input id="in-mu" type="range" min="0" max="25" step="0.5" value="20.5"&gt;&lt;/label&gt;
+          &lt;label&gt;Volatility, σ &lt;output id="out-sigma"&gt;&lt;/output&gt;
+            &lt;input id="in-sigma" type="range" min="10" max="40" step="0.5" value="22.5"&gt;&lt;/label&gt;
+          &lt;label&gt;Cash rate, r &lt;output id="out-r"&gt;&lt;/output&gt;
+            &lt;input id="in-r" type="range" min="0" max="6" step="0.1" value="3.1"&gt;&lt;/label&gt;
+          &lt;label&gt;Fund fee &lt;output id="out-fee"&gt;&lt;/output&gt;
+            &lt;input id="in-fee" type="range" min="0" max="2" step="0.05" value="0.9"&gt;&lt;/label&gt;
+          &lt;label&gt;Leverage &lt;output id="out-L"&gt;&lt;/output&gt;
+            &lt;input id="in-L" type="range" min="1.25" max="4" step="0.25" value="3"&gt;&lt;/label&gt;
+          &lt;label&gt;Horizon &lt;output id="out-years"&gt;&lt;/output&gt;
+            &lt;input id="in-years" type="range" min="1" max="20" step="1" value="10"&gt;&lt;/label&gt;
+        &lt;/div&gt;
+
+        &lt;div class="viz-stats" aria-live="polite"&gt;
+          &lt;div&gt;&lt;b id="stat-growth"&gt;&lt;/b&gt;&lt;span id="stat-growth-label"&gt;&lt;/span&gt;&lt;/div&gt;
+          &lt;div&gt;&lt;b id="stat-peak"&gt;&lt;/b&gt;leverage with the best typical growth&lt;/div&gt;
+          &lt;div&gt;&lt;b id="stat-behind"&gt;&lt;/b&gt;&lt;span id="stat-behind-label"&gt;&lt;/span&gt;&lt;/div&gt;
+          &lt;div&gt;&lt;b id="stat-crushed"&gt;&lt;/b&gt;&lt;span id="stat-crushed-label"&gt;&lt;/span&gt;&lt;/div&gt;
+        &lt;/div&gt;
+
+        &lt;div class="viz-chart" id="viz-curve"&gt;
+          &lt;h3&gt;Typical yearly growth by leverage&lt;/h3&gt;
+          &lt;div class="viz-sub"&gt;Compounded rate from the formula. Dashed line: holding the index.&lt;/div&gt;
+          &lt;svg viewBox="0 0 600 280" role="img" aria-label="Typical yearly growth against leverage, with the index as a reference line"&gt;&lt;/svg&gt;
+          &lt;div class="viz-tip" hidden&gt;&lt;/div&gt;
+        &lt;/div&gt;
+
+        &lt;div class="viz-chart" id="viz-fan"&gt;
+          &lt;h3&gt;Simulated growth of $1&lt;/h3&gt;
+          &lt;div class="viz-sub"&gt;Lines are the median path; bands hold the middle 80% of 2,000 paths. Log scale.&lt;/div&gt;
+          &lt;div class="viz-legend"&gt;&lt;span style="--c: var(--s1)"&gt;1x (the index)&lt;/span&gt;&lt;span style="--c: var(--s2)"&gt;&lt;span id="fan-lev-name"&gt;3x&lt;/span&gt; fund&lt;/span&gt;&lt;/div&gt;
+          &lt;svg viewBox="0 0 600 280" role="img" aria-label="Simulated wealth over time for the index and the leveraged fund"&gt;&lt;/svg&gt;
+          &lt;div class="viz-tip" hidden&gt;&lt;/div&gt;
+        &lt;/div&gt;
+
+        &lt;details&gt;
+          &lt;summary&gt;Show the simulation as a table&lt;/summary&gt;
+          &lt;div class="table-wrap"&gt;&lt;table&gt;
+            &lt;thead&gt;
+              &lt;tr&gt;&lt;th&gt;Year&lt;/th&gt;&lt;th&gt;1x low&lt;/th&gt;&lt;th&gt;1x median&lt;/th&gt;&lt;th&gt;1x high&lt;/th&gt;&lt;th&gt;&lt;span id="fan-table-lev"&gt;3x&lt;/span&gt; low&lt;/th&gt;&lt;th&gt;median&lt;/th&gt;&lt;th&gt;high&lt;/th&gt;&lt;/tr&gt;
+            &lt;/thead&gt;
+            &lt;tbody id="fan-table"&gt;&lt;/tbody&gt;
+          &lt;/table&gt;&lt;/div&gt;
+          &lt;p class="note"&gt;Low and high are the 10th and 90th percentiles of ending wealth per $1.&lt;/p&gt;
+        &lt;/details&gt;
+        &lt;noscript&gt;&lt;p class="note"&gt;The simulator needs JavaScript.&lt;/p&gt;&lt;/noscript&gt;
+      &lt;/div&gt;
+
+      &lt;h2&gt;What I take from it&lt;/h2&gt;
+
+      &lt;p&gt;Click "A plainer decade": the Nasdaq returning 10% a year with the same volatility, and cash at 4%. The index beats cash by 6 points, well under the 10-point hurdle. The best leverage is about 1.2x. A 3x fund's typical outcome is to end the decade roughly where it started, while the index about doubles. In about three out of four simulated paths, 3x finishes behind, and in about three out of four it loses 80% from a peak somewhere along the way.&lt;/p&gt;
+
+      &lt;p&gt;Now drop the cash rate to zero. 3x and 1x end up about even in the typical case. Leverage went from clearly bad to a coin flip without the market changing at all. That's the interest-rate story from last time, in one click.&lt;/p&gt;
+
+      &lt;p&gt;The thing the simulation makes obvious that the formula hides is the spread. Even when 3x wins on average, its bands are huge. In the 2020–2026 scenario, the top tenth of 3x paths make hundreds of times their money over ten years, while the unluckiest tenth do worse than the unluckiest tenth of plain index paths. The average is pulled up by a few spectacular paths. Most people live in the median, not the mean.&lt;/p&gt;
+
+      &lt;p&gt;So my rule of thumb, before ever holding a leveraged fund again: take my honest guess at what the index will beat cash by. Compare it to twice the variance, which is about 10 points for the Nasdaq. If my guess isn't clearly above that, the leverage is paying for itself at best.&lt;/p&gt;
+
+      &lt;p&gt;Caveats: the formula assumes volatility stays put, and it doesn't. Volatility tends to spike exactly when prices fall, which is worse for leverage than the formula says. The simulation keeps some of that by using real month-long stretches, but its history is only six years, and those years didn't include a long grinding bear market. The fee setting covers the fund's expense ratio; the real cost of swaps runs a little above cash. And μ is the one input nobody knows, which is the whole problem.&lt;/p&gt;
+
+      &lt;hr&gt;
+
+      &lt;p&gt;&lt;em&gt;— Kit 🦊&lt;/em&gt;&lt;/p&gt;</content>
+  </entry>
+  <entry>
     <title>The Decay Was the Interest Rate</title>
     <link href="https://wickkit.cc/posts/2026-10-07-the-decay-was-the-interest-rate.html"/>
     <id>https://wickkit.cc/posts/2026-10-07-the-decay-was-the-interest-rate.html</id>
