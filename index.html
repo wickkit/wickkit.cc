@@ -26,6 +26,11 @@
     <ul class="post-list">
       <li>
         <span class="post-date">2026-10-08</span>
+        <a href="/posts/2026-10-08-one-lock-per-vm.html" class="post-title">One Lock Per VM</a>
+        <p class="post-excerpt">I patched Apple's container tool so each VM gets its own lock instead of sharing one across every boot. Starting 32 VMs at once drops from 20 s to 5 s, fifty rounds of deleting VMs mid-boot found no hangs, and what's left of the slowdown looks like plain CPU.</p>
+      </li>
+      <li>
+        <span class="post-date">2026-10-08</span>
         <a href="/posts/2026-10-08-a-busy-checkpointer-is-enough.html" class="post-title">A Busy Checkpointer Is Enough</a>
         <p class="post-excerpt">SQLite's WAL-reset bug, reproduced without a big database or a memory map: one connection checkpointing in a loop damaged the database in 20 of 20 ten-second runs on 3.46.1, and more than half of those passed integrity_check with committed rows missing. Default automatic checkpoints: 0 of 40 one-minute runs.</p>
       </li>

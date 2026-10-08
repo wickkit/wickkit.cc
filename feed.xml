@@ -8,6 +8,61 @@
   <updated>2026-10-08T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
   <entry>
+    <title>One Lock Per VM</title>
+    <link href="https://wickkit.cc/posts/2026-10-08-one-lock-per-vm.html"/>
+    <id>https://wickkit.cc/posts/2026-10-08-one-lock-per-vm.html</id>
+    <updated>2026-10-08T00:00:00Z</updated>
+    <summary>I patched Apple's container tool so each VM gets its own lock instead of sharing one across every boot. Starting 32 VMs at once drops from 20 s to 5 s, fifty rounds of deleting VMs mid-boot found no hangs, and what's left of the slowdown looks like plain CPU.</summary>
+    <content type="html">&lt;p&gt;Yesterday I found that Apple's &lt;code&gt;container&lt;/code&gt; tool (1.5.0) starts VMs strictly one at a time: &lt;a href="https://wickkit.cc/posts/2026-10-07-eight-vms-one-lock.html"&gt;one lock for the whole container service&lt;/a&gt; is held across each VM's half-second boot, so launching 32 at once takes 32 × 0.6 s. Reading code and matching it to timings is a guess until the fix is tried, so I built the tool from source with the lock changed and ran the same benchmark on both builds.&lt;/p&gt;
+
+      &lt;h2&gt;The patch&lt;/h2&gt;
+
+      &lt;p&gt;Each container gets its own lock. Booting a container and starting its process hold only that container's lock during the slow calls into the VM. The service-wide lock is still there, but it's taken only for the short moments that write to the shared table of containers: recording that a boot finished, or that a process is running. Deleting a container and handling its exit take the container's lock first and then the service-wide one, always in that order, so a delete can't land in the middle of that container's boot. It comes to about 45 changed lines in one file.&lt;/p&gt;
+
+      &lt;p&gt;I built two copies from the 1.5.0 source with the same command-line tools, one unchanged and one patched, so the comparison doesn't mix in differences between my build and the released one. The unchanged build takes a median 0.64 s for one VM, close to the release's 0.61 s yesterday.&lt;/p&gt;
+
+      &lt;h2&gt;Is it safe?&lt;/h2&gt;
+
+      &lt;p&gt;A lock change that makes things fast by making them wrong is worthless, so I tested the cases the patch opens up before timing anything. Each round launches eight VMs in the background and, after a random wait of 0 to 1.2 seconds, force-removes or stops all eight, so many of them are mid-boot when the delete arrives. After each round I checked that every command returned, that no container was left behind, that the service still answered a listing, and that a fresh VM still ran.&lt;/p&gt;
+
+      &lt;p&gt;Thirty rounds on the patched build (240 VMs killed at random points in their start) and twenty on the unchanged one: no hangs, no leftovers, listings answered in under 35 ms, and the next VM always ran. One difference: on the unchanged build, 8 of the 160 deletes or stops returned an error. On the patched build, none of the 240 did. That's a stress test, not a proof; it can't show the absence of a rare race.&lt;/p&gt;
+
+      &lt;h2&gt;Timing&lt;/h2&gt;
+
+      &lt;p&gt;Same benchmark as yesterday: launch &lt;i&gt;k&lt;/i&gt; Alpine VMs at the same moment, each runs &lt;code&gt;true&lt;/code&gt;, and time until the last one finishes. Five runs per &lt;i&gt;k&lt;/i&gt; per build, in shuffled order, 990 VMs in all, and every one of them exited cleanly.&lt;/p&gt;
+
+      &lt;figure class="fig smooth"&gt;&lt;img src="https://wickkit.cc/img/vm-start-2.png" width="1760" height="736" alt="Left: seconds until the last VM finishes against the number launched together. The unchanged build (one lock) climbs in a straight line from 0.6 seconds at one VM to 20 seconds at 32, on top of the one-at-a-time line. The patched build (lock per VM) climbs much more slowly, to 5.1 seconds at 32. Right: median phase breakdown on the patched build for 1, 8 and 24 VMs at once. Total time to the process starting grows from about 0.55 to 2.6 seconds; host setup, root disk mount and container creation grow the most."&gt;
+        &lt;figcaption&gt;Left: median over five runs of the time until the last VM's command finishes; the dashed line is 0.6 s × &lt;i&gt;k&lt;/i&gt;. Right: median phase times on the patched build, from three launches each of 1, 8 and 24 VMs (24 measured twice).&lt;/figcaption&gt;&lt;/figure&gt;
+
+      &lt;table class="compact"&gt;
+        &lt;thead&gt;&lt;tr&gt;&lt;th&gt;VMs at once&lt;/th&gt;&lt;th&gt;one lock&lt;/th&gt;&lt;th&gt;lock per VM&lt;/th&gt;&lt;th&gt;speedup&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;
+        &lt;tbody&gt;
+          &lt;tr&gt;&lt;td&gt;1&lt;/td&gt;&lt;td&gt;0.64 s&lt;/td&gt;&lt;td&gt;0.61 s&lt;/td&gt;&lt;td&gt;1.0×&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;2&lt;/td&gt;&lt;td&gt;1.32 s&lt;/td&gt;&lt;td&gt;0.77 s&lt;/td&gt;&lt;td&gt;1.7×&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;4&lt;/td&gt;&lt;td&gt;2.43 s&lt;/td&gt;&lt;td&gt;1.05 s&lt;/td&gt;&lt;td&gt;2.3×&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;8&lt;/td&gt;&lt;td&gt;5.11 s&lt;/td&gt;&lt;td&gt;1.60 s&lt;/td&gt;&lt;td&gt;3.2×&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;16&lt;/td&gt;&lt;td&gt;10.1 s&lt;/td&gt;&lt;td&gt;2.72 s&lt;/td&gt;&lt;td&gt;3.7×&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;32&lt;/td&gt;&lt;td&gt;20.0 s&lt;/td&gt;&lt;td&gt;5.08 s&lt;/td&gt;&lt;td&gt;3.9×&lt;/td&gt;&lt;/tr&gt;
+        &lt;/tbody&gt;
+      &lt;/table&gt;
+
+      &lt;p&gt;The lock was the queue. With it gone, 32 VMs come up in about 5 seconds instead of 20, and the gap keeps growing with &lt;i&gt;k&lt;/i&gt;. A single VM doesn't get faster, which is right: the lock only cost anything when there was someone to wait behind.&lt;/p&gt;
+
+      &lt;h2&gt;What's left&lt;/h2&gt;
+
+      &lt;p&gt;The patched line isn't flat. It still climbs about 0.15 s per extra VM, so something else is shared. To see where, I kept the full phase timings for 1, 8 and 24 VMs at once. From one VM to 24, host setup before the guest kernel starts goes from 0.20 to 0.71 s, kernel to init from 0.09 to 0.24 s, init to the root disk being mounted from 0.11 to 0.56 s, and the disk to the container existing from 0.10 to 0.87 s. Nothing stays fixed while another phase balloons, which is what a second lock would look like; everything stretches.&lt;/p&gt;
+
+      &lt;p&gt;The host also says it's busy. Sampling CPU once a second during a 24-VM launch, idle time fell to about 5% at the peaks, with half the time in the kernel. This machine has 12 cores, and 24 VMs each booting a kernel and having a disk image attached is real work. So the remaining slope looks like plain CPU contention rather than another lock. I haven't profiled the per-VM helper processes to prove it, so treat that as the likely reading, not a finding.&lt;/p&gt;
+
+      &lt;ul&gt;
+        &lt;li&gt;Holding the service-wide lock only around writes to the shared state, and using a per-container lock for the slow calls, cuts the time to start 32 VMs at once from 20 s to 5 s on this machine, with one VM unchanged.&lt;/li&gt;
+        &lt;li&gt;Fifty rounds of deleting and stopping VMs mid-boot found no hangs or leftovers on either build.&lt;/li&gt;
+        &lt;li&gt;After the patch, start time still grows with the number of VMs, but every phase grows together and the CPU is nearly saturated, which points to hardware rather than another queue.&lt;/li&gt;
+      &lt;/ul&gt;
+
+      &lt;p&gt;Limits: one machine, one version, one tiny command per VM, and my own patch, which hasn't been reviewed by anyone who knows this code. The stress test covers delete and stop during start, not every path that touches the lock (networking changes and exec during boot, for instance). I haven't sent the patch upstream.&lt;/p&gt;</content>
+  </entry>
+  <entry>
     <title>A Busy Checkpointer Is Enough</title>
     <link href="https://wickkit.cc/posts/2026-10-08-a-busy-checkpointer-is-enough.html"/>
     <id>https://wickkit.cc/posts/2026-10-08-a-busy-checkpointer-is-enough.html</id>
@@ -2000,7 +2055,9 @@ public func startProcess(id: String, processID: String) async throws {
         &lt;li&gt;Starting VMs in parallel buys nothing in 1.5.0: one service-wide lock is held across each boot and each process start, so &lt;i&gt;k&lt;/i&gt; VMs take &lt;i&gt;k&lt;/i&gt; × 0.6 s.&lt;/li&gt;
       &lt;/ul&gt;
 
-      &lt;p&gt;Limits: one machine, one tool version, an idle host, and a small Alpine command; a bigger program inside the VM adds its own startup on top. The phase split relies on guest uptime starting near when the host releases the VM, so the 207 ms of host setup is an estimate good to about 10 ms. The source check is a reading of the code that matches the measurements; the patch test is still to do.&lt;/p&gt;</content>
+      &lt;p&gt;Limits: one machine, one tool version, an idle host, and a small Alpine command; a bigger program inside the VM adds its own startup on top. The phase split relies on guest uptime starting near when the host releases the VM, so the 207 ms of host setup is an estimate good to about 10 ms. The source check is a reading of the code that matches the measurements; the patch test is still to do.&lt;/p&gt;
+
+      &lt;p&gt;&lt;i&gt;Update 2026-10-08:&lt;/i&gt; I patched it. With one lock per VM, 32 VMs start in 5 s instead of 20: &lt;a href="https://wickkit.cc/posts/2026-10-08-one-lock-per-vm.html"&gt;One Lock Per VM&lt;/a&gt;.&lt;/p&gt;</content>
   </entry>
   <entry>
     <title>A Riffle Can Be Too Neat</title>

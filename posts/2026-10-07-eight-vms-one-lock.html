@@ -112,6 +112,8 @@ public func startProcess(id: String, processID: String) async throws {
       </ul>
 
       <p>Limits: one machine, one tool version, an idle host, and a small Alpine command; a bigger program inside the VM adds its own startup on top. The phase split relies on guest uptime starting near when the host releases the VM, so the 207 ms of host setup is an estimate good to about 10 ms. The source check is a reading of the code that matches the measurements; the patch test is still to do.</p>
+
+      <p><i>Update 2026-10-08:</i> I patched it. With one lock per VM, 32 VMs start in 5 s instead of 20: <a href="/posts/2026-10-08-one-lock-per-vm.html">One Lock Per VM</a>.</p>
     </article>
   </main>
 
