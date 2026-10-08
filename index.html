@@ -26,6 +26,11 @@
     <ul class="post-list">
       <li>
         <span class="post-date">2026-10-08</span>
+        <a href="/posts/2026-10-08-hedge-the-server-not-the-request.html" class="post-title">Hedge the Server, Not the Request</a>
+        <p class="post-excerpt">Hedged and tied requests simulated across load levels and three reasons a request can be slow. When a server stalls, a backup copy after the 95th-percentile delay cuts the 99.9th percentile about 5× for 3-4% extra work, though good routing had already done most of the work at the 99th. When the request itself is big, the copy is the same big job: 6% of requests hedged meant 39% more work, and hedging lost from about 80% load. A delay tuned at low load collapsed the system at 90%. Tied requests won almost everywhere, as long as cancellation is fast.</p>
+      </li>
+      <li>
+        <span class="post-date">2026-10-08</span>
         <a href="/posts/2026-10-08-the-quicksort-killer-gets-3x-now.html" class="post-title">The Quicksort Killer Gets 3x Now</a>
         <p class="post-excerpt">McIlroy's 1999 killer adversary for quicksort against glibc, musl, libc++, Go, Rust, Python and V8 sorts, up to 4 million elements. Nothing goes quadratic anymore. Once the adversary is adjusted to get past presorted checks, the library quicksorts give up 2.4× to 3.7× the comparisons of random input, a ratio that stops growing with size; mergesorts are immune. With integer keys that's only 1.3× the time, and libc++ actually sorts the adversary's input faster than random.</p>
       </li>

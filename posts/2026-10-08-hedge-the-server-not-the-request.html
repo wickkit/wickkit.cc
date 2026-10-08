@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hedge the Server, Not the Request — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/den.html">den</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+
+    <article>
+      <h1>Hedge the Server, Not the Request</h1>
+      <div class="meta">2026-10-08 · Kit Wickham</div>
+
+      <p>A hedged request is the simplest tail-latency trick there is: if a request hasn't come back by the time 95% of requests normally have, send a copy to another server and take whichever answer arrives first. Dean and Barroso's "The Tail at Scale" (2013) made it famous with a striking number: in a Google benchmark reading 1,000 keys from BigTable, hedging after 10 ms cut the 99.9th-percentile latency from 1,800 ms to 74 ms for only 2% more requests. The same paper describes <em>tied requests</em>: send the request to two servers at once, and whichever starts working on it first tells the other to drop its copy.</p>
+
+      <p>"Only 2% more requests" is the part I wanted to test. A hedge is extra load, and extra load is exactly what makes queues slow. So I simulated it across load levels and across three different reasons a request can be slow. The short answer: <b>it depends almost entirely on where the slowness lives.</b> If the server is slow (a stall, a GC pause, a noisy neighbor), a hedge is cheap and cuts the deep tail about 5×. If the request itself is big, the hedge is a second copy of the same big job, it costs far more than its share of requests suggests, and above about 80% load it makes things worse. A hedge delay tuned when things are quiet turns into a collapse at 90% load. Tied requests were the best option almost everywhere.</p>
+
+      <h2>The setup</h2>
+
+      <p>Ten servers, each a first-come-first-served queue, random (Poisson) arrivals. Time is measured in units of the average request's service time. A new request goes to the less busy of two random servers ("two choices"), and so does a hedge, never to the server already holding the request. When the first copy finishes, the other is cancelled at once, whether it's still waiting or already running. Each point is 4 runs of a million requests (the first 100,000 discarded), and "load" means load from the requests alone, before any copies.</p>
+
+      <p>Three worlds, differing only in why a request is slow:</p>
+      <ul>
+        <li><b>noise</b>: every attempt takes an independent, exponentially distributed time, so a copy gets a fresh roll of the dice. This is the world hedging is designed for.</li>
+        <li><b>stalls</b>: request sizes are exponential and a copy has the same size, but each server stalls 2% of the time, for stretches averaging 50 service times, during which it runs at 1/20 speed.</li>
+        <li><b>big jobs</b>: no stalls, but request sizes are very uneven (a two-phase mix with squared coefficient of variation 10: most requests small, a few dozens of times bigger). A copy is the same big job.</li>
+      </ul>
+
+      <p>Strategies: no hedging; hedging after a fixed delay equal to the 95th percentile of unhedged latency measured at the same load; the same, but with the 95th percentile measured at 10% load and then left alone (what happens when someone tunes it once on a quiet day); hedging after a <em>live</em> 95th percentile of the last 2,000 responses; the quiet-day delay plus a token bucket allowing hedges on at most 5% of requests (burst of 10); and tied requests.</p>
+
+      <p>Checks before trusting it. With random routing and no hedging, each server is a textbook M/M/1 queue: at 90% load the mean latency came out 10.07 ± 0.05 against 10, the p99 47.1 ± 0.6 against 46.1, and at 30% load the mean was 1.431 against 1.429. At near-zero load, hedging after 1 time unit in the noise world has a closed form: p99 2.796 against 2.803, with 36.83% of requests hedged against e<sup>−1</sup> = 36.79%. And two-choice routing on 1,000 servers matches the mean-field formula: mean latency 2.618 ± 0.005 against 2.614 at 90% load, 1.265 against 1.266 at 50%.</p>
+
+      <p>One bug caught on the way: in my first version of tied requests, when both chosen servers were idle, the second copy started before the first copy's cancellation could reach it, so at low load both ran to the end. Tied requests looked great and did up to 73% extra work. Everything below is from the fixed code.</p>
+
+      <h2>The results</h2>
+
+      <figure class="fig smooth"><img src="/img/hedging.png" width="1800" height="690" alt="Two panels, tail latency with each strategy divided by tail latency with no hedging, on a log scale, against load from 10% to 95%, all with two-choice routing. Left, servers that stall, 99.9th percentile: hedging after the 95th percentile (fixed at that load, fixed at 10% load, or live) holds at 0.21 to 0.23 from 10% to 70% load, then rises to 0.34-0.56 at 80%; the delay fixed at 10% load jumps off the chart (81 times worse) at 90%, while the other two reach 0.45-0.50 at 90% and 0.55-0.78 at 95%. Tied requests start at 0.89 at 10% load and fall to 0.31 at 70-80%, 0.37 at 90%, 0.54 at 95%. The 5% budget line starts at 0.46 and rises to about 1 at 90%. Right, very uneven request sizes, 99th percentile: the hedging lines dip to 0.78-0.82 at 30-50% load, cross 1 around 70-80%, and climb: the quiet-day delay to 3.8 at 80% and off the chart at 90%, the per-load delay to 1.5 at 90% and 3.3 at 95%, the live delay to 1.17 and 1.24. The budget line stays at 1.02 to 1.11 until 1.32 at 95%. Tied requests fall steadily from 0.95 at 10% to 0.58 at 80% and end at 0.68 at 95%."></figure>
+      <p class="caption">Each line is tail latency divided by tail latency with no hedging, at the same load, with two-choice routing. Below the dotted line is better. 4 runs of 900,000 measured requests per point.</p>
+
+      <div class="table-wrap"><table class="compact">
+        <thead><tr><th>Load</th><th>No hedge</th><th>Hedge at p95</th><th>Extra work</th><th>Tied</th></tr></thead>
+        <tbody>
+          <tr><td colspan="5"><b>stalls</b>, p99.9</td></tr>
+          <tr><td>10%</td><td>35.7</td><td>0.21×</td><td>4%</td><td>0.89×</td></tr>
+          <tr><td>50%</td><td>40.6</td><td>0.21×</td><td>4%</td><td>0.42×</td></tr>
+          <tr><td>70%</td><td>49.5</td><td>0.22×</td><td>3%</td><td>0.31×</td></tr>
+          <tr><td>90%</td><td>68.5</td><td>0.50×</td><td>1%</td><td>0.37×</td></tr>
+          <tr><td colspan="5"><b>big jobs</b>, p99</td></tr>
+          <tr><td>10%</td><td>17.6</td><td>0.95×</td><td>39%</td><td>0.95×</td></tr>
+          <tr><td>50%</td><td>30.1</td><td>0.78×</td><td>17%</td><td>0.67×</td></tr>
+          <tr><td>70%</td><td>39.2</td><td>0.85×</td><td>10%</td><td>0.60×</td></tr>
+          <tr><td>90%</td><td>59.2</td><td>1.51×</td><td>4%</td><td>0.59×</td></tr>
+          <tr><td colspan="5"><b>noise</b>, p99</td></tr>
+          <tr><td>10%</td><td>4.7</td><td>0.83×</td><td>0%</td><td>0.99×</td></tr>
+          <tr><td>50%</td><td>5.7</td><td>0.83×</td><td>0%</td><td>0.87×</td></tr>
+          <tr><td>90%</td><td>10.5</td><td>0.93×</td><td>0%</td><td>0.74×</td></tr>
+        </tbody>
+      </table></div>
+      <p class="caption">"No hedge" in service times; the other columns relative to it. Hedge at p95: delay is the unhedged 95th percentile at that load. Extra work: server time spent beyond one copy per request. Tied requests with instant cancellation do no extra work.</p>
+
+      <h3>Stalls: cheap and large</h3>
+
+      <p>When the slowness is a stalled server, a copy elsewhere doesn't inherit it. Hedging at p95 cut the 99.9th percentile to about a fifth (35.7 to about 7.5 service times at 10% load) all the way up to 70% load, while hedging 5-6% of requests and doing 3-4% more work. The work is small because the copy is a normal-sized request on a healthy server, and the stalled original gets cancelled.</p>
+
+      <p>The surprise was how much of the textbook win is really load balancing. With purely random routing, hedging looks even better: 0.07-0.09× at the 99.9th percentile up to 50% load. But random routing without hedging is also 2.7× (at 10% load) to 4.7× (at 90%) worse at p99.9 than two choices. Two choices already steers new work away from a stalled server, because its queue grows. At the 99th percentile that is nearly all of it: on top of two choices, hedging bought only 4-14% up to 70% load, and made p99 17% and 32% <em>worse</em> at 80% and 90%. What two choices can't fix is the request already being served when the stall begins. That request is the 99.9th percentile, and that's what the hedge rescues.</p>
+
+      <p>It depends on the stall being longer than the hedge delay. With the live-p95 hedge at 30% and 70% load, stalls averaging 2 service times gave 0.87×, 5 gave 0.59-0.65×, 20 gave 0.30-0.35×, 50 gave 0.22-0.23×, and 200 or more gave 0.12-0.19×.</p>
+
+      <h3>Big jobs: the hedge is the same big job</h3>
+
+      <p>When the slowness is in the request, the requests that cross the hedge delay are the big ones, and a copy is just as big. At 10% load, hedging 6.3% of requests added <b>39%</b> to the servers' work. The gain was small (0.78-0.82× at 30-50% load, from copies that skip a long queue), and from about 80% load on the extra work cost more than it saved: 1.01× at 80%, 1.51× at 90%, 3.3× at 95%. At 95% the delay, measured without hedging, was crossed by 49% of requests, because the hedges themselves pushed latency up and more requests crossed the delay. That's a feedback loop, and hedging is supposed to fire on the slowest 5%.</p>
+
+      <p>The noise world is the opposite extreme: there a hedge costs nothing at all. With exponential times the remaining time of a running request is just as random as a fresh one, so racing two copies and cancelling the loser does exactly the same work on average (0.998 of one copy in the zero-load check). Aggressive hedging can't hurt there. It's the best case, and it's the one the intuition comes from.</p>
+
+      <h3>The delay tuned on a quiet day</h3>
+
+      <p>A fixed delay set from the 95th percentile at 10% load did as well as anything at low load and then fell off a cliff. Under stalls it hedged 22% of requests at 70% load, 50% at 80% (p99.9 0.56×), and every request at 90%, where the copies' extra 15% of work pushed the servers past capacity: the 99.9th percentile went to 81× worse, with queues growing until the run ended. With big jobs it was 1.09× at 70%, 3.8× at 80% and 189× at 90%.</p>
+
+      <p>The live delay avoided that, because it rises with load and keeps the hedge rate near 5-10%. It matched the fixed per-load delay where hedging helps and limited the damage where it doesn't: with big jobs, 1.17× at 90% and 1.24× at 95% instead of 1.51× and 3.3×.</p>
+
+      <h3>Budgets: right idea, easy to size wrong</h3>
+
+      <p>A token bucket that caps hedges at 5% of requests did prevent the collapse: the quiet-day delay with a 5% budget stayed at or under 1.01× at 90% load in the stall world. But it gave away most of the benefit: 0.46× at 10% load and 0.80× at 50%, against 0.21× without it. A p95 delay means about 5% of requests want a hedge on an ordinary day, so a 5% budget is empty most of the time, and stalls make the demand bursty: a stalled server holds several requests that all want a hedge at once. A 15% budget kept the full benefit up to 50% load (0.21-0.23×) and was still harmless at 90% (0.98×). A budget should be a multiple of the hedge rate you expect, not equal to it.</p>
+
+      <h3>Tied requests</h3>
+
+      <p>Tied requests send to two servers, and the first to start tells the other to drop its copy, so with instant cancellation they never do extra work. In the big-jobs world they were the best strategy, or tied for best, at every load: 0.77× at 30%, 0.58-0.60× from 70% to 90%, 0.68× at 95%. Under stalls they were weaker than hedging at low load (0.89× at 10%: with two idle servers the request just starts on one of them, and if that one stalls there is no backup), but better from 80% up (0.31× at 80%, 0.37× at 90%). In a mixed world with both big jobs and stalls, tied requests gave 0.46-0.61× at the 99.9th percentile from 50% to 90% load, against 0.64-0.95× for the live-delay hedge, which also spent 4-14% extra work.</p>
+
+      <p>The catch is the cancellation. If it takes 0.1 service times to arrive, both copies sometimes start, and at 95% load in the stall world that duplicated work tipped the system over: p99 22× worse. Tied requests need servers that can tell each other quickly to drop work, which is a much bigger ask than a client-side timer.</p>
+
+      <h2>What I'd take from it</h2>
+      <ul>
+        <li>Hedge when the slowness is the server's fault: pauses, stalls, a bad host. Measure how much extra <em>work</em> hedges cause, not how many extra requests; with big requests the two differ by 6× (6% of requests, 39% of work).</li>
+        <li>Fix the routing first. Two choices did most of what hedging did at the 99th percentile; hedging's own contribution is the 99.9th.</li>
+        <li>Never use a hedge delay measured at a different load. Use a live percentile, and add a budget several times the expected hedge rate as a backstop.</li>
+        <li>If the servers can cancel each other's work quickly, tied requests beat hedging at high load in every world here.</li>
+      </ul>
+
+      <p>Caveats: ten servers, first-come-first-served queues, no network delay, instant and free cancellation (except in the delayed-tie test), and no fan-out. Dean and Barroso's 1,000-key benchmark is a fan-out, where one slow key holds up the whole read, so its 99.9th percentile is much more exposed to stalls than a single request is. The stall model is mine: 2% of the time at 1/20 speed. Shorter stalls give hedging less to rescue, as the stall-length numbers show.</p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+</body>
+</html>
