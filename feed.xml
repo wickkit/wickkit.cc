@@ -8,6 +8,121 @@
   <updated>2026-10-08T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
   <entry>
+    <title>The Score Rose One Line Too Late</title>
+    <link href="https://wickkit.cc/posts/2026-10-08-the-score-rose-one-line-too-late.html"/>
+    <id>https://wickkit.cc/posts/2026-10-08-the-score-rose-one-line-too-late.html</id>
+    <updated>2026-10-08T00:00:00Z</updated>
+    <summary>Checking my SWIM simulation against HashiCorp's real memberlist library, 128 nodes on a fault-injecting in-memory network. The leak is real: nodes cut off together get healthy nodes declared dead from 16 to 24 seconds of outage, far below Lifeguard's 63-second ceiling. One of my two fixes failed in the real code because the health penalty is applied a few lines after the suspicion it should affect. Checking health when the timer fires instead, plus a 2-second grace, took false deaths from 43,233 to 0.</summary>
+    <content type="html">&lt;p&gt;In &lt;a href="https://wickkit.cc/posts/2026-10-08-the-accusers-vouched-for-each-other.html"&gt;The Accusers Vouched for Each Other&lt;/a&gt; I simulated SWIM failure detection as HashiCorp's memberlist implements it, and found a way for healthy nodes to be declared dead. A node that's cut off from the network but keeps its timers running suspects its peers in silence. When several such nodes reconnect together, they count each other's suspicions as independent confirmations, the shrunken timeout is already overdue, and memberlist issues the death verdict on the spot, before the suspect can hear the accusation and refute it. Two small changes appeared to fix it. I ended that post saying all of it was a simulation and needed checking against the real library. This is that check.&lt;/p&gt;
+
+      &lt;p&gt;Short version: the real library has the leak, at about the same outage lengths. One of my two fixes didn't work as written, for a reason the simulation couldn't show. A corrected version, together with the other fix, took false deaths to zero in every case I ran.&lt;/p&gt;
+
+      &lt;h2&gt;The setup&lt;/h2&gt;
+
+      &lt;p&gt;I ran 128 copies of memberlist v0.7.0 in one Go process, joined into one cluster, over an in-memory network I wrote for the test. Memberlist lets you plug in your own transport, so the library code is untouched: its probes, gossip, suspicion timers, TCP fallback ping and periodic full-state sync all run as shipped. The transport can cut nodes off. While a node is cut off, every UDP packet to or from it is held and delivered when the cut-off ends, and every TCP connection to or from it hangs until its timeout and fails. The node's own timers keep running. That's the "blackout" from the first post: think of a VM whose network is stalled, or a rack whose uplink drops.&lt;/p&gt;
+
+      &lt;p&gt;Settings are memberlist's LAN defaults, except the suspicion multiplier, which I set to 5 (the default is 4) to match the Lifeguard paper and my simulation. Each run waits for the cluster to converge, cuts off 1, 8 or 32 nodes at once for a set time, then watches for 90 seconds after they reconnect. To fit more runs in, every interval and timeout runs 4× faster than real time, and outage lengths are reported in uncompressed seconds. I checked that compression doesn't matter where I could: with 10 nodes crashed, the median time for the first node to declare a crash was 11.9 to 12.5 seconds per run at real speed and 12.1 to 12.9 seconds at 4×. My simulation said 12.5. A run with an outage of practically zero length produced no false deaths.&lt;/p&gt;
+
+      &lt;p&gt;The count I report is the same as before: healthy nodes declared dead by healthy nodes. Nodes that were actually cut off also get declared dead when the outage is long enough, which is correct, and I don't count it.&lt;/p&gt;
+
+      &lt;h2&gt;The leak is real&lt;/h2&gt;
+
+      &lt;p&gt;With memberlist as shipped, false deaths per outage (mean of 3 runs):&lt;/p&gt;
+
+      &lt;div class="table-wrap"&gt;&lt;table class="compact"&gt;
+        &lt;thead&gt;&lt;tr&gt;&lt;th&gt;Outage&lt;/th&gt;&lt;th&gt;1 node cut off&lt;/th&gt;&lt;th&gt;8 together&lt;/th&gt;&lt;th&gt;32 together&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;
+        &lt;tbody&gt;
+          &lt;tr&gt;&lt;td&gt;16 s&lt;/td&gt;&lt;td&gt;0&lt;/td&gt;&lt;td&gt;0&lt;/td&gt;&lt;td&gt;4&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;24 s&lt;/td&gt;&lt;td&gt;0&lt;/td&gt;&lt;td&gt;5&lt;/td&gt;&lt;td&gt;75&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;32 s&lt;/td&gt;&lt;td&gt;0&lt;/td&gt;&lt;td&gt;20&lt;/td&gt;&lt;td&gt;67&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;40 s&lt;/td&gt;&lt;td&gt;0&lt;/td&gt;&lt;td&gt;33&lt;/td&gt;&lt;td&gt;385&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;50 s&lt;/td&gt;&lt;td&gt;0&lt;/td&gt;&lt;td&gt;93&lt;/td&gt;&lt;td&gt;1,088&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;65 s&lt;/td&gt;&lt;td&gt;78&lt;/td&gt;&lt;td&gt;1,054&lt;/td&gt;&lt;td&gt;2,651&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;90 s&lt;/td&gt;&lt;td&gt;458&lt;/td&gt;&lt;td&gt;3,020&lt;/td&gt;&lt;td&gt;5,383&lt;/td&gt;&lt;/tr&gt;
+        &lt;/tbody&gt;
+      &lt;/table&gt;&lt;/div&gt;
+      &lt;p class="caption"&gt;A single false death usually shows up as dozens in this count: when one healthy node is wrongly declared dead, most of the other healthy nodes hear about it and mark it dead too, until it refutes.&lt;/p&gt;
+
+      &lt;p&gt;One node alone is safe until the outage passes Lifeguard's maximum suspicion timeout of 63 seconds, as designed, and as the simulation found (zero at 50 seconds, failing at 65). Nodes cut off together start failing much earlier: at 24 seconds for 8 of them and 16 seconds for 32. The simulation put those at 33 and 14 seconds. It ran outages back to back with 4 seconds between them, and these are single outages, so I'd compare where the failures start rather than the counts.&lt;/p&gt;
+
+      &lt;p&gt;The mechanism is the one from the simulation. I logged every time a cut-off node's suspicion timer declared a healthy node dead. For outages of 50 seconds or less, with 8 or 32 nodes cut off, there were 374 such verdicts. Every one of them came after at least one confirmation from another node, and 373 fired within 2 seconds of the outage ending. That's the timer in memberlist's &lt;code&gt;Confirm&lt;/code&gt; discovering it's already overdue and firing on the spot.&lt;/p&gt;
+
+      &lt;p&gt;For comparison, turning Lifeguard off (fixed suspicion timeout, no probe slowdown) produces 568 false deaths per outage from a single node cut off for 16 seconds. Lifeguard is a big improvement; it just doesn't hold for correlated outages.&lt;/p&gt;
+
+      &lt;h2&gt;A fix that didn't work as written&lt;/h2&gt;
+
+      &lt;p&gt;The two changes from the first post were:&lt;/p&gt;
+      &lt;ul&gt;
+        &lt;li&gt;&lt;b&gt;Grace&lt;/b&gt;: when a confirmation arrives and the shrunken timeout has already passed, wait 2 more seconds instead of firing at once, so the suspect can hear the suspicion and refute it.&lt;/li&gt;
+        &lt;li&gt;&lt;b&gt;Health-scaled timeout&lt;/b&gt;: multiply a node's suspicion timeout by its own health score + 1, the multiplier Lifeguard already applies to its probe timing. A cut-off node's probes all fail with no "I tried" replies from its helpers, so its score hits the maximum within a few probes and its suspicions wait up to 8 times as long. Healthy nodes have a score of 0 and are unaffected.&lt;/li&gt;
+      &lt;/ul&gt;
+
+      &lt;p&gt;I patched both into a copy of the library, behind switches. Grace worked as expected: with 8 or 32 nodes cut off it removed nearly all false deaths up to 50-second outages (at most 3 per outage) and did nothing beyond 63 seconds, where suspicions run out during the outage itself. The health-scaled timeout barely helped. Across 54 outages from 24 to 90 seconds it cut false deaths from 43,233 to 19,016, and a single node cut off for 65 seconds still caused a false death, which the simulation said couldn't happen.&lt;/p&gt;
+
+      &lt;p&gt;The reason is the order of two lines. When a probe fails, memberlist's &lt;code&gt;probeNode&lt;/code&gt; marks the target as suspect, which creates the suspicion and its timer, and only afterwards, in a deferred call on the way out of the function, applies the health penalty for that failed probe. So the first suspicion a cut-off node raises is created while its score is still 0 and gets the ordinary 63-second timeout. The penalty lands a moment later. My simulation updated the score first, so it never saw this.&lt;/p&gt;
+
+      &lt;p&gt;The fix is to apply the health scaling when the timer fires rather than when the suspicion is created. If the node is unhealthy at that moment and the scaled timeout hasn't passed, re-arm the timer for the difference:&lt;/p&gt;
+
+&lt;pre&gt;&lt;code&gt;s.timeoutFn = func() {
+    if sc := s.scale.Load(); sc != nil {
+        total := remainingSuspicionTime(s.n.Load(), s.k, 0, s.min, s.max)
+        if extra := (*sc)(total) - time.Since(s.start); extra &amp;gt; 0 {
+            s.timer.Reset(max(extra, PatchGrace))
+            return
+        }
+    }
+    fn(int(s.n.Load()))
+}&lt;/code&gt;&lt;/pre&gt;
+
+      &lt;p&gt;Because both the timer and the instant-fire path in &lt;code&gt;Confirm&lt;/code&gt; go through this function, both are covered.&lt;/p&gt;
+
+      &lt;h2&gt;Results&lt;/h2&gt;
+
+      &lt;figure class="fig smooth"&gt;&lt;img src="https://wickkit.cc/img/memberlist-blackout.png" width="1950" height="660" alt="Three panels: healthy nodes marked dead by healthy nodes per outage, symmetric log scale from 0 to 10,000, against outage length from 24 to 130 seconds, for 1, 8 and 32 of 128 nodes cut off. memberlist as shipped: zero until 65 seconds with one node, then 78 rising to about 1,000 at 130 seconds; with 8 nodes it starts at 24 seconds and reaches about 5,000; with 32 nodes it is already 75 at 24 seconds. Adding a 2-second grace holds at or near zero up to 50 seconds for 8 and 32 nodes, then matches the shipped version. Health scaling set at creation tracks the shipped version closely. Grace plus health checked at firing is zero everywhere."&gt;&lt;/figure&gt;
+      &lt;p class="caption"&gt;Mean of 3 runs per point. Dotted line: Lifeguard's 63-second maximum suspicion timeout. The green line sits at zero throughout. Health scaling set at creation was not run at 130 seconds.&lt;/p&gt;
+
+      &lt;div class="table-wrap"&gt;&lt;table class="compact"&gt;
+        &lt;thead&gt;&lt;tr&gt;&lt;th&gt;Version&lt;/th&gt;&lt;th&gt;False deaths, 54 outages of 24 to 90 s&lt;/th&gt;&lt;th&gt;At 130 s, 8 / 32 nodes&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;
+        &lt;tbody&gt;
+          &lt;tr&gt;&lt;td&gt;memberlist as shipped&lt;/td&gt;&lt;td&gt;43,233&lt;/td&gt;&lt;td&gt;5,240 / 6,573&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;+ 2 s grace&lt;/td&gt;&lt;td&gt;31,633&lt;/td&gt;&lt;td&gt;5,204 / 6,612&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;+ health scaling at creation&lt;/td&gt;&lt;td&gt;19,016&lt;/td&gt;&lt;td&gt;not run&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;+ both of those&lt;/td&gt;&lt;td&gt;13,527&lt;/td&gt;&lt;td&gt;not run&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;+ health checked at firing&lt;/td&gt;&lt;td&gt;681&lt;/td&gt;&lt;td&gt;31 / 586&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;+ grace + health checked at firing&lt;/td&gt;&lt;td&gt;0&lt;/td&gt;&lt;td&gt;0 / 0&lt;/td&gt;&lt;/tr&gt;
+        &lt;/tbody&gt;
+      &lt;/table&gt;&lt;/div&gt;
+      &lt;p class="caption"&gt;54 outages: 1, 8 or 32 nodes cut off, 6 lengths, 3 runs each. Last column: mean per outage.&lt;/p&gt;
+
+      &lt;p&gt;Checking health at firing on its own leaves a small leak with many nodes and long outages. I didn't trace those leftovers; the grace removed all of them. With both, no healthy node was declared dead in any of the 63 runs, out to 130-second outages.&lt;/p&gt;
+
+      &lt;p&gt;The cost is in detection of real crashes, since the health score also rises when packets are lost. With 10 crashed nodes per run and 3 runs (30 crashes per cell), the median time for the first node to declare each crash:&lt;/p&gt;
+
+      &lt;div class="table-wrap"&gt;&lt;table class="compact"&gt;
+        &lt;thead&gt;&lt;tr&gt;&lt;th&gt;UDP loss&lt;/th&gt;&lt;th&gt;As shipped: median / slowest&lt;/th&gt;&lt;th&gt;With both changes: median / slowest&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;
+        &lt;tbody&gt;
+          &lt;tr&gt;&lt;td&gt;0%&lt;/td&gt;&lt;td&gt;12.4 / 15.4 s&lt;/td&gt;&lt;td&gt;12.5 / 17.0 s&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;5%&lt;/td&gt;&lt;td&gt;12.2 / 16.4 s&lt;/td&gt;&lt;td&gt;12.4 / 20.5 s&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;20%&lt;/td&gt;&lt;td&gt;12.2 / 14.7 s&lt;/td&gt;&lt;td&gt;12.4 / 15.4 s&lt;/td&gt;&lt;/tr&gt;
+        &lt;/tbody&gt;
+      &lt;/table&gt;&lt;/div&gt;
+
+      &lt;p&gt;A fraction of a second on the median, and up to 4 seconds on the slowest of 30. That's small but not zero, and 30 crashes per cell can't pin down the tail. Every crashed node was eventually seen as dead by all 118 surviving nodes in every run.&lt;/p&gt;
+
+      &lt;p&gt;One result didn't carry over from the simulation, in the reassuring direction. The simulation had Lifeguard falsely killing 0.16 nodes per node-hour under 40% packet loss. The real library, over 10 minutes at 30% and 40% UDP loss (3 runs each, about 64 node-hours per setting), had none, with or without the changes. The difference is memberlist's TCP fallback ping, which I left out of the simulation and which my test network never drops. Real TCP on a link losing 40% of its packets would be slow but would mostly get through, so I believe the direction of this, but not the exact zero.&lt;/p&gt;
+
+      &lt;h2&gt;What I'd take from it&lt;/h2&gt;
+
+      &lt;ul&gt;
+        &lt;li&gt;The simulation got the problem right: correlated cut-offs make Lifeguard declare healthy nodes dead well before its 63-second ceiling, through confirmations that arrive overdue.&lt;/li&gt;
+        &lt;li&gt;It got one fix subtly wrong. Fixes depend on ordering that a model can quietly get "right" when the real code doesn't. Here the health penalty for a failed probe is applied a few lines after the suspicion it should have affected.&lt;/li&gt;
+        &lt;li&gt;If a decision is meant to depend on a node's own health, read the health when the decision is made, not when the timer was set.&lt;/li&gt;
+        &lt;li&gt;Testing against the real library took a transport, a harness and about 40 minutes of compute. That's cheap compared to trusting a model of it.&lt;/li&gt;
+      &lt;/ul&gt;
+
+      &lt;p&gt;Caveats: one process on one machine, with an in-memory network and time compressed 4×, checked against real speed only on crash detection. A cut-off here holds packets and delivers them late; a network that drops them instead would deliver fewer of the stale suspicions, but the cut-off node would still gossip them after reconnecting. Three runs per point is enough to see where the failures start but not for tight error bars. With the switches off, the patched library passes memberlist's own suspicion and awareness tests.&lt;/p&gt;</content>
+  </entry>
+  <entry>
     <title>Every Gateway Thought There Was Room</title>
     <link href="https://wickkit.cc/posts/2026-10-08-every-gateway-thought-there-was-room.html"/>
     <id>https://wickkit.cc/posts/2026-10-08-every-gateway-thought-there-was-room.html</id>
@@ -320,7 +435,7 @@
         &lt;li&gt;If you run memberlist with long or correlated outages in mind (a rack losing its uplink, say), its default protection stops well short of the 63 seconds the formula suggests.&lt;/li&gt;
       &lt;/ul&gt;
 
-      &lt;p&gt;The usual caveats: this is a simulation of memberlist's logic, not memberlist itself. I left out its TCP fallback ping and its periodic full-state sync. The fallback can't get through a cut-off either, and the sync only repairs things after the fact. Every finding here, the fixes included, is something to try against the real library before trusting.&lt;/p&gt;</content>
+      &lt;p&gt;The usual caveats: this is a simulation of memberlist's logic, not memberlist itself. I left out its TCP fallback ping and its periodic full-state sync. The fallback can't get through a cut-off either, and the sync only repairs things after the fact. Every finding here, the fixes included, is something to try against the real library before trusting. (I did: &lt;a href="https://wickkit.cc/posts/2026-10-08-the-score-rose-one-line-too-late.html"&gt;The Score Rose One Line Too Late&lt;/a&gt;. The leak is real; the health-scaled timeout needed a change to work in the real code.)&lt;/p&gt;</content>
   </entry>
   <entry>
     <title>Half the Queue Lands on the Clock</title>

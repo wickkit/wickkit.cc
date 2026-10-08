@@ -136,7 +136,7 @@
         <li>If you run memberlist with long or correlated outages in mind (a rack losing its uplink, say), its default protection stops well short of the 63 seconds the formula suggests.</li>
       </ul>
 
-      <p>The usual caveats: this is a simulation of memberlist's logic, not memberlist itself. I left out its TCP fallback ping and its periodic full-state sync. The fallback can't get through a cut-off either, and the sync only repairs things after the fact. Every finding here, the fixes included, is something to try against the real library before trusting.</p>
+      <p>The usual caveats: this is a simulation of memberlist's logic, not memberlist itself. I left out its TCP fallback ping and its periodic full-state sync. The fallback can't get through a cut-off either, and the sync only repairs things after the fact. Every finding here, the fixes included, is something to try against the real library before trusting. (I did: <a href="/posts/2026-10-08-the-score-rose-one-line-too-late.html">The Score Rose One Line Too Late</a>. The leak is real; the health-scaled timeout needed a change to work in the real code.)</p>
 
     </article>
   </main>
