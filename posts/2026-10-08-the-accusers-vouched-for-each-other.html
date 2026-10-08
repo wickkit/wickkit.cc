@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>The Accusers Vouched for Each Other — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/den.html">den</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+
+    <article>
+      <h1>The Accusers Vouched for Each Other</h1>
+      <div class="meta">2026-10-08 · Kit Wickham</div>
+
+      <p>SWIM is how a lot of clusters decide that a machine is dead without a central monitor. It's in HashiCorp's memberlist library, which Consul, Nomad and Serf build on. Every second, each node pings one other node. If there's no answer within half a second, it asks three other nodes to try on its behalf. If nobody gets through by the end of the second, the target becomes a <em>suspect</em>, and that news spreads by gossip, piggybacked on other messages. A suspect that hears about it and is actually fine refutes it by bumping a counter it owns, its incarnation number, and announcing "alive, incarnation n+1", which overrides the suspicion everywhere. If nobody hears a refutation before the suspicion timeout, the suspect is declared dead.</p>
+
+      <p>The failure that hurts is a false one: a healthy machine declared dead, with everything that triggers (traffic moved, leases dropped, alerts). HashiCorp's 2017 Lifeguard paper found that a few overloaded machines were enough to get <em>healthy</em> ones declared dead, and added three fixes to memberlist. I wanted to know which kinds of slowness actually cause false deaths, and how much each of Lifeguard's fixes helps. I simulated it.</p>
+
+      <p>The short version: packet loss, a slow inbound path and a frozen process were all mostly harmless. The damaging case is a node that can't talk but keeps its clocks running. It suspects someone, nobody hears the suspicion, so nobody refutes it, and when the node gets its connection back, it releases a death verdict with the target's <em>current</em> incarnation. The healthy nodes believe it. Lifeguard's longer timeout protects against one such node, up to the 63 seconds it promises. When several nodes are cut off together, they count each other's hidden suspicions as independent confirmations, the timeout collapses, and the verdict fires the instant they reconnect. Two small changes closed that in the simulation: 2.1 million false deaths at healthy nodes became 21, with no change in how quickly real crashes were detected.</p>
+
+      <h2>The setup</h2>
+
+      <p>I wrote an event-by-event simulation of memberlist's version of SWIM: 128 nodes, a 1-second probe interval, a 500 ms probe timeout, 3 indirect probes, and gossip every 200 ms to 3 random nodes, each update retransmitted up to 12 times. One-way network delay is 0.5 ms plus a small random jitter. The suspicion timeout follows memberlist's formula, α × log₁₀(nodes) × probe interval. I used α = 5, as the Lifeguard paper did, which gives 10.5 seconds. Lifeguard's three pieces are switches:</p>
+      <ul>
+        <li><b>Health-aware probing</b>: a node keeps a health score from 0 to 7. Missed acks, and missing "I tried, no answer" replies from the nodes it asked for help, raise the score; successful probes lower it. Its probe interval and timeout are multiplied by score + 1, so a node that is probably the problem probes less and waits longer.</li>
+        <li><b>Dynamic suspicion</b>: a new suspicion starts at 6 × the base timeout (63 seconds here) and shrinks toward the base as other nodes independently report the same suspicion, reaching it after 3 confirmations.</li>
+        <li><b>Buddy system</b>: a node that probes a suspect tells it directly that it's suspected, so it can refute sooner.</li>
+      </ul>
+
+      <p>Two checks before trusting it. With suspicion turned off, a probe fails only if the direct ping or its ack is lost and every one of the k indirect routes (four messages each) loses at least one message, so the failure rate should be (1 − (1 − p)²) × (1 − (1 − p)⁴)ᵏ. At every loss rate from 1% to 30% and k from 0 to 5, the simulation matched within 2.5 standard errors (30 combinations, about 100,000 probes each). And the median time from a crash to the first node declaring it dead came out at 12.5 seconds, against 12.44 in the Lifeguard paper's measurements of real Consul at the same settings.</p>
+
+      <p>About 5,000 runs in total, 5 to 30 simulated minutes each.</p>
+
+      <h2>Packet loss is handled</h2>
+
+      <p>The indirect probes are why loss rarely matters. At 10% loss a single ping and its ack fail together 19% of the time; with three indirect routes, a probe of a healthy node failed 0.77% of the time. Suspicion absorbs the rest: the suspect hears about it within a gossip round or two and refutes long before 10 seconds pass.</p>
+
+      <div class="table-wrap"><table class="compact">
+        <thead><tr><th>Packet loss</th><th>Suspicions of healthy nodes per node-hour</th><th>False deaths per node-hour, SWIM</th><th>False deaths per node-hour, Lifeguard</th></tr></thead>
+        <tbody>
+          <tr><td>5%</td><td>2.3</td><td>0</td><td>0</td></tr>
+          <tr><td>10%</td><td>27</td><td>0.005</td><td>0</td></tr>
+          <tr><td>20%</td><td>243</td><td>0.20</td><td>0.02</td></tr>
+          <tr><td>30%</td><td>620</td><td>2.8</td><td>0.04</td></tr>
+          <tr><td>40%</td><td>929</td><td>36</td><td>0.16</td></tr>
+        </tbody>
+      </table></div>
+      <p class="caption">128 nodes, three 30-minute runs per cell (about 190 node-hours). 0.005 is a single event. Suspicion counts are for SWIM; Lifeguard's health-aware probing lowers them at high loss (287 per node-hour at 30%).</p>
+
+      <p>A network losing 10% of packets is badly broken, and SWIM still produced one false death in about 190 node-hours. Lifeguard is better still at extreme loss. Loss isn't where the trouble is.</p>
+
+      <h2>Three ways to be slow</h2>
+
+      <p>The Lifeguard paper is about "slow message processing", which can mean several different things in a simulation. I tried three, each with groups of 1 to 32 of the 128 nodes affected at the same moment and the episodes repeating, as in the paper:</p>
+      <ul>
+        <li><b>Slow inbound path</b>: every message to an affected node is delayed by a random extra amount, averaging 0.5 to 16 seconds. Its own sending is normal.</li>
+        <li><b>Frozen</b>: the whole process stops (a long garbage-collection pause, a VM stall). Nothing runs, including its timers; when it wakes, the overdue timers and the backlog of messages are handled together.</li>
+        <li><b>Cut off</b>: the node can't send or receive for a while, but its clocks keep running: probes time out, suspicion timers count down. Everything it would have sent goes out the moment it reconnects.</li>
+      </ul>
+
+      <p>The first two barely mattered. Apart from a single event, a slow inbound path caused false deaths at healthy nodes only when a quarter of the cluster was affected with delays averaging 2 seconds or more (89 in total across 3 runs at 2 seconds, under plain SWIM). Under plain SWIM, frozen nodes caused 8 false deaths in 48 runs, one of them seen by a healthy node: a frozen node's suspicions only start when it wakes up, so they spread and get refuted normally. I also tried the paper's own injection (the protocol's send and receive paths blocked while the suspicion timers keep running) and got 42 false deaths in total under plain SWIM, none of them seen by healthy nodes. The paper saw far more. My guess is that its slow nodes caught up on their backlog slowly, while mine catch up instantly, so I'm not claiming to reproduce its numbers.</p>
+
+      <p>Being cut off was a different order of magnitude. With 8 nodes cut off together for 16 seconds at a time, SWIM produced 317,000 false deaths per hour as seen by healthy nodes. Here's how. The cut-off node probes someone, gets no answer (nothing gets through), and suspects it. Nobody hears that suspicion, so nobody can refute it. Ten and a half seconds later the timer runs out, and the node declares its target dead with the target's current incarnation. When the connection comes back, that verdict goes out, and every healthy node accepts it, because nothing newer has been announced. The target then hears it was declared dead and refutes, but by then the whole cluster has already acted on it.</p>
+
+      <p>The edge sits where the formula says it should. A cut-off node's suspicion starts up to one probe interval into the outage and needs 10.5 seconds more. With a single node cut off, 10-second outages produced no false deaths, 11 seconds a trickle, and 12 seconds 13,700 per hour.</p>
+
+      <p>Over the whole grid of outage lengths, group sizes and gaps between outages, here is how each piece of Lifeguard did against these cut-off nodes, next to what the paper measured with its own injection:</p>
+
+      <div class="table-wrap"><table class="compact">
+        <thead><tr><th>Configuration</th><th>False deaths at healthy nodes, % of SWIM (sim, cut off)</th><th>Same, Lifeguard paper</th><th>All false deaths, % of SWIM (sim)</th></tr></thead>
+        <tbody>
+          <tr><td>Buddy system</td><td>99%</td><td>45%</td><td>99%</td></tr>
+          <tr><td>Health-aware probing</td><td>38%</td><td>33%</td><td>39%</td></tr>
+          <tr><td>Dynamic suspicion</td><td>21%</td><td>6.7%</td><td>23%</td></tr>
+          <tr><td>All of Lifeguard</td><td>6.2%</td><td>1.9%</td><td>7.0%</td></tr>
+        </tbody>
+      </table></div>
+      <p class="caption">Simulation: 570 runs per configuration (1 to 32 nodes, outages from 0.5 to 131 seconds, 16 ms or 4 s between them, 3 seeds); SWIM's total was 27 million. Paper: Table IV, real Consul, its own grid.</p>
+
+      <p>The ranking matches the paper except for the buddy system, which can't help here: telling the suspect requires sending a message, and the accuser can't send anything. The bigger difference is that Lifeguard leaves 6% of a very large number. That residue is where it gets interesting.</p>
+
+      <h2>When the accusers vouch for each other</h2>
+
+      <figure class="fig smooth"><img src="/img/swim-blackout.png" width="1950" height="660" alt="Three panels, false deaths of healthy nodes per hour as seen by healthy nodes, symmetric log scale from 0 to 1 million, against the length of each cut-off from 0.5 to 200 seconds. Left, one node cut off: SWIM jumps from 0 at 10 seconds to about 14,000 per hour at 12 seconds and 140,000 beyond; Lifeguard stays at 0 until 50 seconds and starts at 65 seconds, near its 63-second maximum timeout; with health-scaled timeouts it stays at 0 through 200 seconds. Middle, eight nodes cut off together: Lifeguard starts at 33 seconds and reaches 7,000 per hour at 50 seconds, well before 63; a 2-second grace removes it up to 50 seconds; health-scaled timeouts hold to 90 seconds; both together stay at or near 0 through 200 seconds. Right, 32 nodes: Lifeguard starts at 14 seconds; both fixes together stay near 0 throughout."></figure>
+      <p class="caption">4 seconds between outages, mean of 3 seeds. Dotted lines: SWIM's 10.5 s suspicion timeout and Lifeguard's 63 s maximum. In the left panel the Lifeguard line is hidden under the "+ 2 s grace" line; their values are the same.</p>
+
+      <p>With one node cut off, Lifeguard behaves exactly as designed: a suspicion nobody else confirms waits the full 63 seconds, so nothing goes wrong until the outages are longer than that (zero at 50 seconds, 216 per hour at 65). With 8 nodes cut off together, it starts failing at 33 seconds, and with 32 at 14 seconds.</p>
+
+      <p>I logged every such event to see why. All of them had the same shape. Several cut-off nodes had happened to suspect the same healthy target, each in silence. When they all reconnected, each one received the others' suspicions and counted them as confirmations. One confirmation cuts the 63-second timeout to 37 seconds, two to 21. If the suspicion is already older than that, the timeout has passed, and memberlist fires it on the spot: its <code>Confirm</code> function calls the timeout handler directly when the remaining time comes out negative. The target hears that it's suspected at the same moment the verdict is issued, too late to refute.</p>
+
+      <p>Dynamic suspicion assumes that two nodes suspecting the same target are independent evidence. Nodes that lost their connection together are about as correlated as evidence gets: they all see the same silence. The paper also synchronized its slow periods, calling them the worst case, like losing power to a rack.</p>
+
+      <h2>Two small changes</h2>
+
+      <p>Both are a few lines in the suspicion timer:</p>
+      <ul>
+        <li><b>Grace</b>: when a confirmation arrives and the shrunken timeout has already passed, wait 2 more seconds instead of firing at once. That gives the suspect time to hear about the suspicion and refute.</li>
+        <li><b>Health-scaled timeout</b>: multiply the accuser's suspicion timeout by its own health score + 1, the same multiplier Lifeguard already applies to its probes. A cut-off node's probes all fail without a single "I tried" reply from its helpers, so its score goes to the maximum within a few probes and its own suspicions wait 8 times as long. Healthy nodes have a score of 0, so nothing changes for them.</li>
+      </ul>
+
+      <p>Across 126 runs per configuration (1, 8 or 32 nodes cut off, outages from 16 to 200 seconds), false deaths at healthy nodes came to:</p>
+
+      <div class="table-wrap"><table class="compact">
+        <thead><tr><th>Configuration</th><th>False deaths at healthy nodes</th><th>Median time to detect a real crash, 128 / 512 nodes</th></tr></thead>
+        <tbody>
+          <tr><td>Lifeguard</td><td>2,097,622</td><td>12.5 / 15.1 s</td></tr>
+          <tr><td>+ 2 s grace</td><td>1,843,398</td><td>12.5 / 15.1 s</td></tr>
+          <tr><td>+ health-scaled timeout</td><td>62,751</td><td>12.5 / 15.1 s</td></tr>
+          <tr><td>+ both</td><td>21</td><td>12.5 / 15.1 s</td></tr>
+        </tbody>
+      </table></div>
+      <p class="caption">Detection: 50 crashes per cell, no packet loss. With 5% loss the medians were 12.2 to 12.3 s and 15.1 to 15.2 s for all four.</p>
+
+      <p>Grace alone only covers the window between the shrunken timeout and the full 63 seconds; past that, the suspicion expires during the outage anyway. The health-scaled timeout alone holds much longer but still gives way once confirmations shrink the timeout to 8 × 10.5 seconds. Together they held, with at most one stray event per hour on the curves above, out to the longest outage I tried (200 seconds). Real crashes were detected as fast as before, because the nodes that detect them are healthy and their scores are 0. Under 40% packet loss, Lifeguard produced 0.16 false deaths per node-hour and the version with both changes produced none.</p>
+
+      <h2>What I'd take from it</h2>
+
+      <ul>
+        <li>A suspicion is only safe if the suspect can hear it. A suspicion timer that keeps running while nobody can hear the accuser turns a network outage into a false death.</li>
+        <li>Agreement between accusers is only worth something if the accusers are independent. Nodes that fail together, on the same rack, switch or network partition, agree for the wrong reason.</li>
+        <li>A node that knows it's unhealthy should slow down its verdicts as well as its probes. Lifeguard already computes the right signal and uses it in only one of the two places.</li>
+        <li>If you run memberlist with long or correlated outages in mind (a rack losing its uplink, say), its default protection stops well short of the 63 seconds the formula suggests.</li>
+      </ul>
+
+      <p>The usual caveats: this is a simulation of memberlist's logic, not memberlist itself. I left out its TCP fallback ping and its periodic full-state sync. The fallback can't get through a cut-off either, and the sync only repairs things after the fact. Every finding here, the fixes included, is something to try against the real library before trusting.</p>
+
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+</body>
+</html>
