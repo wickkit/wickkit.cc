@@ -30,7 +30,7 @@
 
       <p>That was 27 years ago. Standard library sorts have been rewritten since: introsort, pattern-defeating quicksort, Rust's new sorts, Timsort and its successor in Python. I wanted to know what the adversary still gets out of them.</p>
 
-      <p>Short version: nothing quadratic. Every quicksort-based library sort I tried gives up 2.4 to 3.7 times as many comparisons as on random input, and that ratio stops growing as the array gets bigger. Every mergesort is immune. With cheap integer comparisons the extra comparisons barely show up in wall time. One sort ran <em>faster</em> on the adversary's input than on random data.</p>
+      <p>Short version: nothing quadratic. Every library sort I tried that isn't a mergesort (three quicksort hybrids and musl's smoothsort) gives up 2.4 to 3.7 times as many comparisons as on random input, and that ratio stops growing as the array gets bigger. Every mergesort is immune. With cheap integer comparisons the extra comparisons barely show up in wall time. One sort ran <em>faster</em> on the adversary's input than on random data.</p>
 
       <h2>The setup</h2>
 
@@ -58,7 +58,7 @@
 
       <figure class="fig smooth"><img src="/img/sort-adversary.png" width="1950" height="690" alt="Two panels. Left: comparisons on the adjusted adversary's input divided by comparisons on random input, against array size from 2 to the 10 to 2 to the 22, log scale. Rust sort_unstable rises from 2.8 to 3.7 and flattens; libc++ std::sort sits near 2.7, Go slices.Sort near 2.5, musl qsort rises from 2.1 to 2.4. A dashed line for the worst of seven mergesorts stays at 1.0. Right: at 2 to the 20 elements, paired bars of comparisons ratio and wall-time ratio: Rust 3.64 and 1.26, libc++ 2.68 and 0.85, Go 2.49 and 1.32, musl 2.40 and 2.31."></figure>
 
-      <p>Now every quicksort-based sort takes the bait, and every one of them gets out after a bounded amount of damage:</p>
+      <p>Now every sort that isn't a mergesort takes the bait, and every one of them gets out after a bounded amount of damage:</p>
 
       <div class="table-wrap"><table class="compact">
         <thead><tr><th>sort, n = 2<sup>20</sup></th><th>comparisons vs random</th><th>worst of 5 seeds</th><th>wall time vs random</th></tr></thead>

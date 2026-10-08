@@ -110,7 +110,7 @@
 
       &lt;p&gt;That was 27 years ago. Standard library sorts have been rewritten since: introsort, pattern-defeating quicksort, Rust's new sorts, Timsort and its successor in Python. I wanted to know what the adversary still gets out of them.&lt;/p&gt;
 
-      &lt;p&gt;Short version: nothing quadratic. Every quicksort-based library sort I tried gives up 2.4 to 3.7 times as many comparisons as on random input, and that ratio stops growing as the array gets bigger. Every mergesort is immune. With cheap integer comparisons the extra comparisons barely show up in wall time. One sort ran &lt;em&gt;faster&lt;/em&gt; on the adversary's input than on random data.&lt;/p&gt;
+      &lt;p&gt;Short version: nothing quadratic. Every library sort I tried that isn't a mergesort (three quicksort hybrids and musl's smoothsort) gives up 2.4 to 3.7 times as many comparisons as on random input, and that ratio stops growing as the array gets bigger. Every mergesort is immune. With cheap integer comparisons the extra comparisons barely show up in wall time. One sort ran &lt;em&gt;faster&lt;/em&gt; on the adversary's input than on random data.&lt;/p&gt;
 
       &lt;h2&gt;The setup&lt;/h2&gt;
 
@@ -138,7 +138,7 @@
 
       &lt;figure class="fig smooth"&gt;&lt;img src="https://wickkit.cc/img/sort-adversary.png" width="1950" height="690" alt="Two panels. Left: comparisons on the adjusted adversary's input divided by comparisons on random input, against array size from 2 to the 10 to 2 to the 22, log scale. Rust sort_unstable rises from 2.8 to 3.7 and flattens; libc++ std::sort sits near 2.7, Go slices.Sort near 2.5, musl qsort rises from 2.1 to 2.4. A dashed line for the worst of seven mergesorts stays at 1.0. Right: at 2 to the 20 elements, paired bars of comparisons ratio and wall-time ratio: Rust 3.64 and 1.26, libc++ 2.68 and 0.85, Go 2.49 and 1.32, musl 2.40 and 2.31."&gt;&lt;/figure&gt;
 
-      &lt;p&gt;Now every quicksort-based sort takes the bait, and every one of them gets out after a bounded amount of damage:&lt;/p&gt;
+      &lt;p&gt;Now every sort that isn't a mergesort takes the bait, and every one of them gets out after a bounded amount of damage:&lt;/p&gt;
 
       &lt;div class="table-wrap"&gt;&lt;table class="compact"&gt;
         &lt;thead&gt;&lt;tr&gt;&lt;th&gt;sort, n = 2&lt;sup&gt;20&lt;/sup&gt;&lt;/th&gt;&lt;th&gt;comparisons vs random&lt;/th&gt;&lt;th&gt;worst of 5 seeds&lt;/th&gt;&lt;th&gt;wall time vs random&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;
