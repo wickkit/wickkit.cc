@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>K Is Doing Two Jobs — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/den.html">den</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+
+    <article>
+      <h1>K Is Doing Two Jobs</h1>
+      <div class="meta">2026-10-08 · Kit Wickham</div>
+
+      <p>Elo has one knob, K: how many points move after each game. Pick it too small and ratings can't keep up with players who improve; too big and every lucky win throws a rating around. I wanted to know what the right K is, and whether Glicko, the fancier system that tracks how sure it is about each player, is worth the extra machinery. Short answers: when everyone plays steadily, the best K is about twice how much a player's skill changes per game, and a well-tuned Elo is as good as Glicko. On real chess games it isn't close. On four months of lichess games, the best fixed K got only 69% to 78% of Glicko's improvement over a coin flip. Most of that gap goes away if K simply shrinks as a player's game count grows.</p>
+
+      <h2>A formula for K</h2>
+
+      <p>Treat a rating as an estimate of a moving target. After each game it moves K points times the surprise (result minus expected score). Two kinds of error pull in opposite directions. Each update adds noise, because one game says little; that grows with K. And between games the player's real skill wanders; a small K lags behind. If each game moves skill by a random amount with spread <i>d</i> Elo points, and games are between roughly even players, linearizing the update gives a steady-state error whose minimum sits near</p>
+
+      <p style="text-align:center"><b>K ≈ 2d</b></p>
+
+      <p>More exactly it's <i>d</i>/√(p(1−p)), averaged over pairings, which is a bit more than 2<i>d</i> when players are unevenly matched. FIDE's K of 20 for most established players, if it were optimal, would imply skill moving about 10 points per rated game.</p>
+
+      <p>To check the formula, I simulated 1,000 players with true skills spread 200 Elo points, each drifting a little every round, everyone playing one random opponent per round. Eight seeds per setting, 8,000 scored rounds after a 4,000-round warm-up. With equal skills and no drift, the simulated error matched the formula within 2.2% for K from 4 to 32. With a spread of skills and drift, it matched within 7.3% everywhere from K = 2 to 80, after I added a term for skills that stay in a fixed range instead of wandering off forever:</p>
+
+      <figure class="fig smooth"><img src="/img/elo-k-sim.png" width="1125" height="660" alt="Line chart of simulated Elo rating error, in Elo points RMS, against K from 2 to 80 on a log scale, for skill drift of 2, 5, 10 and 20 points per game. Each drift has a U-shaped formula curve with measured dots lying on it. Minima: about 29 points near K = 4 for drift 2, about 46 near K = 12 for drift 5, about 65 near K = 20 to 24 for drift 10, and about 90 near K = 40 for drift 20. Dotted vertical lines at K = 4, 10, 20 and 40 mark twice the drift and sit at or just left of each minimum. At the largest K all curves converge near 90 to 100."></figure>
+
+      <p>The formula's best K for drift 2, 5, 10 and 20 is 4.8, 11.7, 22.5 and 41.4; the simulation's best in my grid was 4, 12, 20 to 24, and 40. And in this tidy world Glicko had nothing to add. With its own drift setting tuned, its rating error was within 2% of the best Elo's for every drift from 2 to 20, and its predictions were better by at most 2.1 millinats of log-loss per game.</p>
+
+      <h2>Real players don't play steadily</h2>
+
+      <p>The formula assumes every player gets one game per unit of drift. Real rating pools break that in two ways. Some players play every day and some once a month, so per-game drift differs a lot between them. And new players arrive with no rating at all, when the right step size is huge, not 2<i>d</i>.</p>
+
+      <p>Both showed up in the simulation. With drift 5, I made 20% of players play every round and the rest one round in 20. The regulars' error was lowest at K = 12 (46 points) and the occasional players' at K = 40 (98 points); at K = 12 the occasional players were off by 120, at K = 40 the regulars by 64. No single K serves both. Glicko, which widens its uncertainty with the time since a player's last game, got 46 and 96. Adding newcomers did the same: each round, every player had a 1-in-2,000 or 1-in-200 chance of retiring and being replaced by a new, unrated player.</p>
+
+      <p>Extra log-loss of the best fixed-K Elo over the best Glicko, in millinats per game (positive means Glicko predicts better):</p>
+
+      <table class="compact">
+        <tr><th>drift / game</th><th>steady play</th><th>uneven play</th><th>1/2,000 newcomers</th><th>1/200 newcomers</th></tr>
+        <tr><td>2</td><td>0.1</td><td>1.8</td><td>4.6</td><td>11.5</td></tr>
+        <tr><td>5</td><td>0.2</td><td>4.0</td><td>2.4</td><td>8.8</td></tr>
+        <tr><td>10</td><td>0.7</td><td>5.1</td><td>1.4</td><td>4.9</td></tr>
+        <tr><td>20</td><td>2.1</td><td>3.6</td><td>2.0</td><td>1.4</td></tr>
+      </table>
+
+      <p>Newcomers hurt fixed K most when skill moves slowly, because then the right K for veterans is tiny and the right K for a beginner is still enormous. The best fixed K in the high-churn column was 32 at every drift up to 10: a compromise set by the beginners. Glicko lost one of the 30 scenarios I ran, by 1.8 millinats, with the fastest drift, uneven play and heavy churn all at once.</p>
+
+      <h2>Lichess</h2>
+
+      <p>For real games I used the <a href="https://database.lichess.org/">lichess open database</a> (CC0): every rated game from January to June 2013, about 963,000 bullet, blitz and classical games after dropping abandoned ones, each speed rated as its own pool. Every system started from scratch on January 1, and I scored next-game predictions from March 1 on: about 200,000 to 280,000 games per pool. The score is log-loss, with a draw counted as half a win. Guessing 50% every time scores 0.6931.</p>
+
+      <p>The pools look nothing like the steady simulation. 80% to 84% of players have fewer than 30 games in a pool, while the busiest 10% play 75% to 86% of all games. The median gap between one player's consecutive games is 4 minutes in bullet and 25 in classical.</p>
+
+      <table class="compact">
+        <tr><th>log-loss per game</th><th>bullet</th><th>blitz</th><th>classical</th></tr>
+        <tr><td>coin flip</td><td>0.6931</td><td>0.6931</td><td>0.6931</td></tr>
+        <tr><td>Elo, best fixed K (32)</td><td>0.6137</td><td>0.6421</td><td>0.6410</td></tr>
+        <tr><td>Elo, K = A/(games+5)<sup>0.4</sup>, best A</td><td>0.5982</td><td>0.6282</td><td>0.6289</td></tr>
+        <tr><td>Elo, K = 1200/(games+4), min 4</td><td>0.5932</td><td>0.6218</td><td>0.6256</td></tr>
+        <tr><td>Glicko-2, best of 24 settings</td><td>0.5913</td><td>0.6200</td><td>0.6225</td></tr>
+        <tr><td>Glicko, drift 5 pts/√day</td><td>0.5914</td><td>0.6190</td><td>0.6225</td></tr>
+      </table>
+
+      <p>Counting from the coin flip, the best fixed K got 78%, 69% and 74% of Glicko's improvement. The second row is the schedule FiveThirtyEight used for its tennis Elo; it closes 60% to 70% of the gap. The third row, K shrinking like one over the number of games played with a small floor, gets 96% to 98%. That's the Elo version of "your rating is the average of all your games," which is roughly what Glicko does when skill barely drifts.</p>
+
+      <figure class="fig smooth"><img src="/img/elo-k-lichess.png" width="1125" height="660" alt="Line chart of extra log-loss compared with Glicko, in millinats per game, against fixed K from 4 to 128 on a log scale, for bullet, blitz and classical lichess games. All three curves are U-shaped with minima at K = 32: about 22 for bullet, 23 for blitz and 18 for classical. At K = 4 they are 37 to 46, at K = 128 about 60 to 68. Dashed horizontal lines for Elo with K = 1200 over games plus 4 sit between 2 and 3 for all three pools, just above the zero line that marks Glicko."></figure>
+
+      <p>Two checks on where the rest of Glicko's edge comes from, in blitz. Turning off Glicko's use of the opponent's uncertainty when updating changed nothing (0.6191). Turning off its use of uncertainty when predicting, so that a game between two newcomers is predicted as confidently as one between veterans, cost 3.1 millinats (0.6221), almost exactly the shrinking-K Elo's score. So nearly 90% of the gap is the step size, and the rest is knowing when to say "I'm not sure who wins."</p>
+
+      <p>The data also say something about how fast skill moves. Glicko's score was nearly flat for drift settings from 0 to 10 points per √day (0.6196 to 0.6190 in blitz) and got worse above that. At 5 points per √day, with these players' gaps between games, a typical game moves skill by 3 to 4 points, which by the formula wants K around 7 or 8 for the regulars. The best fixed K was 32 anyway, because the beginners set it. For the shrinking-K Elo, any floor from 0 to 8 scored within 0.0011 of the best. Glicko-2's extra piece, a per-player volatility it learns, didn't help: in every pool its best setting started volatility at the lowest value I tried, and it came within 0.001 of plain Glicko's best without beating it.</p>
+
+      <h2>What I'd take from it</h2>
+
+      <ul>
+        <li>A fixed K mixes up two jobs: tracking how fast skill moves and catching up on players the system knows nothing about. The first wants K ≈ 2 × per-game drift. The second wants a big K that shrinks with every game.</li>
+        <li>If you're stuck with Elo, give it a K that falls like 1/(games played), with a floor near twice the drift. On these games that recovered 96% to 98% of Glicko's improvement over a coin flip, with one line of code.</li>
+        <li>Glicko's remaining edge was mostly in its predictions for players it has barely seen. If predictions matter, that's the part to keep.</li>
+      </ul>
+
+      <p>Limits: one site, one half-year, and from 2013, when lichess was young and full of new players; a mature pool with fewer newcomers would shrink the gap, as the simulation's newcomer columns suggest. Every system's settings were picked on the same games they were scored on, from grids of a few dozen settings each, so all the numbers are a little optimistic, though they move in the third decimal and the gaps are in the second. No system modeled white's advantage (white scored 52% to 53%), and draws (about 3%) were scored as half a win. The simulation's drift is a random walk that stays inside a fixed spread, which is my guess at how skill moves, not a measurement. About 240 simulation runs and a few dozen replays of the lichess games for the numbers here.</p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+</body>
+</html>
