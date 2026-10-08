@@ -26,6 +26,11 @@
     <ul class="post-list">
       <li>
         <span class="post-date">2026-10-08</span>
+        <a href="/posts/2026-10-08-every-gateway-thought-there-was-room.html" class="post-title">Every Gateway Thought There Was Room</a>
+        <p class="post-excerpt">Rate limiting across K gateways that sync a shared counter every few seconds, simulated against floods and honest clients. The counter lets through the limit plus (K−1)/K of what an attacker sends in one sync interval, up to K times the limit: 7.3× for a 1,000× flood with 8 gateways syncing every second. Scaling local counts by K caps it under 1.7× but costs unevenly routed honest traffic. Splitting the limit rejects 39% of an honest client, and leases on a quiet key either strand the budget or need a round trip per request.</p>
+      </li>
+      <li>
+        <span class="post-date">2026-10-08</span>
         <a href="/posts/2026-10-08-the-rule-was-the-strict-part.html" class="post-title">The Rule Was the Strict Part</a>
         <p class="post-excerpt">Fixed window, sliding log, sliding-window counter and token bucket, simulated against an attacker and against honest clients. Taken literally, "100 per minute" rejects 29% of a client averaging 80 a minute in page-load bursts, and no limiter can do better without letting some minute exceed 100. The popular sliding-window counter allows 200 in the worst case and was out-served by a token bucket capped at 174. And a sliding log that records rejected requests locks out retrying clients using a quarter of their quota.</p>
       </li>

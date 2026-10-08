@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Every Gateway Thought There Was Room — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/den.html">den</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+
+    <article>
+      <h1>Every Gateway Thought There Was Room</h1>
+      <div class="meta">2026-10-08 · Kit Wickham</div>
+
+      <p>My <a href="/posts/2026-10-08-the-rule-was-the-strict-part.html">last post</a> compared rate limiters as if one machine saw every request. Real APIs sit behind several gateways, and "100 requests per minute per key" has to be enforced across all of them. The usual answer is a shared counter in something like Redis that each gateway syncs with every so often, because asking the store on every request is slow. That post ended by saying I hadn't measured what the gap between syncs costs. This one does.</p>
+
+      <p>The short version: a shared counter synced every Δ seconds lets through the limit plus about (K−1)/K of whatever an attacker sends during one Δ, where K is the number of gateways, until it hits K times the limit. With 8 gateways syncing every second, a flood at 100 times the limit gets 2.4 times the limit, and a flood at 1,000 times gets 7.3 times. So the safe sync interval depends on how fast the attacker is, not on the limit. A gateway that assumes the others are doing what it's doing stays under 1.7 times the limit at any flood rate, but it starts rejecting honest clients when traffic is unevenly spread and syncs are slow. Leases never over-admit, but on a low-rate key they either strand most of the budget or turn into a store round trip on nearly every request.</p>
+
+      <h2>The setup</h2>
+
+      <p>One key, a limit of 100 per 60-second sliding window, K gateways from 2 to 32. Each request lands on one gateway. Every gateway syncs with a central store every Δ seconds (0.1, 0.3, 1, 3 or 10), at its own random offset. I made the store generous: it keeps the exact timestamp of every admitted request, and a sync is instant. The only error left is that a gateway doesn't know what the others admitted since they last pushed. Six designs:</p>
+      <ul>
+        <li><b>Central log</b>: every request asks the store. Exact, and the baseline for everything below.</li>
+        <li><b>Split</b>: no sharing; each gateway allows 100/K on its own.</li>
+        <li><b>Shared counter</b>: admit if what the store said at the last sync, plus what this gateway admitted since, is under 100.</li>
+        <li><b>Assume the others did what I did</b>: the same, but count this gateway's admits since its last sync K times over.</li>
+        <li><b>Track my share</b>: like the previous one, but use this gateway's measured share of recent traffic instead of 1/K.</li>
+        <li><b>Leases</b>: at each sync a gateway hands back unused slots and asks for 1.5 times its recent arrivals per interval (plus one). The store counts outstanding grants as used, so it never grants past 100. A gateway admits only within its grant. A second version, <b>leases + ask when empty</b>, asks for nothing when it's been idle and goes to the store immediately when it runs out, at the cost of a round trip for that request. If the store says no, it waits for its next sync.</li>
+      </ul>
+      <p>Honest traffic was a steady client at 50%, 80% or 100% of the limit, or page loads (bursts of about 10 requests within a second) at 50% or 80%, with requests spread evenly over the gateways or unevenly (gateway i gets a share proportional to 1/i, so the busiest of 8 gets 37% and the busiest of 32 gets 25%). Floods were steady random traffic at 1.5 to 1,000 times the limit, spread evenly. That's 2,815 runs: 5 seeds of 300 minutes each for honest traffic, 3 seeds of 20 to 60 minutes for floods, and a set of honest runs with a limit of 10,000 to see what changes for a busy key.</p>
+
+      <p>Checks before trusting it: with one gateway, the shared counter and both extrapolating designs made exactly the central log's decisions. The central log served 99.61% of a steady client at 80%, which matches the Erlang loss formula, as in the last post. With all gateways syncing at the same instants and a fixed-window counter, a heavy flood gets exactly K × 100 per window (4.000 with four gateways), which is what you'd work out by hand. And across all 2,815 runs no lease design ever had more than 100 admitted in any 60 seconds.</p>
+
+      <h2>Floods: the allowance is one sync interval</h2>
+
+      <p>Admitted per minute, as a multiple of the limit, with 8 gateways syncing every second:</p>
+      <div class="table-wrap"><table class="compact">
+        <tr><th>flood, × limit</th><th>3</th><th>10</th><th>30</th><th>100</th><th>1,000</th></tr>
+        <tr><td>shared counter</td><td>1.02</td><td>1.14</td><td>1.43</td><td>2.45</td><td>7.32</td></tr>
+        <tr><td>shared counter, fixed windows</td><td>1.04</td><td>1.15</td><td>1.44</td><td>2.47</td><td>7.16</td></tr>
+        <tr><td>track my share</td><td>1.02</td><td>1.08</td><td>1.27</td><td>1.77</td><td>1.99</td></tr>
+        <tr><td>assume the others did what I did</td><td>1.02</td><td>1.08</td><td>1.22</td><td>1.44</td><td>1.46</td></tr>
+        <tr><td>leases (both)</td><td>1.00</td><td>1.00</td><td>1.00</td><td>1.00</td><td>1.00</td></tr>
+      </table></div>
+
+      <p>The shared counter's numbers collapse onto one variable: x, the attack traffic arriving in one sync interval, measured in units of the limit. A 100× flood is 167 requests a second, so with Δ = 1 s, x = 1.67. With syncs of 1 s or faster, all 60 combinations of gateway count, sync interval and flood rate with x up to 2 land within 4% of 1 + (K−1)/K × x. With 2 gateways and x = 0.5 that predicts 1.25 and the simulation gave 1.24; with 8 gateways and x = 0.17, 1.146 against 1.135 to 1.146; with 32 gateways and x = 1.67, 2.61 against 2.61. The formula overestimates by up to 15% at Δ = 10 s, where an interval is a sixth of the window (2.18 against 2.46 with 8 gateways at x = 1.67). Past x ≈ 2 it bends over and approaches K, because no gateway will admit more than 100 of its own requests in a window: 32 gateways at Δ = 10 s and a 1,000× flood got 30.7×.</p>
+
+      <p>The reading I'd give it: when the window fills, every other gateway is working from a count that's up to one interval old, and each keeps admitting its share of the flood until it next hears from the store. That costs (K−1)/K of one interval's worth of attack traffic per window.</p>
+
+      <figure class="fig smooth"><img src="/img/distributed-rate-limits.png" width="1800" height="690" alt="Two panels. Left, log-log: admitted per minute divided by the limit against attack requests arriving in one sync interval in units of the limit, for a shared counter with 2, 8 and 32 gateways and sync intervals of 0.1, 1 and 10 seconds. The points sit on one curve, 1 plus (K minus 1)/K times x, from about 1.0 at x = 0.01 to about 2.6 at x = 1.7, then flatten toward K: near 2 for 2 gateways, 8 for 8 and 31 for 32. Hollow points for the 'assume the others did what I did' rule stay between 1.0 and 1.7 at every flood rate. Right: honest requests rejected, in percent, against the number of gateways (2 to 32), for a client at 80% of the limit with uneven routing and a 1-second sync. Splitting the limit rises from 9.5% at 2 gateways to 39% at 32. Leases sized to recent traffic stay near 3 to 4% up to 8 gateways, then jump to 12% at 16 and 36% at 32. 'Assume the others did what I did' rises from 0.4% to 4.9%. The shared counter and leases with ask-when-empty stay at about 0.4%, on top of the central log's 0.4%."></figure>
+
+      <p>Two things I expected to help didn't. A sliding window doesn't save the shared counter: the sliding and fixed-window versions were within 5% of each other at every flood rate from 10× up with syncs of 1 s or faster, and within 15% at 10 s. A fixed window frees the whole budget at once at the minute boundary, so every gateway sees room at the same moment. A sliding window frees it gradually, but the over-admitted requests come in clumps, and when a clump ages out all the gateways see the same hole together and fill it again. And shorter syncs only help in proportion: Δ = 0.1 s against a 1,000× flood is x = 1.67 again, and 32 gateways admitted 2.63×.</p>
+
+      <p>Extrapolating local counts is a real fix for floods. "Assume the others did what I did" stayed at or under 1.24× with 2 gateways and 1.68× with 32 at every flood rate, because when traffic is spread evenly each gateway's count times K is a decent estimate of the total. Tracking each gateway's actual share was worse (up to 3.0× with 32 gateways): in a flood, admissions are near zero most of the time, so the measured shares are noisy, and a gateway that thinks its share is large lets in too much.</p>
+
+      <h2>What it costs honest clients</h2>
+
+      <p>Rejected requests for a steady honest client at 80% of the limit, uneven routing, syncing every second; the central log rejects 0.4%. Brackets show the worst 60 seconds over all runs, as a multiple of the limit:</p>
+      <div class="table-wrap"><table class="compact">
+        <tr><th>gateways</th><th>2</th><th>8</th><th>32</th></tr>
+        <tr><td>split</td><td>9.5% (0.96)</td><td>27.1% (0.81)</td><td>39.1% (0.73)</td></tr>
+        <tr><td>shared counter</td><td>0.4% (1.04)</td><td>0.3% (1.05)</td><td>0.3% (1.05)</td></tr>
+        <tr><td>assume the others did what I did</td><td>0.4% (1.02)</td><td>1.0% (1.03)</td><td>4.9% (1.03)</td></tr>
+        <tr><td>track my share</td><td>0.5% (1.02)</td><td>1.5% (1.04)</td><td>1.5% (1.04)</td></tr>
+        <tr><td>leases</td><td>3.4% (1.00)</td><td>3.7% (0.96)</td><td>35.9% (0.72)</td></tr>
+        <tr><td>leases + ask when empty</td><td>0.5% (1.00)</td><td>0.5% (1.00)</td><td>0.4% (1.00)</td></tr>
+        <tr><td>… round trips per request</td><td>0.62</td><td>0.92</td><td>0.98</td></tr>
+      </table></div>
+
+      <p>Splitting the limit is the clear loser. With uneven routing the busy gateway runs out while the quiet ones sit on unused quota: 39% rejected with 32 gateways at a load where the central log rejects 0.4%. Even with perfectly even routing it rejected 15% at 32 gateways, since random routing makes each gateway's share fluctuate.</p>
+
+      <p>The shared counter is almost free for honest clients. It rejects no more than the central log, and slightly less as syncs get slower, because the slack it gives attackers it also gives everyone else. With Δ = 10 s the honest client's worst minute reached 1.15× the limit, and page-load bursts reached 1.9×.</p>
+
+      <p>Extrapolating has a cost that grows with the sync interval and with uneven routing. A gateway that gets 25% of the traffic and multiplies its own count by 32 thinks the key is eight times busier than it is. At Δ = 1 s that's 4.9% rejected with 32 gateways; at Δ = 10 s it's 16.4%. With even routing at Δ = 10 s it was 5.4%. Tracking the share fixes most of the uneven-routing cost (1.5% at 32 gateways, 4.5% at Δ = 10 s), which is the trade against its weaker flood cap.</p>
+
+      <p>Plain leases strand budget. With 32 gateways each asking for at least two slots per interval, up to 64 of the 100 slots are parked on gateways that may not use them, and the client loses 36%. Asking when empty fixes that completely, but for this key it's just the central log with extra steps: a store round trip on 98% of requests, because each gateway sees well under one request per interval.</p>
+
+      <p>A busy key changes the lease picture. With a limit of 10,000 a minute and the client at the limit with even routing, leases + ask when empty went to the store on 1 to 6% of requests and never went over the limit, though with Δ = 10 s it rejected 4 to 6% against the central log's 0.8%. Splitting is still bad there with uneven routing (37% rejected at 32 gateways and 80% load). So leases are for keys that each gateway sees many times per interval; for the long tail of quiet keys, a lease is a round trip.</p>
+
+      <h2>What I'd take from it</h2>
+      <ul>
+        <li>If you run a shared counter with a sync interval, budget for the limit plus (K−1)/K of what an attacker can send in one interval, up to K times the limit. Kong's Rate Limiting Advanced plugin, for example, exposes this as a <code>sync_rate</code> setting, and its docs say the shared counters are accurate only when syncing on every request.</li>
+        <li>If floods matter, scale your local count by K before comparing it to the limit. It caps the damage at well under 2× for any flood rate, at the price of rejecting some honest traffic when routing is uneven and syncs are slow. Keep the sync interval short if you do.</li>
+        <li>Don't split the limit evenly across gateways unless routing is sticky and even. It has no attack risk and the worst honest cost of anything here.</li>
+        <li>Leases (Google's Doorman is the well-known example, though it leases rates rather than slots) give an exact guarantee and are cheap for busy keys. For quiet keys, either accept a round trip per request or accept stranded budget.</li>
+      </ul>
+
+      <p>Caveats: one key, floods spread evenly over the gateways (an attacker who can pick a gateway changes the extrapolating rule's numbers), an idealized store with exact timestamps and instant syncs, no network delay, and one simple lease-sizing policy. Real gateways with slower or lossy syncs would over-admit more, not less.</p>
+
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+</body>
+</html>

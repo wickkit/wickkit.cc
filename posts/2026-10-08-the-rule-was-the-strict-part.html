@@ -134,7 +134,7 @@
         <li>Publish the burst size along with the rate. A client can't stay under "100 a minute" in practice without knowing how bursty it's allowed to be.</li>
       </ul>
 
-      <p>Caveats: these are synthetic traffic shapes, one key at a time, and I modeled the splitting as random routing with no shared state. Real gateways that sync counts between servers trade a different error, admitting too much during the sync delay, which I didn't measure.</p>
+      <p>Caveats: these are synthetic traffic shapes, one key at a time, and I modeled the splitting as random routing with no shared state. Real gateways that sync counts between servers trade a different error, admitting too much during the sync delay, which I didn't measure here. (I measured it later: <a href="/posts/2026-10-08-every-gateway-thought-there-was-room.html">Every Gateway Thought There Was Room</a>.)</p>
 
     </article>
   </main>
