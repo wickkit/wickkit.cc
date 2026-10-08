@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sorting Made the Sum Worse — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/den.html">den</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+
+    <article>
+      <h1>Sorting Made the Sum Worse</h1>
+      <div class="meta">2026-10-07 · Kit Wickham</div>
+
+      <p>Add up 100 million random numbers between 0 and 1 in single precision (float32), one after another in a plain loop. The true total is 49,998,337. The loop says 16,777,216. It got there after the 33,553,559th number and never moved again.</p>
+
+      <p>That number is 2<sup>24</sup>. Float32 carries 24 bits of precision, so above 2<sup>24</sup> the gap between neighbouring representable numbers is 2. Adding anything less than 1 rounds back down to the same total, and every number in the input is less than 1. Below 2<sup>24</sup> the loop was already drifting, just less visibly.</p>
+
+      <p>That's the extreme case. I wanted the ordinary ones: how wrong a sum is, how that grows with the count, which fixes work, and whether the old advice to sort the numbers first helps. The short version: the error of a plain loop grows like the square root of the count, numpy's built-in sum is already nearly as good as the classic fix, and sorting can make float32 sums hundreds of times worse.</p>
+
+      <h2>The setup</h2>
+
+      <p>Four kinds of data: uniform between 0 and 1; normal with mean 1 (some cancellation); normal with mean 0 (heavy cancellation); and heavy-tailed positive numbers (lognormal with σ = 2, where a few values are thousands of times the median). Eleven sizes from 100 to 10 million, float32 and float64, 30 seeds each: 2,640 sums in all.</p>
+
+      <p>Each sum ran through ten methods: the plain loop in the given order; the plain loop after sorting ascending, descending, and by size ignoring sign in both directions; recursive pairwise summation; numpy's version of pairwise summation (blocks of 128 with eight running totals, reimplemented from its source); Kahan's compensated summation; Neumaier's variant of it; and for float32, a plain loop with a float64 running total.</p>
+
+      <p>Errors are exact. Every input and every result is a multiple of the smallest bit in the data, so I turned them all into big integers and subtracted. Before trusting any of it, I checked the plain loop, numpy-style sum and both sorted orders against numpy itself (<code>cumsum</code> and <code>np.sum</code>) and the exact total against Python fractions, on four datasets. All matched bit for bit.</p>
+
+      <p>The unit for errors below is one rounding of the total: <i>u</i>·Σ|<i>x</i>|, where <i>u</i> is 2<sup>−24</sup> in float32 and 2<sup>−53</sup> in float64. An error of 1 in these units means you lost about one last bit of the answer.</p>
+
+      <h2>The plain loop drifts like a random walk</h2>
+
+      <p>Each addition rounds, and the rounding error is as likely to be up as down. The running total grows steadily, so each step's error is proportional to the size of the total so far. Add those up with random signs and you get a random walk: the expected error grows with the square root of the count.</p>
+
+      <p>That's what came out. For the three kinds of data whose totals grow with the count, the plain loop's RMS error divided by √<i>n</i> stayed between 0.17 and 0.29 units at every size from 100 to 10 million in float64. At 10 million numbers that's about 870 units: the last ten bits of the answer are noise. (Mean-zero data behaves differently, because the running total wanders instead of growing. Measured against Σ|<i>x</i>| its error doesn't grow at all, but the answer itself is small, so relative to the answer it still grows like √<i>n</i>.)</p>
+
+      <p>The two fixes don't drift. Pairwise summation adds numbers in a balanced tree, so each one passes through only about log₂ <i>n</i> additions. Kahan's method keeps a second variable holding the bits the last addition dropped and feeds them back into the next one. Neither grew with the count from 100 to 10 million. On the three growing kinds of data, Kahan sat at 0.25 to 0.6 units, about what it costs to round the exact answer once. numpy's pairwise sum sat at 0.35 to 1.2. That's the left panel below.</p>
+
+      <figure class="fig smooth"><img src="/img/fsum.png" width="1650" height="690" alt="Left: log-log chart of RMS error in units of u times the sum of absolute values, against n from 100 to 10 million, for float32 sums of uniform numbers. The plain loop in the given order follows a dashed 0.24 times square root of n line from about 2.4 to 760. The plain loop on ascending-sorted input tracks it up to 1 million, then jumps to about 60,000 at 3.2 million and 190,000 at 10 million. numpy's pairwise sum stays between 0.4 and 1, and Kahan between 0.3 and 0.5. Right: running error while adding 10 million float32 numbers. In the given order the error stays near zero at this scale. Sorted ascending, it swings in arcs between about minus 20,000 and plus 57,000 and ends at 57,500. Sorted descending, it rises in arcs that peak at about 19,000, 78,000, and 312,000 at the 7.5 millionth number, then falls back to about minus 450 at the end.">
+        <figcaption>Uniform numbers in [0, 1), float32, 30 seeds per point on the left; one seed on the right. Right-panel reference is a float64 running total, accurate to better than 10<sup>−8</sup> here.</figcaption>
+      </figure>
+
+      <h2>Sorting</h2>
+
+      <p>The textbook advice for adding positive numbers is to go from smallest to largest, so small numbers get added together before the total is big enough to swamp them. In float64 that works, a little: ascending order cut the error by about 1.8× on uniform data and 3× on the heavy-tailed data at 10 million numbers.</p>
+
+      <p>In float32 it falls apart. Up to a million uniform numbers, ascending order is within about 2× of no sorting either way. At 3.2 million its RMS error is 145 times the plain loop's, and at 10 million 250 times: the sum is off by 1.2%, against 0.003% for the unsorted loop.</p>
+
+      <p>The right panel shows why. When numbers arrive in random order, each addition's rounding error is unrelated to the last one, and they mostly cancel. Sorted, consecutive numbers are nearly equal, so consecutive additions round the same way, by nearly the same amount, millions of times in a row. Whether a number rounds up or down depends on where it falls relative to the gap between representable totals. Late in a 10-million-number float32 sum that gap is 0.5. Sorted descending, from the 5.9 millionth number on, the values being added fall from 0.41 toward 0. Above 0.25 each one rounds <i>up</i> to 0.5; below 0.25 each one rounds down to nothing. So the error climbs for 1.6 million steps, peaks at +312,000 exactly where the values cross 0.25, then falls for 2.5 million steps. Halfway through, the descending sum was off by 312,000 on a true running total of about 4.7 million: 6.6%.</p>
+
+      <p>It ended at −450, not far from the unsorted loop's +250 on the same data, but only because the last arc happened to nearly cancel the one before it. Across 30 seeds the descending order's median error was 0.0026%, close to the plain loop's. That's luck about where the run stops, not accuracy. Ascending order finishes in the middle of a rising arc, and ends 57,500 off.</p>
+
+      <p>None of this shows up in float64 at these sizes because the gap between representable totals is 2<sup>29</sup> times smaller. The arcs are there in principle; they're far shorter than the spacing between consecutive sorted values, so they average out.</p>
+
+      <p>With mixed signs, sorting by value is a disaster in both precisions. For mean-zero data it puts all the negatives first, so the running total swings to −0.4<i>n</i> before the positives bring it back near zero. In float64 that made the error 2,400 times worse than the plain loop at 10 million numbers; in float32 the answer was off by 8%. Sorting by size ignoring sign, which is what the advice actually means, was fine.</p>
+
+      <div class="table-wrap"><table class="compact">
+        <thead><tr><th>method</th><th>uniform</th><th>heavy-tailed</th><th>mean zero</th></tr></thead>
+        <tbody>
+          <tr><td>plain loop</td><td>3.2e-5</td><td>2.5e-2</td><td>4.6e-5</td></tr>
+          <tr><td>sorted ascending</td><td>1.2e-2</td><td>1.8e-4</td><td>8.3e-2</td></tr>
+          <tr><td>sorted descending</td><td>2.6e-5</td><td>9.2e-2</td><td>9.2e-2</td></tr>
+          <tr><td>numpy's pairwise</td><td>3.1e-8</td><td>3.8e-8</td><td>1.6e-7</td></tr>
+          <tr><td>Kahan</td><td>2.4e-8</td><td>3.0e-8</td><td>4.0e-8</td></tr>
+          <tr><td>Neumaier</td><td>2.4e-8</td><td>4.2e-5</td><td>2.1e-8</td></tr>
+          <tr><td>float64 running total</td><td>2.4e-8</td><td>3.0e-8</td><td>2.0e-8</td></tr>
+        </tbody>
+      </table></div>
+      <p class="note">Median relative error of a float32 sum of 10 million numbers, 30 seeds. 1e-2 is 1%.</p>
+
+      <h2>The heavy tail breaks the plain loop and Neumaier</h2>
+
+      <p>The heavy-tailed data shows the 2<sup>24</sup> stall again. Ten million of these numbers add up to about 74 million, where the gap between float32 values is 8. Three quarters of the numbers are below 4, so they round to nothing. By the end of the sum, the plain loop was off by 2.5%; sorted descending, which saves the small numbers for last, by 9%. Ascending order helped here, as advertised, though it was still nearly 6,000 times worse than Kahan.</p>
+
+      <p>Neumaier's method is usually described as an improved Kahan: it also handles the case where the new number is bigger than the total. Here it was 1,400 times worse than Kahan. It keeps the dropped bits in a separate float32 total and only adds it in at the end. When most of every number is being dropped, that separate total grows to 1.8 million on a seed I checked, and it is itself a plain float32 loop, with all the problems above. Kahan feeds the dropped bits straight back in, so its correction never grows past one gap.</p>
+
+      <h2>The numpy trap</h2>
+
+      <p>numpy's <code>sum</code> uses pairwise summation, which is why it stayed within a few times of Kahan everywhere. But it only does that along a contiguous run of memory. Summing a tall row-major array down its columns adds one row at a time, which for each column is a plain loop.</p>
+
+      <p>With 25 million float32 uniform numbers (numpy 2.5.3), <code>np.sum(x)</code> was off by 2.7e-8. The same data as a two-column array, <code>x.reshape(-1, 2).sum(axis=0)</code>, gave column sums off by up to 4.9e-5, 1,800 times worse and right where the plain loop's √<i>n</i> rule predicts for 12.6 million rows. At 64 columns it was still 2.6e-5. Summing across rows, or passing <code>dtype=np.float64</code>, avoids it. That's a common shape for a table of float32 features with millions of rows, and the column means used to normalize them.</p>
+
+      <h2>What I'd do</h2>
+
+      <ul>
+        <li>Don't sort to improve a sum. In float64 the gain is under 4× and it costs a sort; in float32 it can cost you a percent or more.</li>
+        <li>In float32, accumulate in float64 when you can. It matched Kahan everywhere, and it's one cast.</li>
+        <li>Trust <code>np.sum</code> along a contiguous axis. Down the columns of a tall array, ask for float64.</li>
+        <li>If you need compensated summation, use Kahan's form, not Neumaier's, when most of each number can be lost; or use an exact method like Python's <code>math.fsum</code>.</li>
+      </ul>
+
+      <p>Limits: random data in random order, one thread, round-to-nearest. I emulated float32 by rounding after every float64 operation, which is exact for addition and matched numpy bit for bit. GPUs and parallel reductions add in other orders (usually tree-like, so closer to pairwise), and fused SIMD code in other libraries may block differently from numpy.</p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+</body>
+</html>
