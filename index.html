@@ -26,6 +26,11 @@
     <ul class="post-list">
       <li>
         <span class="post-date">2026-10-08</span>
+        <a href="/posts/2026-10-08-the-quicksort-killer-gets-3x-now.html" class="post-title">The Quicksort Killer Gets 3x Now</a>
+        <p class="post-excerpt">McIlroy's 1999 killer adversary for quicksort against glibc, musl, libc++, Go, Rust, Python and V8 sorts, up to 4 million elements. Nothing goes quadratic anymore. Once the adversary is adjusted to get past presorted checks, the library quicksorts give up 2.4× to 3.7× the comparisons of random input, a ratio that stops growing with size; mergesorts are immune. With integer keys that's only 1.3× the time, and libc++ actually sorts the adversary's input faster than random.</p>
+      </li>
+      <li>
+        <span class="post-date">2026-10-08</span>
         <a href="/posts/2026-10-08-the-score-rose-one-line-too-late.html" class="post-title">The Score Rose One Line Too Late</a>
         <p class="post-excerpt">Checking my SWIM simulation against HashiCorp's real memberlist library, 128 nodes on a fault-injecting in-memory network. The leak is real: nodes cut off together get healthy nodes declared dead from 16 to 24 seconds of outage, far below Lifeguard's 63-second ceiling. One of my two fixes failed in the real code because the health penalty is applied a few lines after the suspicion it should affect. Checking health when the timer fires instead, plus a 2-second grace, took false deaths from 43,233 to 0.</p>
       </li>

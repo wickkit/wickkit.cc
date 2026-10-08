@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>The Quicksort Killer Gets 3x Now — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/den.html">den</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+
+    <article>
+      <h1>The Quicksort Killer Gets 3x Now</h1>
+      <div class="meta">2026-10-08 · Kit Wickham</div>
+
+      <p>In 1999 Doug McIlroy published a short paper called "A Killer Adversary for Quicksort." The trick is a comparison function that doesn't decide what the data is until it has to. Every element starts as "gas," a value bigger than anything decided so far. When the sort compares two gas elements, the adversary freezes one of them to the next smallest value, preferring the one it guesses is the pivot. So the pivot always turns out to be about the smallest thing left, every partition is lopsided, and quicksort goes quadratic. Once the sort finishes, the frozen values are an ordinary input array. Feed that array to the same sort with a normal comparison and, if the sort is deterministic, it takes exactly the same path. McIlroy used it to make several C libraries' <code>qsort</code> go quadratic.</p>
+
+      <p>That was 27 years ago. Standard library sorts have been rewritten since: introsort, pattern-defeating quicksort, Rust's new sorts, Timsort and its successor in Python. I wanted to know what the adversary still gets out of them.</p>
+
+      <p>Short version: nothing quadratic. Every quicksort-based library sort I tried gives up 2.4 to 3.7 times as many comparisons as on random input, and that ratio stops growing as the array gets bigger. Every mergesort is immune. With cheap integer comparisons the extra comparisons barely show up in wall time. One sort ran <em>faster</em> on the adversary's input than on random data.</p>
+
+      <h2>The setup</h2>
+
+      <p>I wrote the same harness in C, C++, Go, Rust, Python and JavaScript. Each one sorts the indices 0 to n−1 under the adversary's comparison, writes out the frozen values, and checks the result really is sorted. A replay mode then sorts that frozen array with a plain comparison, so I can confirm the bad input is real and time it without the adversary's own overhead. Everything ran on Linux on 64-bit ARM:</p>
+
+      <ul>
+        <li>C: glibc 2.41 <code>qsort</code>, musl <code>qsort</code>, plus two controls I wrote: a textbook quicksort that takes the first element as pivot, and a median-of-three quicksort.</li>
+        <li>C++: libc++ 22 <code>std::sort</code> and <code>std::stable_sort</code>.</li>
+        <li>Go 1.27: <code>slices.SortFunc</code> (pattern-defeating quicksort) and <code>slices.SortStableFunc</code>.</li>
+        <li>Rust 1.99: <code>sort_unstable_by</code> and <code>sort_by</code>.</li>
+        <li>Python 3.14: <code>list.sort</code>. Node 26 (V8 14.6): <code>Array.prototype.sort</code> and <code>Int32Array.prototype.sort</code>, both with a comparator.</li>
+      </ul>
+
+      <p>Sizes went from 1,024 to 4.2 million elements in powers of two, 5 seeds each, about 2,700 runs. Every replay used exactly the same number of comparisons as the adversary run that produced it, for every sort and size. None of these sorts randomize, so every bad input here is a fixed file you could hand to someone else's program.</p>
+
+      <h2>The original adversary mostly bounces off</h2>
+
+      <p>McIlroy's adversary as published still destroys the two controls. At 262,144 elements the textbook quicksort makes 5,856 times as many comparisons as on random input, and the median-of-three version 3,206 times. In wall time that's 15 to 31 seconds against 15 milliseconds.</p>
+
+      <p>Against the library sorts it mostly does the opposite of what it's for. The adversary freezes values in the order it meets them, so a sort that starts by scanning for an already-sorted run sees one long ascending run and stops. Rust's two sorts, Python, V8's <code>Array.sort</code> and Go's stable sort all finished in under a tenth of their usual comparisons, most of them in exactly n−1. Go's <code>slices.SortFunc</code> doesn't scan first, but it has its own check for nearly sorted input, and the adversary's answers apparently pass it: a third of its usual comparisons. Only libc++'s <code>std::sort</code> took the bait, at 2.7×.</p>
+
+      <h2>Making it a fair fight</h2>
+
+      <p>So I changed the adversary in two small ways, which together I'll call the adjusted adversary. When it compares two gas elements and neither is its pivot guess, it freezes one at random instead of always the same one, so the frozen values no longer come out in order. And it freezes the element at index 1 as the smallest value before the sort starts, so an opening scan finds a run of two and gives up. Neither change touches the part that kills pivots.</p>
+
+      <figure class="fig smooth"><img src="/img/sort-adversary.png" width="1950" height="690" alt="Two panels. Left: comparisons on the adjusted adversary's input divided by comparisons on random input, against array size from 2 to the 10 to 2 to the 22, log scale. Rust sort_unstable rises from 2.8 to 3.7 and flattens; libc++ std::sort sits near 2.7, Go slices.Sort near 2.5, musl qsort rises from 2.1 to 2.4. A dashed line for the worst of seven mergesorts stays at 1.0. Right: at 2 to the 20 elements, paired bars of comparisons ratio and wall-time ratio: Rust 3.64 and 1.26, libc++ 2.68 and 0.85, Go 2.49 and 1.32, musl 2.40 and 2.31."></figure>
+
+      <p>Now every quicksort-based sort takes the bait, and every one of them gets out after a bounded amount of damage:</p>
+
+      <div class="table-wrap"><table class="compact">
+        <thead><tr><th>sort, n = 2<sup>20</sup></th><th>comparisons vs random</th><th>worst of 5 seeds</th><th>wall time vs random</th></tr></thead>
+        <tbody>
+          <tr><td>Rust <code>sort_unstable_by</code></td><td>3.64×</td><td>3.65×</td><td>1.26×</td></tr>
+          <tr><td>libc++ <code>std::sort</code></td><td>2.68×</td><td>2.68×</td><td>0.85×</td></tr>
+          <tr><td>Go <code>slices.SortFunc</code></td><td>2.49×</td><td>2.72×</td><td>1.32×</td></tr>
+          <tr><td>musl <code>qsort</code></td><td>2.40×</td><td>2.55×</td><td>2.31×</td></tr>
+          <tr><td>mergesorts (7 of them)</td><td>0.05× to 1.01×</td><td>1.01×</td><td>faster</td></tr>
+          <tr><td>textbook quicksort, n = 2<sup>18</sup></td><td>3,903×</td><td>3,907×</td><td>about 1,360×</td></tr>
+        </tbody>
+      </table></div>
+
+      <p>The ratio is what matters, and it stops growing. Quadratic behavior would double the ratio every time n doubles, as it does for the textbook control. Rust's climbs slowly from 2.8× at 1,024 elements to 3.7× at 4 million and flattens. The others are flat from the start. That's the defenses working as designed. libc++ and Rust count how deep the quicksort recursion goes and switch to heapsort past a limit proportional to log n. Go's pattern-defeating quicksort counts lopsided partitions, shuffles a few elements when it sees one, and also falls back to heapsort. The adversary can waste the levels before the fallback, and then pays heapsort's normal cost. musl's <code>qsort</code> isn't a quicksort at all but smoothsort, a heapsort variant that's fast on nearly sorted input. The adversary still finds 2.4× there.</p>
+
+      <p>The mergesorts don't care. Merging two halves costs at most one comparison per element no matter what the comparison says, so the worst case is already close to the random case. glibc's <code>qsort</code> is a mergesort, and under the adversary it made exactly 45,057 comparisons on 4,096 elements, which is the textbook worst case for mergesort at that size. V8's <code>Int32Array.sort</code> with a comparator showed the same count. When glibc can't allocate the merge buffer it falls back to heapsort. I forced that by making large allocations fail: it uses about twice as many comparisons as the mergesort on any input, and the adversary does no better than random against it.</p>
+
+      <h2>Comparisons aren't time</h2>
+
+      <p>For timing I replayed the frozen inputs with a plain integer comparison, one run at a time, median of 15 runs on a million elements. That's where the picture softens. Rust does 3.6 times the comparisons for 1.3 times the time, Go 2.5 times for 1.3 times. libc++ does 2.7 times the comparisons and finishes in 85% of the time it takes on random input.</p>
+
+      <p>My best guess is branch prediction. Partitioning random data means a coin-flip branch per element that the CPU mispredicts half the time. The adversary's partitions are lopsided, so the branch almost always goes the same way and is nearly free. I didn't measure branch misses, so treat that as a likely explanation, not a finding. musl is the exception: 2.4 times the comparisons, 2.3 times the time, so whatever smoothsort does on this input isn't cheap.</p>
+
+      <p>Integer comparison is the best case, though. When each comparison is expensive (long strings with shared prefixes, a comparator written in Python, a callback across a language boundary), time follows the comparison count, and 3.6× is what you'd pay.</p>
+
+      <h2>What I'd take from it</h2>
+
+      <ul>
+        <li>The library sorts I tried can't be made quadratic by this attack anymore. The 1999 failure mode is gone from all of them.</li>
+        <li>They can still be made 2.4 to 3.7 times more expensive in comparisons, with a fixed input file, because none of them randomize. That's a nuisance, not a denial of service.</li>
+        <li>If comparisons are expensive and the input comes from someone you don't trust, a mergesort (every stable sort here) has the smallest gap between average and worst case. If you write your own quicksort, the textbook control shows what that costs without the defenses: 20 seconds instead of 15 milliseconds at a quarter million elements.</li>
+      </ul>
+
+      <p>Caveats: the adjusted adversary is a lower bound on each sort's worst case, not the worst case itself. A smarter adversary, written for one specific sort, might get more. One machine, one architecture, one version of each library. I didn't test GCC's libstdc++, Java, or older glibc versions, whose <code>qsort</code> worked differently. Wall times use integer keys only.</p>
+
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+</body>
+</html>
