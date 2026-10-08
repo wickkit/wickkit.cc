@@ -8,6 +8,78 @@
   <updated>2026-10-08T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
   <entry>
+    <title>Three Attempts, One Third</title>
+    <link href="https://wickkit.cc/posts/2026-10-08-three-attempts-one-third.html"/>
+    <id>https://wickkit.cc/posts/2026-10-08-three-attempts-one-third.html</id>
+    <updated>2026-10-08T00:00:00Z</updated>
+    <summary>With plain retries and k attempts, a brief stall leaves a server stuck for good at any load above 1/k: every request times out, retries, and wastes the server's time. Backoff doesn't move that line. A retry budget moves it near capacity but did worse than no retries at tight timeouts; serving newest-first or capping the queue never got stuck.</summary>
+    <content type="html">&lt;p&gt;My &lt;a href="https://wickkit.cc/posts/2026-10-08-the-cap-is-doing-the-work.html"&gt;last post on retries&lt;/a&gt; left out timeouts and retry limits, and ended by saying the fixes for overload were "elsewhere" and that I hadn't tested them. This one tests them. The failure I care about is the kind where a system that was fine gets knocked over by something brief, like a stall, a deploy or a slow dependency, and then stays down after the cause is gone. Bronson and colleagues called these metastable failures, and retries are the textbook way to get one.&lt;/p&gt;
+
+      &lt;p&gt;The short version: with plain retries, a server stays stuck after a hiccup whenever the load is above one over the number of attempts. With 3 attempts that's a third of capacity. Backoff doesn't move that line, because it changes when the attempts happen, not how many there are. A retry budget moves the line up to near full capacity, but at tight timeouts it did worse than not retrying at all. What made the stuck state disappear was the server refusing to work on requests nobody is waiting for: serving newest-first, or capping the queue.&lt;/p&gt;
+
+      &lt;h2&gt;The setup&lt;/h2&gt;
+
+      &lt;p&gt;One server handles one request at a time, with exponentially distributed service times (the unit of time is the mean service time). New requests arrive at random at a rate called the load, as a fraction of capacity. Each client waits a fixed timeout for a response; if none comes, it counts the attempt as failed and may try again. The server doesn't know the client gave up and finishes the old attempt anyway, so that work is wasted. 1% of served attempts fail with a quick error, so retries have something to win back. Unless noted, clients make up to 3 attempts.&lt;/p&gt;
+
+      &lt;p&gt;I used two timeouts: 10 service times, about the 99th percentile of healthy latency at 60% load, and 50. To knock the system over I stopped the server for a while (a stall) at time 2,000, then ran 60,000 more time units and measured the fraction of requests that succeeded in the last 2,500. Each point is 40 runs. As a check, with no retries and no stall the simulator matches the textbook single-server queue: mean latency 2.02, 4.85 and 10.2 at loads 0.5, 0.8 and 0.9 (theory 2, 5 and 10), and at load 0.8 the fraction answered within 10 was 0.863 ± 0.002 against 0.865.&lt;/p&gt;
+
+      &lt;figure class="fig smooth"&gt;&lt;img src="https://wickkit.cc/img/metastable.png" width="2025" height="690" alt="Left: success rate over time at 60% load with a timeout of 50, around a 200-unit server stall starting at time 1000. All lines drop to zero during the stall. Server LIFO is back at once, no retries after about 250, a 10% retry budget after about 450; three attempts with or without backoff stay at zero to the end. Middle: success rate at the end of the run after a 2000-unit stall, against load from 0.2 to 0.98. Three attempts with or without backoff succeed fully up to load 0.3 and drop to zero from 0.35, just past a marked line at one third. The 10% budget holds until 0.85 and is zero from 0.9, near a line at 1 over 1.1. The refund bucket and server-skips-dead hold to 0.9 and fall to about 0.6 and 0.5 near full load. No retries holds to 0.95. Server LIFO stays above 0.97 everywhere. Right: mean time until three attempts lock up with no stall, log scale, against timeout. At load 0.5 it rises from 10 thousand at timeout 5 to 2 million at 20, with no lockup at 30. At 0.7 from 5 thousand to 20 million at 40. At 0.9 from 3 thousand at timeout 5 to 2 million at 100."&gt;&lt;/figure&gt;
+      &lt;p class="caption"&gt;Left: one run, successes per new request in 150-unit windows; the two orange lines overlap at zero, and the spikes above 1 are the backlog clearing. Middle: timeout 50, 40 runs per point; the lines marked 1/3 and 1/1.1 are where retries alone could keep the server busy. Right: timeout varies, 20 runs per point of up to a million time units each.&lt;/p&gt;
+
+      &lt;h2&gt;Why it sticks&lt;/h2&gt;
+
+      &lt;p&gt;Once the queue is longer than the timeout, every request times out, so every request makes all 3 attempts, and none of them succeeds. In that state I measured 2.98 to 2.99 attempts per request and 100% of the server's time spent on abandoned work. The state keeps itself going as long as 3 times the load is more than the server can do, so it's stuck above a load of 1/3 and drains below it. That's what the runs show: after a 2,000-unit stall, every run recovered at load 0.3 and none did at 0.35 (3 × 0.35 = 1.05). With 10 attempts the lowest load I tried, 0.2, was already stuck.&lt;/p&gt;
+
+      &lt;p&gt;A bigger stall isn't needed to get there, just a bigger load. With a timeout of 50 and load 0.6, a 100-unit stall was enough, and a 200-unit one in the left panel never recovered. With the tight timeout of 10, the system locked up on its own, without any stall, at every load from 0.45 up: an ordinary run of bad luck in the queue is enough to cross the timeout. The right panel shows how fast. At load 0.5 the mean time to lock up was about 20,000 service times with a timeout of 10 and 2 million with 20; at 0.9 it took a timeout of 100 to get to 2 million. If a service takes 10 ms, 20,000 service times is under four minutes.&lt;/p&gt;
+
+      &lt;h2&gt;Backoff doesn't help&lt;/h2&gt;
+
+      &lt;p&gt;Full-jitter exponential backoff, with a base of 1 or 10 service times, gave the same line as no backoff: stuck from 0.35 after a long stall, at both timeouts. Without a stall, it changed the mean time to lock up by a factor between 0.7 and 3.1 across the 34 load and timeout settings where both locked up: sometimes later, sometimes sooner. That's the arithmetic: the stuck state needs 3 times the load in attempts, and backoff still sends all 3; it just sends them later. In the last post backoff helped a burst drain because the retries kept coming forever until they won. Here they stop at 3, so all it can change is when.&lt;/p&gt;
+
+      &lt;h2&gt;Budgets move the line, and cost something&lt;/h2&gt;
+
+      &lt;p&gt;A retry budget caps retries as a share of requests. I tried two kinds:&lt;/p&gt;
+      &lt;ul&gt;
+        &lt;li&gt;&lt;b&gt;Ratio&lt;/b&gt; (the style Finagle uses): each new request adds 0.1 of a token, a retry spends one, and the bank holds at most 100. Stuck, the server sees at most 1.1 times the load, so the line moves to 1/1.1 ≈ 0.91. Measured: it fell to about zero from 0.9 at both timeouts. At 0.9 the load with retries is 99% of capacity, so a 2,000-unit stall didn't drain in the time I gave it.&lt;/li&gt;
+        &lt;li&gt;&lt;b&gt;Refund&lt;/b&gt; (the style of the AWS SDK's standard retry mode): a bucket of 500, a retry costs 5 (10 after a timeout), and each success refunds 1. When nothing succeeds, retries stop entirely, so this one never stuck at zero below load 0.98.&lt;/li&gt;
+      &lt;/ul&gt;
+
+      &lt;p&gt;With the timeout of 50 and load up to 0.8, both budgets did their job: essentially every request succeeded, against 99% without retries, because they won back the 1% errors. The trouble was elsewhere.&lt;/p&gt;
+
+      &lt;table class="compact"&gt;
+        &lt;tr&gt;&lt;th&gt;fraction succeeding, no stall&lt;/th&gt;&lt;th&gt;load 0.6, timeout 10&lt;/th&gt;&lt;th&gt;load 0.8, timeout 10&lt;/th&gt;&lt;th&gt;load 0.95, timeout 50&lt;/th&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;no retries&lt;/td&gt;&lt;td&gt;0.97&lt;/td&gt;&lt;td&gt;0.86&lt;/td&gt;&lt;td&gt;0.90&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;ratio budget, bank 100&lt;/td&gt;&lt;td&gt;0.88&lt;/td&gt;&lt;td&gt;0.58&lt;/td&gt;&lt;td&gt;0.00&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;ratio budget, bank 1&lt;/td&gt;&lt;td&gt;0.97&lt;/td&gt;&lt;td&gt;0.76&lt;/td&gt;&lt;td&gt;0.00&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;refund bucket 500&lt;/td&gt;&lt;td&gt;0.92&lt;/td&gt;&lt;td&gt;0.71&lt;/td&gt;&lt;td&gt;0.69&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;refund bucket 50&lt;/td&gt;&lt;td&gt;0.97&lt;/td&gt;&lt;td&gt;0.80&lt;/td&gt;&lt;td&gt;0.82&lt;/td&gt;&lt;/tr&gt;
+      &lt;/table&gt;
+      &lt;p class="caption"&gt;Budget rows: 20 runs per cell, a separate sweep; no-retries row from the 40-run grid. The 0.95 column is above the ratio budget's 1/1.1 line.&lt;/p&gt;
+
+      &lt;p&gt;At the tight timeout, the budgets were worse than not retrying. The bank is the problem. While things are healthy it fills up, and when a fluctuation causes a few timeouts, a full bank lets a hundred retries through at once. That pushes the queue past the timeout for everyone, and the system cycles: drain, refill, burst. A bank of 1 removed most of the damage at 0.6 but not at 0.8, and a bigger ratio made it worse (20% with a bank of 100: 0.83 at load 0.6). A budget limits how bad it gets, but it's a limit on the stuck state, not a way out of it.&lt;/p&gt;
+
+      &lt;h2&gt;What made the stuck state go away&lt;/h2&gt;
+
+      &lt;p&gt;Every option that never got stuck changes which work the server does, not which work the clients send:&lt;/p&gt;
+      &lt;ul&gt;
+        &lt;li&gt;&lt;b&gt;LIFO&lt;/b&gt; (serve the newest attempt first): with 3 attempts it held 0.95 at load 0.9 and 0.93 at 0.95 with the tight timeout, and 0.97 or better everywhere with the timeout of 50. After the 200-unit stall it was back in the first window. The newest attempt is the one whose client is surely still waiting. Retries helped here: LIFO without retries got 0.86 and 0.83 at 0.9 and 0.95, because a request stuck at the bottom of the stack only gets out by retrying onto the top. This is Facebook's "adaptive LIFO" idea; I used plain LIFO all the time.&lt;/li&gt;
+        &lt;li&gt;&lt;b&gt;A bounded queue&lt;/b&gt; (reject instantly when 10 are waiting or in service): 0.85 and 0.81 at loads 0.9 and 0.95 with the tight timeout, 0.95 and 0.93 with the loose one. Never stuck.&lt;/li&gt;
+        &lt;li&gt;&lt;b&gt;Skipping dead work&lt;/b&gt; (the server checks, before starting an attempt, whether its client already gave up): never stuck, and with no retries it was excellent, 0.98 at load 0.95. With 3 attempts it fell to 0.57 there. Under overload, a first-in-first-out queue's oldest live attempt is the one closest to its deadline, so it often times out while being served: in one run, 64% of the server's time still went to answers nobody received. A real deadline check should skip work that can't finish in time, not just work that's already expired.&lt;/li&gt;
+      &lt;/ul&gt;
+
+      &lt;h2&gt;What I'd do&lt;/h2&gt;
+
+      &lt;ul&gt;
+        &lt;li&gt;Know the number: with plain retries and k attempts, a server is one bad minute away from being stuck whenever its load is above 1/k. Three attempts and 40% utilization is already in that zone.&lt;/li&gt;
+        &lt;li&gt;Don't count on backoff to prevent this. It's for spreading out contention, not for reducing total work.&lt;/li&gt;
+        &lt;li&gt;Make the server shed abandoned work: serve newest-first when the queue is long, cap the queue, or pass deadlines down and skip requests that can't make theirs. These were the only options I tested that couldn't get stuck at any load.&lt;/li&gt;
+        &lt;li&gt;If you add a retry budget, keep the bank small. A large bank is a burst of retries waiting for a bad moment.&lt;/li&gt;
+        &lt;li&gt;Timeouts set near the 99th percentile of healthy latency make all of this much worse: at load 0.5 my tight timeout locked up on its own in minutes of simulated time, and twice that timeout took 100 times longer.&lt;/li&gt;
+      &lt;/ul&gt;
+
+      &lt;p&gt;Limits: one server, exponential service times, one class of request, and every client following the same policy with one shared budget (real budgets are per client, which lets a fleet send more). The queue has no memory or connection limit, so a stuck run's queue just grows. Rejections and skips cost the server nothing here; in practice they cost a little. The exact lines will move with all of this, but the 1/k arithmetic doesn't depend on the details: it only needs abandoned work to keep using the server.&lt;/p&gt;</content>
+  </entry>
+  <entry>
     <title>The Cap Is Doing the Work</title>
     <link href="https://wickkit.cc/posts/2026-10-08-the-cap-is-doing-the-work.html"/>
     <id>https://wickkit.cc/posts/2026-10-08-the-cap-is-doing-the-work.html</id>

@@ -26,6 +26,11 @@
     <ul class="post-list">
       <li>
         <span class="post-date">2026-10-08</span>
+        <a href="/posts/2026-10-08-three-attempts-one-third.html" class="post-title">Three Attempts, One Third</a>
+        <p class="post-excerpt">With plain retries and k attempts, a brief stall leaves a server stuck for good at any load above 1/k: every request times out, retries, and wastes the server's time. Backoff doesn't move that line. A retry budget moves it near capacity but did worse than no retries at tight timeouts; serving newest-first or capping the queue never got stuck.</p>
+      </li>
+      <li>
+        <span class="post-date">2026-10-08</span>
         <a href="/posts/2026-10-08-the-cap-is-doing-the-work.html" class="post-title">The Cap Is Doing the Work</a>
         <p class="post-excerpt">Retry backoff simulated three ways. The classic ranking holds, but the cap decides whether a burst drains: full jitter needs about twice the pile-up, and decorrelated jitter far more, since its typical sleep grows only 10% per retry. When failed attempts eat capacity, every strategy collapsed at 15% to 20% load.</p>
       </li>
