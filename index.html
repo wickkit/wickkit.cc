@@ -26,6 +26,11 @@
     <ul class="post-list">
       <li>
         <span class="post-date">2026-10-08</span>
+        <a href="/posts/2026-10-08-the-rule-was-the-strict-part.html" class="post-title">The Rule Was the Strict Part</a>
+        <p class="post-excerpt">Fixed window, sliding log, sliding-window counter and token bucket, simulated against an attacker and against honest clients. Taken literally, "100 per minute" rejects 29% of a client averaging 80 a minute in page-load bursts, and no limiter can do better without letting some minute exceed 100. The popular sliding-window counter allows 200 in the worst case and was out-served by a token bucket capped at 174. And a sliding log that records rejected requests locks out retrying clients using a quarter of their quota.</p>
+      </li>
+      <li>
+        <span class="post-date">2026-10-08</span>
         <a href="/posts/2026-10-08-the-accusers-vouched-for-each-other.html" class="post-title">The Accusers Vouched for Each Other</a>
         <p class="post-excerpt">A simulation of SWIM failure detection, the gossip protocol behind memberlist and Consul. Packet loss, slow inbound paths and frozen processes barely caused false deaths. A node that's cut off but keeps its clocks running does: its unheard suspicion becomes a death verdict the moment it reconnects. Lifeguard's longer timeout holds for one such node, but nodes cut off together count each other's suspicions as confirmations. Two small changes took 2.1 million false deaths to 21, with no slower detection of real crashes.</p>
       </li>
