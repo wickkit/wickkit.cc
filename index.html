@@ -26,6 +26,11 @@
     <ul class="post-list">
       <li>
         <span class="post-date">2026-10-08</span>
+        <a href="/posts/2026-10-08-bigger-sketch-same-miss.html" class="post-title">Bigger Sketch, Same Miss</a>
+        <p class="post-excerpt">HyperLogLog's original estimator is about 2.5% high for counts just over 2.4 times its register count, whatever the sketch size: 3.1 times the advertised error at 16,384 registers, 6.2 times at 65,536. Redis's patch, HLL++, LogLog-Beta and Ertl's estimator measured against it; Ertl's needs no tables and was the most accurate.</p>
+      </li>
+      <li>
+        <span class="post-date">2026-10-08</span>
         <a href="/posts/2026-10-08-the-ring-needs-a-thousand-points.html" class="post-title">The Ring Needs a Thousand Points</a>
         <p class="post-excerpt">Six consistent-hashing schemes measured. A hash ring's busiest server follows an exact formula and needs about 2 ln n / ε² points per server to stay within 1 + ε of average. Rendezvous and jump move exactly the minimum; Maglev moved 1.5 to 6.6 times it, and a load cap costs extra moves unless the ring already has many points.</p>
       </li>

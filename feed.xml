@@ -8,6 +8,78 @@
   <updated>2026-10-08T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
   <entry>
+    <title>Bigger Sketch, Same Miss</title>
+    <link href="https://wickkit.cc/posts/2026-10-08-bigger-sketch-same-miss.html"/>
+    <id>https://wickkit.cc/posts/2026-10-08-bigger-sketch-same-miss.html</id>
+    <updated>2026-10-08T00:00:00Z</updated>
+    <summary>HyperLogLog's original estimator is about 2.5% high for counts just over 2.4 times its register count, whatever the sketch size: 3.1 times the advertised error at 16,384 registers, 6.2 times at 65,536. Redis's patch, HLL++, LogLog-Beta and Ertl's estimator measured against it; Ertl's needs no tables and was the most accurate.</summary>
+    <content type="html">&lt;p&gt;HyperLogLog counts distinct items in a fixed, small amount of memory: &lt;i&gt;m&lt;/i&gt; registers, each remembering the longest run of leading zeros among the hashes that landed in it. Its error is usually quoted as one number, 1.04/√&lt;i&gt;m&lt;/i&gt;, which is 0.81% for the 16,384 registers Redis uses. That number is the limit for large counts. I measured the error across the whole range, from one item to 64 times the register count, for the original estimator and the four fixes that came after it.&lt;/p&gt;
+
+      &lt;p&gt;The short version: the original 2007 estimator has a spike just above 2.5&lt;i&gt;m&lt;/i&gt;, where its error jumps to about 2.5% no matter how many registers you give it. For 16,384 registers that's 3.1 times the advertised error; for 65,536 it's 6.2 times. The later fixes remove it, and the best one, Otmar Ertl's 2017 estimator, needs no tables at all. Up to about 5&lt;i&gt;m&lt;/i&gt;, the good ones actually beat the advertised number.&lt;/p&gt;
+
+      &lt;h2&gt;The estimators&lt;/h2&gt;
+
+      &lt;ul&gt;
+        &lt;li&gt;&lt;b&gt;Original&lt;/b&gt; (Flajolet et al., 2007): the harmonic-mean "raw" estimate, but if that comes out at or under 2.5&lt;i&gt;m&lt;/i&gt; and some registers are still empty, use linear counting instead (&lt;i&gt;m&lt;/i&gt; ln(&lt;i&gt;m&lt;/i&gt;/empty registers)). This is the version most write-ups teach.&lt;/li&gt;
+        &lt;li&gt;&lt;b&gt;Redis 3.2&lt;/b&gt;: the original plus a fitted polynomial that subtracts the raw estimate's bias between 2.5&lt;i&gt;m&lt;/i&gt; and 72,000, for 16,384 registers only.&lt;/li&gt;
+        &lt;li&gt;&lt;b&gt;HLL++&lt;/b&gt; (Heule, Nunkesser and Hall, 2013): subtract an empirical bias, looked up from a table of simulated runs, and switch to linear counting below a per-size threshold. I built my own table from 2,000 training runs per size, separate from the test runs.&lt;/li&gt;
+        &lt;li&gt;&lt;b&gt;LogLog-Beta&lt;/b&gt; (Qin et al., 2016; Redis 4): one formula with a fitted 8-term correction for empty registers. I used Redis's coefficients at 16,384 registers and my own least-squares fit at every size.&lt;/li&gt;
+        &lt;li&gt;&lt;b&gt;Ertl's improved estimator&lt;/b&gt; (2017; Redis 5 and later): corrects for empty and saturated registers analytically. No tables, no switch.&lt;/li&gt;
+      &lt;/ul&gt;
+
+      &lt;p&gt;Each test was 10,000 independent runs per register count (1,024, 4,096, 16,384 and 65,536), each adding up to 64&lt;i&gt;m&lt;/i&gt; distinct items and recording the estimates at several hundred checkpoints along the way. Hashes were ideal 64-bit random values. Two checks before trusting it: linear counting's spread matched Whang's closed form within 3%, and 200 runs that hashed actual strings with SHA-1 (4,096 registers) were indistinguishable from 200 ideal runs: for Ertl's estimator the ratio of their spreads stayed between 0.87 and 1.13 at every count from 64 up, and their means differed by more than two standard errors at 2.5% of checkpoints, about what chance gives.&lt;/p&gt;
+
+      &lt;figure class="fig smooth"&gt;&lt;img src="https://wickkit.cc/img/hll.png" width="1650" height="690" alt="Left: RMS error divided by the advertised 1.04 over root m, against the true count from m/64 to 64m on a log axis, for 16,384 registers. All four estimators sit near 0.7 below m and rise to 1.0 at 64m. The original HLL spikes to 3.1 just above 2.4m and falls back by about 3.5m. The Redis 3.2 patch rises to 1.12 just below 2.4m, then drops. HLL++ and Ertl stay at or under 1.0 everywhere. Right: peak RMS error between m and 5m for 1K, 4K, 16K and 64K registers. Original HLL: 4.3, 2.9, 2.5, 2.5 percent. Ertl: 2.9, 1.5, 0.73, 0.37 percent, just under the advertised line of 3.2, 1.6, 0.81, 0.41."&gt;
+        &lt;figcaption&gt;Left: 10,000 runs per point, 16,384 registers. LogLog-Beta is left off because it sits on top of Ertl. Right: the peak RMS error anywhere between &lt;i&gt;m&lt;/i&gt; and 5&lt;i&gt;m&lt;/i&gt;, by sketch size.&lt;/figcaption&gt;
+      &lt;/figure&gt;
+
+      &lt;h2&gt;The spike, and why more registers don't help&lt;/h2&gt;
+
+      &lt;p&gt;The raw estimate is badly biased upward at small counts, which is why the original switches to linear counting. The trouble is where it switches back. Measured as a fraction of the true count, the raw estimate's bias is:&lt;/p&gt;
+
+      &lt;div class="table-wrap"&gt;&lt;table class="compact"&gt;
+        &lt;thead&gt;&lt;tr&gt;&lt;th&gt;true count&lt;/th&gt;&lt;th&gt;&lt;i&gt;m&lt;/i&gt;&lt;/th&gt;&lt;th&gt;2&lt;i&gt;m&lt;/i&gt;&lt;/th&gt;&lt;th&gt;2.5&lt;i&gt;m&lt;/i&gt;&lt;/th&gt;&lt;th&gt;3&lt;i&gt;m&lt;/i&gt;&lt;/th&gt;&lt;th&gt;4&lt;i&gt;m&lt;/i&gt;&lt;/th&gt;&lt;th&gt;5&lt;i&gt;m&lt;/i&gt;&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;
+        &lt;tbody&gt;
+          &lt;tr&gt;&lt;td&gt;raw estimate bias&lt;/td&gt;&lt;td&gt;+31.6%&lt;/td&gt;&lt;td&gt;+5.5%&lt;/td&gt;&lt;td&gt;+2.5%&lt;/td&gt;&lt;td&gt;+1.0%&lt;/td&gt;&lt;td&gt;+0.2%&lt;/td&gt;&lt;td&gt;0.0%&lt;/td&gt;&lt;/tr&gt;
+        &lt;/tbody&gt;
+      &lt;/table&gt;&lt;/div&gt;
+      &lt;p class="note"&gt;Same to within 0.1 points at all four sizes.&lt;/p&gt;
+
+      &lt;p&gt;So the original hands over to the raw estimate while it's still about 2.5% high. Because the switch is on the estimate rather than the true count, it happens at a true count of about 2.43&lt;i&gt;m&lt;/i&gt;, and from there almost every run reports the biased raw number until the bias fades out past 3&lt;i&gt;m&lt;/i&gt;. The bias is a fixed fraction of the count, the same for every sketch size, while the advertised error shrinks with √&lt;i&gt;m&lt;/i&gt;. More registers make the rest of the curve better and leave the spike where it was:&lt;/p&gt;
+
+      &lt;div class="table-wrap"&gt;&lt;table class="compact"&gt;
+        &lt;thead&gt;&lt;tr&gt;&lt;th&gt;registers&lt;/th&gt;&lt;th&gt;advertised&lt;/th&gt;&lt;th&gt;original, peak&lt;/th&gt;&lt;th&gt;Ertl, peak&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;
+        &lt;tbody&gt;
+          &lt;tr&gt;&lt;td&gt;1,024&lt;/td&gt;&lt;td&gt;3.25%&lt;/td&gt;&lt;td&gt;4.27% (1.3×)&lt;/td&gt;&lt;td&gt;2.93%&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;4,096&lt;/td&gt;&lt;td&gt;1.62%&lt;/td&gt;&lt;td&gt;2.87% (1.8×)&lt;/td&gt;&lt;td&gt;1.46%&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;16,384&lt;/td&gt;&lt;td&gt;0.81%&lt;/td&gt;&lt;td&gt;2.55% (3.1×)&lt;/td&gt;&lt;td&gt;0.73%&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;65,536&lt;/td&gt;&lt;td&gt;0.41%&lt;/td&gt;&lt;td&gt;2.50% (6.2×)&lt;/td&gt;&lt;td&gt;0.37%&lt;/td&gt;&lt;/tr&gt;
+        &lt;/tbody&gt;
+      &lt;/table&gt;&lt;/div&gt;
+      &lt;p class="note"&gt;Peak RMS error for true counts between &lt;i&gt;m&lt;/i&gt; and 5&lt;i&gt;m&lt;/i&gt;. For the original the peak is at about 2.43&lt;i&gt;m&lt;/i&gt; to 2.48&lt;i&gt;m&lt;/i&gt;, at the two larger sizes almost all of it bias; for Ertl it's near 5&lt;i&gt;m&lt;/i&gt;, on the way up to the advertised value.&lt;/p&gt;
+
+      &lt;p&gt;In counts: with 16,384 registers, every true count from about 39,800 to 48,300 has more than 1.5 times the advertised error, and at 40,700 the 99th-percentile miss is 3.9%. It's bias, not noise: at that count the sketch reads high in nearly every run.&lt;/p&gt;
+
+      &lt;h2&gt;The fixes&lt;/h2&gt;
+
+      &lt;p&gt;At 16,384 registers, Redis's polynomial patch took the worst error from 3.1× down to 1.12× the advertised value, with a small leftover bump just before the switch. LogLog-Beta with Redis's coefficients, my refit LogLog-Beta, HLL++ with my bias table, and Ertl's estimator all peaked at 1.00×, and only at 45&lt;i&gt;m&lt;/i&gt;, where every estimator converges to the advertised value anyway. The other sizes look the same. At 16,384 registers their largest bias anywhere from &lt;i&gt;m&lt;/i&gt;/64 to 64&lt;i&gt;m&lt;/i&gt;: Ertl 0.016%, LogLog-Beta 0.03%, HLL++ 0.09%.&lt;/p&gt;
+
+      &lt;p&gt;Two details I didn't expect:&lt;/p&gt;
+
+      &lt;ul&gt;
+        &lt;li&gt;HLL++'s switch threshold barely matters. I set mine where linear counting's error crosses the bias-corrected estimate's, which came out at 1.2&lt;i&gt;m&lt;/i&gt; for 16,384 registers; the paper's value is 11,500, or 0.7&lt;i&gt;m&lt;/i&gt;. The two error curves are nearly level with each other there, and using the paper's threshold instead changed the worst error below 5&lt;i&gt;m&lt;/i&gt; from 0.905× to 0.926× the advertised value.&lt;/li&gt;
+        &lt;li&gt;My least-squares fit of LogLog-Beta's eight coefficients came out completely different from Redis's (one of them is −1.18 where Redis has +0.17), yet the two gave the same errors. The polynomial is so badly conditioned that many coefficient sets trace the same curve, so its coefficients shouldn't be read as meaning anything.&lt;/li&gt;
+      &lt;/ul&gt;
+
+      &lt;p&gt;And the good news hidden in the left chart: below &lt;i&gt;m&lt;/i&gt;, every estimator except the uncorrected raw one runs at 0.66 to 0.83 times the advertised error. Small counts are the easy part.&lt;/p&gt;
+
+      &lt;h2&gt;What I'd use&lt;/h2&gt;
+
+      &lt;p&gt;Ertl's estimator. It's about twenty lines that run on a histogram of the register values, has no tables or thresholds to get right for each sketch size, and was the most accurate of everything I tested. If you're using a library, check which estimator it implements: anything that switches at 2.5&lt;i&gt;m&lt;/i&gt; with no bias correction will be about 2.5% high for counts a little over 2.4 times its register count, however big you make it.&lt;/p&gt;
+
+      &lt;p&gt;Limits: ideal hashing with 64-bit hashes, so no 32-bit large-range correction, and registers wide enough never to overflow; the real-hash check covered one size. I didn't test Ertl's maximum-likelihood estimator or HLL++'s sparse mode, which stores small sets exactly and does better than any of these at tiny counts. My HLL++ bias table is built the paper's way but isn't Google's.&lt;/p&gt;</content>
+  </entry>
+  <entry>
     <title>The Ring Needs a Thousand Points</title>
     <link href="https://wickkit.cc/posts/2026-10-08-the-ring-needs-a-thousand-points.html"/>
     <id>https://wickkit.cc/posts/2026-10-08-the-ring-needs-a-thousand-points.html</id>
