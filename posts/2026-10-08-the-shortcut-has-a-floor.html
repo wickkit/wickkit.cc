@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>The Shortcut Has a Floor — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/den.html">den</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+
+    <article>
+      <h1>The Shortcut Has a Floor</h1>
+      <div class="meta">2026-10-08 · Kit Wickham</div>
+
+      <p>A Bloom filter answers "have I seen this key?" with no false negatives and a tunable rate of false positives. Each key sets <i>k</i> bits in an array of <i>m</i> bits; a lookup checks the same <i>k</i> bits and says yes if they're all set. The textbook rate after <i>n</i> keys is (1 − e<sup>−<i>kn</i>/<i>m</i></sup>)<sup><i>k</i></sup>. Give it 10 bits per key and 7 probes and it promises 0.82%. Give it 20 bits per key and 14 probes and it promises 0.0067%.</p>
+
+      <p>I wanted to know how often real filters keep that promise. The formula turned out to be fine. What breaks the promise is the arithmetic that turns a key's hash into <i>k</i> bit positions. The most popular shortcut puts a floor under the false-positive rate that no amount of memory gets you below, and a 2012 bug in a widely used Java library made big filters up to 4.5 times worse than advertised. I reproduced both.</p>
+
+      <h2>The formula holds</h2>
+
+      <p>The textbook formula assumes the bits are independent, which they aren't quite: setting one bit makes the others slightly less likely to be set. I computed the exact rate (a dynamic program over how many bits are set) for filters from 1,024 to 65,536 bits. At 1,024 bits with 20 bits per key, the exact rate is 2.7% above the formula; at 4,096 bits, 0.7%; at 65,536 bits, 0.04%. Simulated filters with truly independent probe positions matched the exact rate to within about two standard errors. Splitting the array into <i>k</i> slices with one probe each, another common layout, cost at most 9% at 1,024 bits and stayed within about 1% from 65,536 bits up.</p>
+
+      <p>So with good hashing, trust the formula. The question is whether you have good hashing.</p>
+
+      <h2>Double hashing has a floor</h2>
+
+      <p>Computing <i>k</i> independent hashes per key is slow. Kirsch and Mitzenmacher showed in 2006 that two are enough: take hashes <i>h</i><sub>1</sub> and <i>h</i><sub>2</sub> and probe <i>h</i><sub>1</sub> + <i>i</i>·<i>h</i><sub>2</sub> mod <i>m</i> for <i>i</i> = 0 … <i>k</i>−1. Their result is that the false-positive rate converges to the formula as the filter grows. It's the standard trick; most libraries use some form of it.</p>
+
+      <p>"Converges as the filter grows" leaves room at finite sizes. I simulated filters at 4,096 and 65,536 bits with ideal random hash values, so the only thing being tested is the index arithmetic, and swept the memory from 4 to 32 bits per key with the matching optimal <i>k</i>. Each point is 200 million lookups at 4,096 bits and a billion at 65,536 bits, across many independently built filters.</p>
+
+      <figure class="fig smooth"><img src="/img/bloom.png" width="1650" height="690" alt="Two log-scale charts of false-positive rate against bits per key from 4 to 32, for a 4,096-bit filter (left) and a 65,536-bit filter (right). The dashed formula line falls from about 0.15 at 4 bits per key to about 2 in 10 million at 32. Simulated independent hashes sit on it. Up to 12 bits per key every method matches. Beyond that, plain double hashing with a power-of-two size flattens out: around 2.7 in 10,000 on the left and 1.7 in 100,000 on the right. Double hashing with a prime size and nonzero stride flattens lower, around 4.5 in 100,000 on the left and 3 in a million on the right. Enhanced double hashing stays close to the formula longest, ending at about 7.5 in a million on the left and 7 in 10 million on the right.">
+        <figcaption>Ideal random hash values in every case; only the way two hashes become <i>k</i> positions differs. Independent hashes were simulated up to 16 bits per key; past that the exact formula stands in for them.</figcaption>
+      </figure>
+
+      <p>Up to 10 bits per key, every method lands within 4% of the formula. Past that, double hashing stops improving. With a power-of-two filter size and the stride <i>h</i><sub>2</sub> taken straight from the hash, the rate bottoms out near 1.1/<i>m</i>: 2.7 in 10,000 for the 4,096-bit filter and 1.7 in 100,000 for the 65,536-bit one, whatever you spend. Using a prime size and forcing the stride to be nonzero lowers the floor to about 0.2/<i>m</i>. Enhanced double hashing (Dillinger and Manolios, which adds a cubic term, <i>h</i><sub>1</sub> + <i>i</i>·<i>h</i><sub>2</sub> + (<i>i</i><sup>3</sup>−<i>i</i>)/6) lowers it to about 0.03/<i>m</i>.</p>
+
+      <div class="table-wrap"><table class="compact">
+        <thead><tr><th>bits per key</th><th>formula</th><th>plain, power of two</th><th>prime, stride ≠ 0</th><th>enhanced</th></tr></thead>
+        <tbody>
+          <tr><td>16</td><td>4.6e-4</td><td>1.05×</td><td>1.02×</td><td>1.00×</td></tr>
+          <tr><td>20</td><td>6.7e-5</td><td>1.29×</td><td>1.08×</td><td>1.00×</td></tr>
+          <tr><td>24</td><td>9.9e-6</td><td>2.8×</td><td>1.4×</td><td>1.08×</td></tr>
+          <tr><td>28</td><td>1.4e-6</td><td>12×</td><td>3.2×</td><td>1.4×</td></tr>
+          <tr><td>32</td><td>2.1e-7</td><td>78×</td><td>15×</td><td>3.4×</td></tr>
+        </tbody>
+      </table></div>
+      <p class="note">65,536-bit (8 KB) filter: the formula's promise, and how many times worse each double-hashing variant measured. At 4,096 bits the 32-bits-per-key row reads 1,240×, 209× and 35×.</p>
+
+      <p>Where the floor comes from is easy to see once you look for it. If the stride happens to be 0, which a uniform hash gives you once in <i>m</i> keys, all <i>k</i> probes hit the same bit, and at the optimal <i>k</i> about half the bits are set. That alone is a false-positive rate of 0.5/<i>m</i>, and it's exactly the gap I measured between allowing stride 0 and forbidding it (0.51/<i>m</i> at 1,021 bits). With a power-of-two size, strides of <i>m</i>/2 and ±<i>m</i>/4 also cycle through only two or four bits, which adds roughly another 0.4/<i>m</i>. What's left after those are gone is pairs of keys that drew the same stride with nearby starting points and so share most of their probe positions, which for any one lookup has a chance on the order of <i>kn</i>/<i>m</i><sup>2</sup>. The cubic term breaks most of those overlaps.</p>
+
+      <p>None of this matters for big filters with modest targets: at 10 bits per key and 65,536 bits, every variant was within 1% of the formula. It matters when the target is low relative to 1/<i>m</i>. A rough rule from these runs: if the rate you want is below about ten times the floor, the floor shows. Plain double hashing in an 8 KB filter can't get below about one in 60,000 however much memory it gets, and it's already paying extra past one in 10,000. Small per-block or per-page filters asked for one in a million can be off by a lot.</p>
+
+      <h2>A bug that only shows up in big filters</h2>
+
+      <p>The arithmetic around the shortcut matters too. Guava, Google's core Java library, shipped this as its Bloom filter index computation, with 32-bit <code>int</code> hashes taken from a 128-bit MurmurHash3:</p>
+
+      <pre><code>int combinedHash = hash1 + (i * hash2);
+// Flip all the bits if it's negative (guaranteed positive number)
+if (combinedHash < 0) {
+  combinedHash = ~combinedHash;
+}
+bitsChanged |= bits.set(combinedHash % bitSize);</code></pre>
+
+      <p>The index before the modulo is a number from 0 to 2<sup>31</sup>−1. In 2012 someone filed <a href="https://github.com/google/guava/issues/1119">"BloomFilter broken when really big"</a>, with two problems. If the filter has more than 2<sup>31</sup> bits, the rest are never touched. And if it has somewhat fewer, the modulo isn't uniform: at 3·2<sup>29</sup> bits, the first 2<sup>29</sup> positions get hit twice as often as the others. The report showed a filter configured for a one-in-a-million rate measuring three in a million.</p>
+
+      <p>I reimplemented that index arithmetic (signed 32-bit wraparound, the bit flip, the modulo; ideal random hash bits in place of MurmurHash3) and ran it on filters with up to 3 billion bits:</p>
+
+      <div class="table-wrap"><table class="compact">
+        <thead><tr><th>filter</th><th>formula</th><th>independent hashes</th><th>Guava-style index</th></tr></thead>
+        <tbody>
+          <tr><td>3·2<sup>29</sup> bits, 10 per key</td><td>0.82%</td><td>0.82%</td><td>1.17% (1.43×)</td></tr>
+          <tr><td>3·2<sup>29</sup> bits, sized for 1 in a million</td><td>1.0e-6</td><td>0.99e-6</td><td>4.5e-6 (4.5×)</td></tr>
+          <tr><td>3 billion bits, 10 per key</td><td>0.82%</td><td>0.82%</td><td>3.68% (4.5×)</td></tr>
+        </tbody>
+      </table></div>
+      <p class="note">6 filters per row for the first two (3 for the last), 20 million lookups each (250 million for the one-in-a-million row). Standard errors are at most 2% of each value.</p>
+
+      <p>The 1.43× matches the 1.42× you get by hand from a third of the array taking half the probes, and the 3-billion-bit row is what a 2<sup>31</sup>-bit filter would give with all those keys crammed into it. The one-in-a-million case is worse than the 10-bits-per-key case because 20 probes compound the unevenness where 7 don't. Guava's fix was a new strategy, <code>MURMUR128_MITZ_64</code>, which uses two 64-bit halves of the hash and 64-bit arithmetic; the issue was slated for Guava 17 in 2014. The old strategy stays in the code so that filters serialized with it still read back correctly.</p>
+
+      <p>Doing the same thing in unsigned 32-bit arithmetic, without the flip, is better but still not right: the modulo of a 32-bit value is uneven too. It measured 1.11× at 3·2<sup>29</sup> bits and 1.43× at 3 billion.</p>
+
+      <h2>A 32-bit hash is a floor too</h2>
+
+      <p>One more way to get a floor: derive both probe hashes from a single 32-bit hash. Two keys whose hashes collide are then indistinguishable to the filter, so a lookup is a false positive whenever its hash matches any stored key's, which happens with probability about <i>n</i>/2<sup>32</sup>. With 100 million keys in a billion bits at 10 bits per key, the formula promises 0.82%. That design measured 3.08%, 3.8 times worse, and the 2.3% collision floor accounts for nearly all of the difference. At a million keys and a 1% target it adds under 3%, easy to miss in testing.</p>
+
+      <h2>What I'd do</h2>
+
+      <ul>
+        <li>Hash to 64 bits or more and keep the index arithmetic in 64 bits. Reduce to the filter size from the full 64-bit value, never from a 31- or 32-bit one.</li>
+        <li>Use double hashing freely when the target is well above 1/<i>m</i>: at 10 bits per key it was within 4% of the formula from 4,096 bits up.</li>
+        <li>For low targets in small filters, compare the target with about 1/<i>m</i>. If it's not well above, use enhanced double hashing (its floor was about 35 times lower in my runs) or truly independent hashes.</li>
+        <li>Test a filter at the size you'll deploy, not a small one. Every problem here grows with size or with how low the target is.</li>
+      </ul>
+
+      <p>Limits: random keys with ideal hash values, so this measures index arithmetic, not hash quality; weak hash functions on structured keys are a separate problem. The Guava rows reimplement its index computation in JavaScript; I didn't run the Java library. About 2,000 simulation runs in all, plus exact calculations for filters up to 65,536 bits.</p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+</body>
+</html>

@@ -5,8 +5,96 @@
   <link href="https://wickkit.cc/"/>
   <link rel="self" href="https://wickkit.cc/feed.xml"/>
   <id>https://wickkit.cc/</id>
-  <updated>2026-10-07T00:00:00Z</updated>
+  <updated>2026-10-08T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
+  <entry>
+    <title>The Shortcut Has a Floor</title>
+    <link href="https://wickkit.cc/posts/2026-10-08-the-shortcut-has-a-floor.html"/>
+    <id>https://wickkit.cc/posts/2026-10-08-the-shortcut-has-a-floor.html</id>
+    <updated>2026-10-08T00:00:00Z</updated>
+    <summary>The Bloom filter formula is right. The standard two-hash shortcut isn't: it puts a floor near 1/m under the false-positive rate, 78 times the promise in an 8 KB filter at 32 bits per key. Plus a reproduction of a 2012 Guava bug that made big filters up to 4.5 times worse.</summary>
+    <content type="html">&lt;p&gt;A Bloom filter answers "have I seen this key?" with no false negatives and a tunable rate of false positives. Each key sets &lt;i&gt;k&lt;/i&gt; bits in an array of &lt;i&gt;m&lt;/i&gt; bits; a lookup checks the same &lt;i&gt;k&lt;/i&gt; bits and says yes if they're all set. The textbook rate after &lt;i&gt;n&lt;/i&gt; keys is (1 − e&lt;sup&gt;−&lt;i&gt;kn&lt;/i&gt;/&lt;i&gt;m&lt;/i&gt;&lt;/sup&gt;)&lt;sup&gt;&lt;i&gt;k&lt;/i&gt;&lt;/sup&gt;. Give it 10 bits per key and 7 probes and it promises 0.82%. Give it 20 bits per key and 14 probes and it promises 0.0067%.&lt;/p&gt;
+
+      &lt;p&gt;I wanted to know how often real filters keep that promise. The formula turned out to be fine. What breaks the promise is the arithmetic that turns a key's hash into &lt;i&gt;k&lt;/i&gt; bit positions. The most popular shortcut puts a floor under the false-positive rate that no amount of memory gets you below, and a 2012 bug in a widely used Java library made big filters up to 4.5 times worse than advertised. I reproduced both.&lt;/p&gt;
+
+      &lt;h2&gt;The formula holds&lt;/h2&gt;
+
+      &lt;p&gt;The textbook formula assumes the bits are independent, which they aren't quite: setting one bit makes the others slightly less likely to be set. I computed the exact rate (a dynamic program over how many bits are set) for filters from 1,024 to 65,536 bits. At 1,024 bits with 20 bits per key, the exact rate is 2.7% above the formula; at 4,096 bits, 0.7%; at 65,536 bits, 0.04%. Simulated filters with truly independent probe positions matched the exact rate to within about two standard errors. Splitting the array into &lt;i&gt;k&lt;/i&gt; slices with one probe each, another common layout, cost at most 9% at 1,024 bits and stayed within about 1% from 65,536 bits up.&lt;/p&gt;
+
+      &lt;p&gt;So with good hashing, trust the formula. The question is whether you have good hashing.&lt;/p&gt;
+
+      &lt;h2&gt;Double hashing has a floor&lt;/h2&gt;
+
+      &lt;p&gt;Computing &lt;i&gt;k&lt;/i&gt; independent hashes per key is slow. Kirsch and Mitzenmacher showed in 2006 that two are enough: take hashes &lt;i&gt;h&lt;/i&gt;&lt;sub&gt;1&lt;/sub&gt; and &lt;i&gt;h&lt;/i&gt;&lt;sub&gt;2&lt;/sub&gt; and probe &lt;i&gt;h&lt;/i&gt;&lt;sub&gt;1&lt;/sub&gt; + &lt;i&gt;i&lt;/i&gt;·&lt;i&gt;h&lt;/i&gt;&lt;sub&gt;2&lt;/sub&gt; mod &lt;i&gt;m&lt;/i&gt; for &lt;i&gt;i&lt;/i&gt; = 0 … &lt;i&gt;k&lt;/i&gt;−1. Their result is that the false-positive rate converges to the formula as the filter grows. It's the standard trick; most libraries use some form of it.&lt;/p&gt;
+
+      &lt;p&gt;"Converges as the filter grows" leaves room at finite sizes. I simulated filters at 4,096 and 65,536 bits with ideal random hash values, so the only thing being tested is the index arithmetic, and swept the memory from 4 to 32 bits per key with the matching optimal &lt;i&gt;k&lt;/i&gt;. Each point is 200 million lookups at 4,096 bits and a billion at 65,536 bits, across many independently built filters.&lt;/p&gt;
+
+      &lt;figure class="fig smooth"&gt;&lt;img src="https://wickkit.cc/img/bloom.png" width="1650" height="690" alt="Two log-scale charts of false-positive rate against bits per key from 4 to 32, for a 4,096-bit filter (left) and a 65,536-bit filter (right). The dashed formula line falls from about 0.15 at 4 bits per key to about 2 in 10 million at 32. Simulated independent hashes sit on it. Up to 12 bits per key every method matches. Beyond that, plain double hashing with a power-of-two size flattens out: around 2.7 in 10,000 on the left and 1.7 in 100,000 on the right. Double hashing with a prime size and nonzero stride flattens lower, around 4.5 in 100,000 on the left and 3 in a million on the right. Enhanced double hashing stays close to the formula longest, ending at about 7.5 in a million on the left and 7 in 10 million on the right."&gt;
+        &lt;figcaption&gt;Ideal random hash values in every case; only the way two hashes become &lt;i&gt;k&lt;/i&gt; positions differs. Independent hashes were simulated up to 16 bits per key; past that the exact formula stands in for them.&lt;/figcaption&gt;
+      &lt;/figure&gt;
+
+      &lt;p&gt;Up to 10 bits per key, every method lands within 4% of the formula. Past that, double hashing stops improving. With a power-of-two filter size and the stride &lt;i&gt;h&lt;/i&gt;&lt;sub&gt;2&lt;/sub&gt; taken straight from the hash, the rate bottoms out near 1.1/&lt;i&gt;m&lt;/i&gt;: 2.7 in 10,000 for the 4,096-bit filter and 1.7 in 100,000 for the 65,536-bit one, whatever you spend. Using a prime size and forcing the stride to be nonzero lowers the floor to about 0.2/&lt;i&gt;m&lt;/i&gt;. Enhanced double hashing (Dillinger and Manolios, which adds a cubic term, &lt;i&gt;h&lt;/i&gt;&lt;sub&gt;1&lt;/sub&gt; + &lt;i&gt;i&lt;/i&gt;·&lt;i&gt;h&lt;/i&gt;&lt;sub&gt;2&lt;/sub&gt; + (&lt;i&gt;i&lt;/i&gt;&lt;sup&gt;3&lt;/sup&gt;−&lt;i&gt;i&lt;/i&gt;)/6) lowers it to about 0.03/&lt;i&gt;m&lt;/i&gt;.&lt;/p&gt;
+
+      &lt;div class="table-wrap"&gt;&lt;table class="compact"&gt;
+        &lt;thead&gt;&lt;tr&gt;&lt;th&gt;bits per key&lt;/th&gt;&lt;th&gt;formula&lt;/th&gt;&lt;th&gt;plain, power of two&lt;/th&gt;&lt;th&gt;prime, stride ≠ 0&lt;/th&gt;&lt;th&gt;enhanced&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;
+        &lt;tbody&gt;
+          &lt;tr&gt;&lt;td&gt;16&lt;/td&gt;&lt;td&gt;4.6e-4&lt;/td&gt;&lt;td&gt;1.05×&lt;/td&gt;&lt;td&gt;1.02×&lt;/td&gt;&lt;td&gt;1.00×&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;20&lt;/td&gt;&lt;td&gt;6.7e-5&lt;/td&gt;&lt;td&gt;1.29×&lt;/td&gt;&lt;td&gt;1.08×&lt;/td&gt;&lt;td&gt;1.00×&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;24&lt;/td&gt;&lt;td&gt;9.9e-6&lt;/td&gt;&lt;td&gt;2.8×&lt;/td&gt;&lt;td&gt;1.4×&lt;/td&gt;&lt;td&gt;1.08×&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;28&lt;/td&gt;&lt;td&gt;1.4e-6&lt;/td&gt;&lt;td&gt;12×&lt;/td&gt;&lt;td&gt;3.2×&lt;/td&gt;&lt;td&gt;1.4×&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;32&lt;/td&gt;&lt;td&gt;2.1e-7&lt;/td&gt;&lt;td&gt;78×&lt;/td&gt;&lt;td&gt;15×&lt;/td&gt;&lt;td&gt;3.4×&lt;/td&gt;&lt;/tr&gt;
+        &lt;/tbody&gt;
+      &lt;/table&gt;&lt;/div&gt;
+      &lt;p class="note"&gt;65,536-bit (8 KB) filter: the formula's promise, and how many times worse each double-hashing variant measured. At 4,096 bits the 32-bits-per-key row reads 1,240×, 209× and 35×.&lt;/p&gt;
+
+      &lt;p&gt;Where the floor comes from is easy to see once you look for it. If the stride happens to be 0, which a uniform hash gives you once in &lt;i&gt;m&lt;/i&gt; keys, all &lt;i&gt;k&lt;/i&gt; probes hit the same bit, and at the optimal &lt;i&gt;k&lt;/i&gt; about half the bits are set. That alone is a false-positive rate of 0.5/&lt;i&gt;m&lt;/i&gt;, and it's exactly the gap I measured between allowing stride 0 and forbidding it (0.51/&lt;i&gt;m&lt;/i&gt; at 1,021 bits). With a power-of-two size, strides of &lt;i&gt;m&lt;/i&gt;/2 and ±&lt;i&gt;m&lt;/i&gt;/4 also cycle through only two or four bits, which adds roughly another 0.4/&lt;i&gt;m&lt;/i&gt;. What's left after those are gone is pairs of keys that drew the same stride with nearby starting points and so share most of their probe positions, which for any one lookup has a chance on the order of &lt;i&gt;kn&lt;/i&gt;/&lt;i&gt;m&lt;/i&gt;&lt;sup&gt;2&lt;/sup&gt;. The cubic term breaks most of those overlaps.&lt;/p&gt;
+
+      &lt;p&gt;None of this matters for big filters with modest targets: at 10 bits per key and 65,536 bits, every variant was within 1% of the formula. It matters when the target is low relative to 1/&lt;i&gt;m&lt;/i&gt;. A rough rule from these runs: if the rate you want is below about ten times the floor, the floor shows. Plain double hashing in an 8 KB filter can't get below about one in 60,000 however much memory it gets, and it's already paying extra past one in 10,000. Small per-block or per-page filters asked for one in a million can be off by a lot.&lt;/p&gt;
+
+      &lt;h2&gt;A bug that only shows up in big filters&lt;/h2&gt;
+
+      &lt;p&gt;The arithmetic around the shortcut matters too. Guava, Google's core Java library, shipped this as its Bloom filter index computation, with 32-bit &lt;code&gt;int&lt;/code&gt; hashes taken from a 128-bit MurmurHash3:&lt;/p&gt;
+
+      &lt;pre&gt;&lt;code&gt;int combinedHash = hash1 + (i * hash2);
+// Flip all the bits if it's negative (guaranteed positive number)
+if (combinedHash &lt; 0) {
+  combinedHash = ~combinedHash;
+}
+bitsChanged |= bits.set(combinedHash % bitSize);&lt;/code&gt;&lt;/pre&gt;
+
+      &lt;p&gt;The index before the modulo is a number from 0 to 2&lt;sup&gt;31&lt;/sup&gt;−1. In 2012 someone filed &lt;a href="https://github.com/google/guava/issues/1119"&gt;"BloomFilter broken when really big"&lt;/a&gt;, with two problems. If the filter has more than 2&lt;sup&gt;31&lt;/sup&gt; bits, the rest are never touched. And if it has somewhat fewer, the modulo isn't uniform: at 3·2&lt;sup&gt;29&lt;/sup&gt; bits, the first 2&lt;sup&gt;29&lt;/sup&gt; positions get hit twice as often as the others. The report showed a filter configured for a one-in-a-million rate measuring three in a million.&lt;/p&gt;
+
+      &lt;p&gt;I reimplemented that index arithmetic (signed 32-bit wraparound, the bit flip, the modulo; ideal random hash bits in place of MurmurHash3) and ran it on filters with up to 3 billion bits:&lt;/p&gt;
+
+      &lt;div class="table-wrap"&gt;&lt;table class="compact"&gt;
+        &lt;thead&gt;&lt;tr&gt;&lt;th&gt;filter&lt;/th&gt;&lt;th&gt;formula&lt;/th&gt;&lt;th&gt;independent hashes&lt;/th&gt;&lt;th&gt;Guava-style index&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;
+        &lt;tbody&gt;
+          &lt;tr&gt;&lt;td&gt;3·2&lt;sup&gt;29&lt;/sup&gt; bits, 10 per key&lt;/td&gt;&lt;td&gt;0.82%&lt;/td&gt;&lt;td&gt;0.82%&lt;/td&gt;&lt;td&gt;1.17% (1.43×)&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;3·2&lt;sup&gt;29&lt;/sup&gt; bits, sized for 1 in a million&lt;/td&gt;&lt;td&gt;1.0e-6&lt;/td&gt;&lt;td&gt;0.99e-6&lt;/td&gt;&lt;td&gt;4.5e-6 (4.5×)&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;3 billion bits, 10 per key&lt;/td&gt;&lt;td&gt;0.82%&lt;/td&gt;&lt;td&gt;0.82%&lt;/td&gt;&lt;td&gt;3.68% (4.5×)&lt;/td&gt;&lt;/tr&gt;
+        &lt;/tbody&gt;
+      &lt;/table&gt;&lt;/div&gt;
+      &lt;p class="note"&gt;6 filters per row for the first two (3 for the last), 20 million lookups each (250 million for the one-in-a-million row). Standard errors are at most 2% of each value.&lt;/p&gt;
+
+      &lt;p&gt;The 1.43× matches the 1.42× you get by hand from a third of the array taking half the probes, and the 3-billion-bit row is what a 2&lt;sup&gt;31&lt;/sup&gt;-bit filter would give with all those keys crammed into it. The one-in-a-million case is worse than the 10-bits-per-key case because 20 probes compound the unevenness where 7 don't. Guava's fix was a new strategy, &lt;code&gt;MURMUR128_MITZ_64&lt;/code&gt;, which uses two 64-bit halves of the hash and 64-bit arithmetic; the issue was slated for Guava 17 in 2014. The old strategy stays in the code so that filters serialized with it still read back correctly.&lt;/p&gt;
+
+      &lt;p&gt;Doing the same thing in unsigned 32-bit arithmetic, without the flip, is better but still not right: the modulo of a 32-bit value is uneven too. It measured 1.11× at 3·2&lt;sup&gt;29&lt;/sup&gt; bits and 1.43× at 3 billion.&lt;/p&gt;
+
+      &lt;h2&gt;A 32-bit hash is a floor too&lt;/h2&gt;
+
+      &lt;p&gt;One more way to get a floor: derive both probe hashes from a single 32-bit hash. Two keys whose hashes collide are then indistinguishable to the filter, so a lookup is a false positive whenever its hash matches any stored key's, which happens with probability about &lt;i&gt;n&lt;/i&gt;/2&lt;sup&gt;32&lt;/sup&gt;. With 100 million keys in a billion bits at 10 bits per key, the formula promises 0.82%. That design measured 3.08%, 3.8 times worse, and the 2.3% collision floor accounts for nearly all of the difference. At a million keys and a 1% target it adds under 3%, easy to miss in testing.&lt;/p&gt;
+
+      &lt;h2&gt;What I'd do&lt;/h2&gt;
+
+      &lt;ul&gt;
+        &lt;li&gt;Hash to 64 bits or more and keep the index arithmetic in 64 bits. Reduce to the filter size from the full 64-bit value, never from a 31- or 32-bit one.&lt;/li&gt;
+        &lt;li&gt;Use double hashing freely when the target is well above 1/&lt;i&gt;m&lt;/i&gt;: at 10 bits per key it was within 4% of the formula from 4,096 bits up.&lt;/li&gt;
+        &lt;li&gt;For low targets in small filters, compare the target with about 1/&lt;i&gt;m&lt;/i&gt;. If it's not well above, use enhanced double hashing (its floor was about 35 times lower in my runs) or truly independent hashes.&lt;/li&gt;
+        &lt;li&gt;Test a filter at the size you'll deploy, not a small one. Every problem here grows with size or with how low the target is.&lt;/li&gt;
+      &lt;/ul&gt;
+
+      &lt;p&gt;Limits: random keys with ideal hash values, so this measures index arithmetic, not hash quality; weak hash functions on structured keys are a separate problem. The Guava rows reimplement its index computation in JavaScript; I didn't run the Java library. About 2,000 simulation runs in all, plus exact calculations for filters up to 65,536 bits.&lt;/p&gt;</content>
+  </entry>
   <entry>
     <title>Sorting Made the Sum Worse</title>
     <link href="https://wickkit.cc/posts/2026-10-07-sorting-made-the-sum-worse.html"/>
@@ -558,7 +646,7 @@ public func startProcess(id: String, processID: String) async throws {
 
       &lt;p&gt;So the balanced state needs (&lt;i&gt;k&lt;/i&gt; − 1) × (typical spread) to be smaller than (1 − λ) × &lt;i&gt;T&lt;/i&gt;, up to a constant. I measured the spread directly: the gap between the longest and shortest queue on the board times (1 − λ) came out at 2.1 to 2.8 across loads of 70 to 95% and two to five dispatchers, so the spread grows like 1/(1 − λ). Put together, the tipping point should scale like (&lt;i&gt;k&lt;/i&gt; − 1)/(1 − λ)². That's where the (1 − load)² came from. In the first post I guessed it was the time a single queue takes to forget its starting point; that guess was wrong.&lt;/p&gt;
 
-      &lt;p&gt;The right panel checks the prediction. For four to ten dispatchers, the tipping point times (1 − λ)² sits close to 0.85 × (&lt;i&gt;k&lt;/i&gt; − 1) at 80, 90 and 95% load. At 90 and 95% load, three dispatchers tip earlier than the line (about 1.0 instead of 1.7); with an overshoot factor of only 2, the simple drain argument is at its weakest there. The constant 0.85 is fitted, not derived. Well below the threshold the balanced state lasts a handful of refreshes; above it, not one of 10 runs tipped in 1,000 refreshes. It's a sharp edge, not a slow leak.&lt;/p&gt;
+      &lt;p&gt;The right panel checks the prediction. For four to ten dispatchers, the tipping point times (1 − λ)² sits close to 0.85 × (&lt;i&gt;k&lt;/i&gt; − 1) at 80, 90 and 95% load. At 90 and 95% load, three dispatchers tip earlier than the line (about 1.0 instead of 1.7); with an overshoot factor of only 2, the simple drain argument is at its weakest there. The constant 0.85 is fitted, not derived (the update at the end derives the edge from a model and corrects the line). Well below the threshold the balanced state lasts a handful of refreshes; above it, not one of 10 runs tipped in 1,000 refreshes. It's a sharp edge, not a slow leak.&lt;/p&gt;
 
       &lt;h2&gt;Why the herd never ends&lt;/h2&gt;
 
@@ -574,12 +662,37 @@ public func startProcess(id: String, processID: String) async throws {
 
       &lt;ul&gt;
         &lt;li&gt;Several dispatchers, each correcting a shared stale view with only its own sends, overcorrect together. With &lt;i&gt;k&lt;/i&gt; of them, each refresh multiplies the imbalance by &lt;i&gt;k&lt;/i&gt; − 1.&lt;/li&gt;
-        &lt;li&gt;The balanced state survives only if queues drain that overshoot between refreshes: roughly &lt;i&gt;T&lt;/i&gt; &amp;gt; 0.85(&lt;i&gt;k&lt;/i&gt; − 1)/(1 − λ)². At 90% load and five dispatchers that's about 340 service times.&lt;/li&gt;
+        &lt;li&gt;The balanced state survives only if queues drain that overshoot between refreshes: roughly &lt;i&gt;T&lt;/i&gt; &amp;gt; 0.9(&lt;i&gt;k&lt;/i&gt; − 2)/(1 − λ)² with many servers (see the update; I first fitted 0.85(&lt;i&gt;k&lt;/i&gt; − 1) on 100 servers). At 90% load and five dispatchers that's about 300 service times.&lt;/li&gt;
         &lt;li&gt;Past that point the herd still exists. A fleet-wide imbalance (a restart, a scale-out) can flip the system into it permanently, at 200 times the response time.&lt;/li&gt;
         &lt;li&gt;Partition the servers among the dispatchers, or share the tally. Either removes the multiplication.&lt;/li&gt;
       &lt;/ul&gt;
 
-      &lt;p&gt;Limits: one simulator, exponential job sizes, 100 servers, identical dispatchers that each get a random share of the jobs. The constant 0.85 is measured on a coarse grid. I haven't tested whether real systems refresh their load views slowly enough to sit near this edge. The point that I'd carry over is that a cliff in a parameter sweep can hide two coexisting states, and a sweep that always starts from the same place can't tell you which one is the cliff.&lt;/p&gt;</content>
+      &lt;p&gt;Limits: one simulator, exponential job sizes, 100 servers, identical dispatchers that each get a random share of the jobs. I haven't tested whether real systems refresh their load views slowly enough to sit near this edge. The point that I'd carry over is that a cliff in a parameter sweep can hide two coexisting states, and a sweep that always starts from the same place can't tell you which one is the cliff.&lt;/p&gt;
+
+      &lt;h2&gt;Update: deriving the edge&lt;/h2&gt;
+
+      &lt;p&gt;&lt;i&gt;Added 2026-10-08.&lt;/i&gt; I called the 0.85 fitted, not derived. Here's a model that produces the edge with nothing fitted. Let the number of servers go to infinity, so the board is no longer a list of queue lengths but a distribution of them. One refresh period then turns one distribution into the next. Each dispatcher's tally raises its water level one job at a time. While the level is at &lt;i&gt;v&lt;/i&gt;, every server whose board reads &lt;i&gt;v&lt;/i&gt; or less gets one job from each dispatcher, at a random point in that dispatcher's pass, and the pass takes &lt;i&gt;k&lt;/i&gt;F(&lt;i&gt;v&lt;/i&gt;)/λ, where F(&lt;i&gt;v&lt;/i&gt;) is the share of servers at or below &lt;i&gt;v&lt;/i&gt;. Once the level clears the top of the board, everyone gets jobs at rate λ. Servers finish jobs at rate 1. The balanced state is a fixed point of that map.&lt;/p&gt;
+
+      &lt;p&gt;The model matches the simulator where both can be checked. The average queue on the board at each refresh comes out within 2%: 4.73 against 4.70 for one dispatcher at &lt;i&gt;T&lt;/i&gt; = 600, 5.50 against 5.40 for five dispatchers at &lt;i&gt;T&lt;/i&gt; = 400, 15.9 against 15.7 for five at &lt;i&gt;T&lt;/i&gt; = 20, which is already herded. Following the balanced fixed point down from long refresh periods, it holds to a certain &lt;i&gt;T&lt;/i&gt;, and just below that the map runs off from it into the herd. That's the edge:&lt;/p&gt;
+
+      &lt;div class="table-wrap"&gt;&lt;table class="compact"&gt;
+        &lt;thead&gt;&lt;tr&gt;&lt;th&gt;Dispatchers&lt;/th&gt;&lt;th&gt;Model, 80% load&lt;/th&gt;&lt;th&gt;Model, 90% load&lt;/th&gt;&lt;th&gt;Simulator, 90% load, 800 servers&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;
+        &lt;tbody&gt;
+          &lt;tr&gt;&lt;td&gt;3&lt;/td&gt;&lt;td&gt;0.87&lt;/td&gt;&lt;td&gt;0.99&lt;/td&gt;&lt;td&gt;0.95–1.05&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;4&lt;/td&gt;&lt;td&gt;2.11&lt;/td&gt;&lt;td&gt;1.97&lt;/td&gt;&lt;td&gt;&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;5&lt;/td&gt;&lt;td&gt;3.17&lt;/td&gt;&lt;td&gt;2.90&lt;/td&gt;&lt;td&gt;2.9–3.0&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;7&lt;/td&gt;&lt;td&gt;5.02&lt;/td&gt;&lt;td&gt;4.63&lt;/td&gt;&lt;td&gt;&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;10&lt;/td&gt;&lt;td&gt;7.96&lt;/td&gt;&lt;td&gt;7.07&lt;/td&gt;&lt;td&gt;7.2–7.5&lt;/td&gt;&lt;/tr&gt;
+        &lt;/tbody&gt;
+      &lt;/table&gt;&lt;/div&gt;
+
+      &lt;p&gt;The numbers are &lt;i&gt;T&lt;/i&gt;(1 − λ)² at the edge. The simulator column brackets the edge between the last refresh period where all four to six runs tipped and the first where at most one did.&lt;/p&gt;
+
+      &lt;p&gt;Three things change. First, the line isn't 0.85(&lt;i&gt;k&lt;/i&gt; − 1). At 90% load the model's edge goes up by about 0.85 per extra dispatcher, but it starts from about two dispatchers, not one: 0.9(&lt;i&gt;k&lt;/i&gt; − 2) is within 10% of every model and large-simulator value above. That's why three dispatchers looked low; it wasn't the drain argument breaking down. The model puts three dispatchers at 0.99 at 90% load and 0.96 at 95%, where the simulator had them. It also predicts that two dispatchers never tip, and they don't: with two, the simulator recovered from a half-loaded start with a backlog of 0.2&lt;i&gt;T&lt;/i&gt; at every refresh period from 5 to 300. Each refresh flips the imbalance but doesn't grow it.&lt;/p&gt;
+
+      &lt;p&gt;Second, the simulator's 100 servers put the edge about 10% high. At 90% load and five dispatchers, measured on a finer grid, the edge falls from about 3.5 with 25 servers to 3.2 with 100 and between 2.9 and 3.0 with 800 and 1,600. The model, with infinitely many, says 2.90. The (1 − λ)² scaling holds to within about 10% between 80 and 90% load.&lt;/p&gt;
+
+      &lt;p&gt;Third, the 80% load, three-dispatcher point in the chart is wrong. My tipping test counted a run as tipped once the dispatchers stopped reaching every server for ten refreshes in a row. At 80% load with refresh periods this short, that happens with no herd at all: the mean time in the system stays between 4 and 5 for refresh periods from 20 to 45 with 100 or 800 servers. There's no sharp edge there to measure.&lt;/p&gt;</content>
   </entry>
   <entry>
     <title>Round Robin Can't See the Giant</title>
