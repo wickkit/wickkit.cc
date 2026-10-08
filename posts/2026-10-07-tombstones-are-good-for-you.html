@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tombstones Are Good for You — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+    <article>
+      <h1>Tombstones Are Good for You</h1>
+      <div class="meta">2026-10-07 · Kit Wickham</div>
+
+      <p>Linear probing is the simplest hash table there is. Hash the key to a slot; if it's taken, try the next one, and the next, until you find room. It is also famous for one weakness, <i>primary clustering</i>: occupied slots clump into long runs, and every new key that lands in a run has to walk to its end and make it longer. Knuth worked out the cost in 1963. With a table that is a fraction 1&nbsp;−&nbsp;1/<i>x</i> full, inserting a key touches about ½(1&nbsp;+&nbsp;<i>x</i>²) slots. At 75% full that's 8.5. At 98.4% full it's about 2,000.</p>
+
+      <p>The usual advice for deletions goes the same way. Don't leave <i>tombstones</i> (markers that say "something was here, keep looking"), because they clog the table; shift the later keys back instead, so the table looks as if the deleted key had never been inserted. A 2021 paper by Bender, Kuszmaul and Kuszmaul, <a href="https://arxiv.org/abs/2107.01250">"Linear Probing Revisited: Tombstones Mark the Death of Primary Clustering"</a>, argues the opposite. In a table that keeps churning (keys deleted and new ones inserted), tombstones break up the runs, insertions get asymptotically cheaper than Knuth's formula, and if you plant extra tombstones on purpose you can get rid of primary clustering entirely. They call that version <i>graveyard hashing</i>. It's a proof, not a benchmark, so I simulated it to see how big the effect is at sizes you'd actually use.</p>
+
+      <h2>The setup</h2>
+
+      <p>A table of about a million slots (2<sup>20</sup>) filled to 1&nbsp;−&nbsp;1/<i>x</i> for <i>x</i> from 2 to 64, so 50% up to 98.4% full. Then the table <i>hovers</i>: delete a random key, insert a new random one, over and over. Two million of those to settle, then a million more to measure, three seeds per setting. The cost of an operation is the number of slots it touches.</p>
+
+      <p>The paper uses <i>ordered</i> linear probing, an old variant where keys within a run are kept sorted by hash. A lookup can then stop as soon as it reaches a key with a bigger hash, so even a lookup for a missing key doesn't walk the whole run. An insert finds where the key belongs and shifts the rest of the run right by one, until it reaches an empty slot or a tombstone, which it reuses. Tombstones keep their hash, so they stay in sorted order too. I compared five ways of handling deletes:</p>
+
+      <ul>
+        <li><b>No tombstones.</b> Delete by shifting later keys back (backward shift). The table stays exactly like a freshly built one.</li>
+        <li><b>Tombstones, classic rebuilds.</b> Leave a tombstone, and every <i>n</i>/(2<i>x</i>) inserts rebuild the table without them (<i>n</i> is the number of slots). That's the textbook rebuild interval.</li>
+        <li><b>Tombstones, rebuilt 16× less often.</b></li>
+        <li><b>Tombstones, never rebuilt.</b></li>
+        <li><b>Graveyard hashing.</b> Rebuild every <i>n</i>/(4<i>x</i>) operations, and at each rebuild plant <i>n</i>/(2<i>x</i>) fresh tombstones, evenly spaced, for future inserts to use.</li>
+      </ul>
+
+      <p>First, a sanity check. A freshly filled table and the no-tombstone table under churn both match Knuth's formulas: at 93.8% full (<i>x</i>&nbsp;=&nbsp;16), finding a key touches 8.5 slots against a predicted 8.5, and inserting touches 130 against 128.5.</p>
+
+      <h2>Result: inserts get much cheaper, lookups barely notice</h2>
+
+      <figure class="fig smooth"><img src="/img/graveyard.png" width="1760" height="800" alt="Two log-log charts against how full the table is, from 50% to 98.4%. Left, slots touched to insert a new key: no tombstones climbs steepest, to about 2,160 at 98.4%; classic rebuilds reach 743; rebuilding 16 times less often reaches 394; never rebuilding reaches 966; graveyard hashing climbs least, to 135. Right, slots touched to look up a missing key: no tombstones and classic rebuilds nearly coincide, ending near 34 and 37; graveyard ends at 65 and rebuilding 16 times less often at 58; never rebuilding climbs to 695.">
+        <figcaption>Ordered linear probing, about a million slots, a delete and an insert per step, mean of 3 seeds per point. The "rebuild 16× less often" line starts at 93.8% because below that its rebuild interval is longer than the whole run.</figcaption>
+      </figure>
+
+      <table class="compact">
+        <tr><th>At 98.4% full (<i>x</i> = 64)</th><th>Insert</th><th>Missing-key lookup</th><th>Rebuild sweep per insert</th></tr>
+        <tr><td>no tombstones</td><td>2,158</td><td>34</td><td>0</td></tr>
+        <tr><td>tombstones, classic rebuilds</td><td>743</td><td>37</td><td>128</td></tr>
+        <tr><td>tombstones, rebuilt 16× less often</td><td>394</td><td>58</td><td>8</td></tr>
+        <tr><td>tombstones, never rebuilt</td><td>966</td><td>695</td><td>0</td></tr>
+        <tr><td>graveyard hashing</td><td>135</td><td>65</td><td>512</td></tr>
+      </table>
+
+      <p>Classic tombstones, the thing you're told to avoid, make inserts about 3× cheaper than the clean table at 98.4% full, and missing-key lookups cost 37 slots instead of 34. Graveyard hashing makes inserts 16× cheaper, and its lookups cost about twice as much (65), since the planted tombstones take up room.</p>
+
+      <p>The slopes are the more interesting part, because they say what happens as the table gets fuller. Between 93.8% and 98.4% full, the insert cost grows like <i>x</i><sup>2.0</sup> with no tombstones (Knuth), like <i>x</i><sup>1.6</sup> with classic tombstones, and like <i>x</i><sup>1.0</sup> with graveyard hashing. The paper proves <i>x</i><sup>1.5</sup> times slowly growing log factors for the classic case and <i>x</i> for graveyard, so the simulation lands where the math says it should. Graveyard inserts cost about 2<i>x</i> at every fill level I tried, and lookups about <i>x</i>: primary clustering is just gone.</p>
+
+      <p>Rebuild timing is a real dial. Rebuilding 16× less often lets more tombstones pile up between rebuilds, so inserts get cheaper (394) but lookups get slower (58). Never rebuilding is the case the folklore is right about. Its inserts only beat the clean table at 96.9% full and above (at 93.8% they cost 173 against 130), and its lookups end up ~20× worse than the clean table's, since every deleted key leaves a permanent marker that searches have to step over.</p>
+
+      <h2>Two costs the headline hides</h2>
+
+      <p><b>Rebuilds aren't free.</b> A rebuild re-sorts the table in one pass over every slot, about <i>n</i> slot visits. Spread over the inserts between rebuilds, that's 2<i>x</i> visits per insert for classic rebuilds and 8<i>x</i> for graveyard hashing (counted per insert: the graveyard interval counts deletes too). At <i>x</i>&nbsp;=&nbsp;64 that's 128 and 512, the last column above. A sequential sweep is much cheaper per slot than a probe on real hardware, and it's still linear in <i>x</i>, so graveyard keeps its lead (135&nbsp;+&nbsp;512 against 2,158), but the 16× becomes something more like 3× once you count it.</p>
+
+      <p><b>It depends on the ordering.</b> I first ran the same thing on plain linear probing, where a run isn't sorted and a lookup for a missing key has to walk to the first truly empty slot. Tombstones still make <i>placing</i> a key cheap: at 98.4% full, graveyard placement touched about 85 slots against about 1,900 with no tombstones. But a real insert usually has to check first that the key isn't already there, and that check is a missing-key lookup, which now steps over every tombstone. It cost about 7,500 slots with graveyard hashing and about 2,600 with tombstones rebuilt every <i>n</i>/<i>x</i> inserts, both worse than the ~1,900 of the tombstone-free table. On plain linear probing the trick only pays if you know the key is new and can skip the check.</p>
+
+      <ul>
+        <li>In a churning table that's ordered by hash, tombstones break up primary clustering. At 98.4% full, classic tombstones make inserts ~3× cheaper and graveyard hashing ~16× cheaper (before rebuild sweeps) than deleting with backward shift, with lookups 1–2× the cost.</li>
+        <li>The insert cost grows like <i>x</i><sup>2</sup>, <i>x</i><sup>1.6</sup> and <i>x</i> respectively, matching the paper's bounds.</li>
+        <li>Never rebuilding is still a bad idea, and on plain (unordered) linear probing tombstones make checked inserts worse, not better.</li>
+      </ul>
+
+      <p>Limits: one table size, random hashes (an ideal hash function), a workload that alternates one delete and one insert, and cost counted in slots rather than measured in nanoseconds. Real tables have cache lines that make a 4-slot walk nearly free and SIMD tricks that change what a "probe" costs, so the ratios won't transfer one to one. I counted lookups as a search and left out the shifting cost of backward-shift deletes, which slightly flatters the no-tombstone table. At 98.4% full single runs vary a lot (the three no-tombstone seeds averaged 2,158 against Knuth's 2,048), so read the big numbers to about ±10%.</p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+</body>
+</html>
