@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Yesterday's Hits Keep Their Seats — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/den.html">den</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+
+    <article>
+      <h1>Yesterday's Hits Keep Their Seats</h1>
+      <div class="meta">2026-10-08 · Kit Wickham</div>
+
+      <p>SIEVE is a cache eviction algorithm from a 2024 paper with a cheeky title, <a href="https://www.usenix.org/conference/nsdi24/presentation/zhang-yazhuo">"SIEVE is Simpler than LRU"</a>. It keeps one queue, one bit per object and one pointer, and on web-cache traces it beats LRU and often the much fancier algorithms too. I wanted to find where it loses. The paper names one weakness itself: it isn't scan-resistant. I found a second. When the set of popular objects changes, SIEVE keeps the old favorites for a long time, and in a big cache that can make it miss up to 61% more often than plain LRU.</p>
+
+      <h2>How SIEVE works</h2>
+
+      <p>New objects go in at the head of a queue. A hit sets the object's <i>visited</i> bit and nothing else; nothing moves. On a miss, a pointer called the hand walks from where it last stopped toward the head. It clears the visited bit of every object it passes and evicts the first one whose bit was already clear. Then it stops there until the next miss. When it reaches the head it wraps around to the tail.</p>
+
+      <p>The trick is where the hand ends up. The stretch in front of it is mostly recent arrivals that haven't been hit yet, so it evicts them one after another while barely moving. That's the "quick demotion" the paper credits: most new objects are never requested again, and SIEVE throws them out fast. Objects behind the hand, the ones that survived the last pass, don't get looked at again until the hand comes all the way round. That long tenure is why SIEVE holds on to popular objects so well.</p>
+
+      <h2>When popularity holds still, SIEVE wins</h2>
+
+      <p>I wrote a simulator with nine policies: LRU, FIFO, random, CLOCK, SIEVE, S3-FIFO (a sibling design with overlapping authors, with a small probation queue and a "ghost" list of recently evicted keys), ARC, W-TinyLFU and Belady's optimal policy, which knows the future and so gives the floor. All objects are the same size and the cache holds a fixed number of them. Before trusting it I checked LRU, FIFO, SIEVE and the optimal policy against naive reference implementations on 300 small random traces (exact agreement), and checked LRU, FIFO and random against the standard closed-form approximations for Zipf traffic (all within 0.001 of the miss ratio).</p>
+
+      <p>On a static Zipf workload (100,000 objects, skew 1.0, cache of 1,000), the miss ratios were:</p>
+
+      <table class="compact">
+        <tr><th>policy</th><th>miss ratio</th></tr>
+        <tr><td>optimal (knows the future)</td><td>0.335</td></tr>
+        <tr><td>SIEVE</td><td>0.393</td></tr>
+        <tr><td>S3-FIFO</td><td>0.400</td></tr>
+        <tr><td>W-TinyLFU</td><td>0.402</td></tr>
+        <tr><td>ARC</td><td>0.404</td></tr>
+        <tr><td>CLOCK</td><td>0.482</td></tr>
+        <tr><td>LRU</td><td>0.494</td></tr>
+        <tr><td>FIFO</td><td>0.535</td></tr>
+      </table>
+
+      <p>SIEVE had about a fifth fewer misses than LRU. With caches of 100 and 1,000 objects it was the best non-optimal policy at skews 1.0 and 1.2, and within 0.2% of the best at 0.8. It was also best when I mixed in bursts of one-off objects (a sequential scan of up to 50,000 new keys every 50,000 requests) at those sizes. That's not what the paper's scan warning describes: it concerns block-storage traces, where popular blocks get mixed into scans in ways my synthetic bursts don't copy. On a pure loop slightly bigger than the cache, SIEVE missed every request, the same as LRU, while S3-FIFO missed 20% and W-TinyLFU 10%.</p>
+
+      <p>On a real trace, 10 million requests from Twitter's public production cache traces (<a href="https://github.com/twitter/cache-trace">twitter/cache-trace</a>, CC BY 4.0, via the sample in libCacheSim), SIEVE beat LRU by 3% to 7% across cache sizes from 0.1% to 10% of the objects, and S3-FIFO did better still. So far, this matches the paper.</p>
+
+      <h2>When popularity moves, SIEVE remembers</h2>
+
+      <p>Then I made popularity change. Every 200,000 requests, the entire popular set is replaced by objects that have never been seen, with the same Zipf shape. With a cache of 10,000 objects, here's what happens after each switch, averaged over 250 switches (25 per run after warm-up, ten seeds):</p>
+
+      <figure class="fig smooth"><img src="/img/sieve-recovery.png" width="1650" height="660" alt="Two line charts against thousands of requests since the popular set was replaced, 0 to 200. Left, miss ratio: LRU drops from about 0.49 to 0.26 within 30 thousand requests and stays flat. ARC and S3-FIFO drop more slowly and end around 0.23. SIEVE drops slowest and is still at 0.30 at 200 thousand, above all the others. Right, share of the cache holding objects from the old popular set: LRU falls to zero by 30 thousand requests, ARC by about 75 thousand, S3-FIFO to about 13% by 200 thousand, while SIEVE is still above 50% at 200 thousand."></figure>
+
+      <p>LRU has flushed the old set within 30,000 requests. SIEVE, 200,000 requests later, still has more than half its slots holding objects nobody asks for any more. Averaged over the whole period, SIEVE missed 0.356 of requests against LRU's 0.274, 30% more. S3-FIFO missed 0.287 and ARC 0.271.</p>
+
+      <p>The reason is the hand. Every old favorite has its visited bit set and sits behind the hand. To evict one, the hand has to pass it twice: once to clear the bit, once to throw it out. But the hand barely moves, because it's busy evicting new arrivals in front of it. I counted its laps. With 10,000 slots it went round about 19 times in six million requests, one lap per 314,000 requests, longer than the popular set lasted. In the meantime, every new object that's going to be popular has to get hit before the hand reaches it, in the small part of the cache the old favorites leave free.</p>
+
+      <p>With a 1,000-object cache, the same workload gave SIEVE 66 laps per run, the old set was down to 5% of the cache by 60,000 requests, and SIEVE stayed 13% better than LRU. The lap length grows with the cache, and that's what decides it.</p>
+
+      <h2>How big, how fast</h2>
+
+      <p>To map it out, I varied the cache size and how often popularity changes, either replacing the whole popular set or only a random 10% of the objects each time. Five seeds per cell, six million requests each:</p>
+
+      <figure class="fig smooth"><img src="/img/sieve-grid.png" width="1650" height="690" alt="Two 5 by 5 heatmaps of SIEVE's misses divided by LRU's misses, with cache size from 300 to 30 thousand objects across and requests between changes from 10 thousand to 1 million up. Left, the whole popular set replaced each period: small caches with slow changes are blue around 0.82 to 0.86; the ratio rises toward larger caches, peaking at 1.61 for a 30 thousand cache with changes every 300 thousand requests, and 1.52 at 1 million. Right, 10% of objects replaced each period: mostly blue around 0.8 to 0.9 for small caches, rising to 1.42 for a 30 thousand cache with changes every 30 thousand requests, 1.18 at 300 thousand, and 0.99 at 1 million."></figure>
+
+      <p>Small caches and slow change: SIEVE wins by 14% to 20%, as advertised. Big caches and frequent change: SIEVE loses, by up to 61% with whole-set changes and 42% when only a tenth of the objects change. The worst cell isn't the fastest change. When the whole popular set changes every 10,000 requests, a cache of 10,000 or more holds everything from the current period, almost every miss is a first-ever request that no policy can avoid, and LRU exactly matches the optimal policy. SIEVE is only 3% to 9% worse there.</p>
+
+      <p>The other two adaptive policies held up better. S3-FIFO's worst cell was 28% worse than LRU, and it also uses a FIFO queue with lazy promotion, so it's partly exposed. ARC never got more than 5% worse than LRU anywhere in the grid. Gradual churn showed the same thing: replacing one random object (weighted toward popular ranks) every 5 requests left SIEVE 13% worse than LRU at 10,000 slots, while ARC was 2% better.</p>
+
+      <h2>What I'd take from it</h2>
+
+      <ul>
+        <li>SIEVE's strength and this weakness are the same mechanism. A hand that barely moves gives survivors a long tenure; a long tenure is exactly what you don't want when yesterday's hits stop being hits.</li>
+        <li>Before picking SIEVE for a large cache, compare how long it takes the hand to go round with how long your objects stay popular. If a lap takes longer than a hot object stays hot, expect it to fall behind LRU. The lap count is a single counter to add.</li>
+        <li>For workloads where popularity is fairly stable, like the Twitter sample, SIEVE is a fine, simple choice. If you can't tell, ARC was the safest under churn in these runs, never more than 5% worse than LRU. It isn't safe everywhere: on the loop, it missed every request too.</li>
+      </ul>
+
+      <p>Limits: equal-size objects, synthetic Zipf traffic plus one real trace, and abrupt or random changes in popularity that are my own guesses at what churn looks like; real churn is probably gentler and the effect smaller. My W-TinyLFU uses a fixed 1% window, not the adaptive window that Caffeine has, and it did badly under fast churn, so don't read much into its numbers there. I didn't try to fix SIEVE; a cap on how long an object can stay behind the hand is the obvious idea, and it's untested. About 200 simulation runs for the results here.</p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+</body>
+</html>
