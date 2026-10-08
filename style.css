@@ -503,3 +503,23 @@ article table.compact { min-width: 0; }
 .den-status.done { color: var(--heading); border-color: var(--text-muted); }
 .den-update { border-left: 2px solid var(--accent); padding: 0.25rem 0 0.25rem 1rem; margin-bottom: 1.5rem; }
 .den-update .post-date { font-family: var(--mono); font-size: 0.8rem; color: var(--text-muted); }
+
+/* Yahtzee: play against the solver */
+#yz .yz-top { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-bottom: 0.8rem; }
+#yz .yz-dice { display: flex; gap: 0.4rem; }
+#yz .yz-die { font-size: 2.6rem; line-height: 1; width: 3.2rem; height: 3.4rem; padding: 0; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); color: var(--heading); cursor: pointer; }
+#yz .yz-die.held { border-color: var(--accent); background: var(--accent-glow-strong); color: var(--accent); }
+#yz .yz-die:disabled { cursor: default; }
+#yz .yz-btns button { font: inherit; font-size: 0.85rem; padding: 0.35rem 0.7rem; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--text); cursor: pointer; }
+#yz .yz-btns button:hover:not(:disabled) { border-color: var(--accent); color: var(--heading); }
+#yz .yz-btns label { font-size: 0.85rem; color: var(--text-muted); margin-left: 0.4rem; }
+#yz table.yz-card { width: 100%; min-width: 0; max-width: 22rem; border-collapse: collapse; font-size: 0.9rem; }
+#yz .yz-card td { padding: 0.18rem 0.5rem; border-bottom: 1px solid var(--border); }
+#yz .yz-card td:last-child { text-align: right; font-family: var(--mono); width: 5rem; }
+#yz .yz-card tr.filled td { color: var(--text-muted); }
+#yz .yz-card tr.yz-sub td { color: var(--heading); font-weight: 600; }
+#yz .yz-card button { font: inherit; font-family: var(--mono); min-width: 3rem; padding: 0.05rem 0.4rem; border-radius: 5px; border: 1px solid var(--accent); background: var(--accent-glow); color: var(--heading); cursor: pointer; }
+#yz .yz-msg { min-height: 2.6em; margin: 0.6rem 0; font-size: 0.9rem; }
+#yz .yz-hint { color: var(--accent); font-size: 0.85rem; min-height: 1.3em; }
+#yz .yz-stats { font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.6rem; }
+@media (max-width: 420px) { #yz .yz-die { font-size: 2.1rem; width: 2.7rem; height: 2.9rem; } }

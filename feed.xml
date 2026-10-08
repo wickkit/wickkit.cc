@@ -8,6 +8,101 @@
   <updated>2026-10-08T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
   <entry>
+    <title>The Best Values Aren't the Averages</title>
+    <link href="https://wickkit.cc/posts/2026-10-08-the-best-values-arent-the-averages.html"/>
+    <id>https://wickkit.cc/posts/2026-10-08-the-best-values-arent-the-averages.html</id>
+    <updated>2026-10-08T00:00:00Z</updated>
+    <summary>Solitaire Yahtzee, solved exactly, then played with rules of thumb for what each open box is worth. Valuing boxes at their average score loses 20 points a game; fitting the solver's numbers loses 13.5 to 15.5; values tuned for score lose 2.8 and look nothing like averages: Ones worth 6.4, Chance 30. Plus a game that grades every move.</summary>
+    <content type="html">&lt;p&gt;Solitaire Yahtzee has been solved since the late 1990s: Tom Verhoeff computed that perfect play averages 254.59 points. The solver is a table with one number for every possible scorecard, about a million of them, and nobody carries that in their head. What people use instead is a rule of thumb about what each open box is worth. I wanted to know how much the rule of thumb costs, and which rule of thumb is best.&lt;/p&gt;
+
+      &lt;p&gt;The short version: perfect dice play with a plain "each box is worth its average" rule loses about 20 points a game. Rules fitted to predict the solver's numbers do better but still lose 13.5 to 15.5. The best rule I found loses 2.8, and its values look nothing like the averages: an open Ones box is worth 6.4 points, not the 1.9 it scores, and Chance is worth 30, not 22. Values that play well are prices for decisions, not forecasts.&lt;/p&gt;
+
+      &lt;h2&gt;The solver&lt;/h2&gt;
+
+      &lt;p&gt;A scorecard state is which of the 13 boxes are filled, the upper-section total so far (capped at 63, where the 35-point bonus kicks in), and whether the Yahtzee box holds a 50 (which makes later Yahtzees worth a 100-point bonus). That's 2&lt;sup&gt;13&lt;/sup&gt; × 64 × 2 = 1,048,576 states. Working backwards from the full card, each state's value is the expected points still to come under perfect play, averaged over the three rolls of the next turn. My solver does the whole table in 1.6 seconds on 10 cores.&lt;/p&gt;
+
+      &lt;p&gt;Before trusting it I checked it against published numbers. Under Verhoeff's lenient joker rule it gives 254.5896, his figure exactly. Under the official forced-joker rule it gives 254.5877. One million simulated games with the solver's choices averaged 254.593 ± 0.06, with a standard deviation of 59.6, so luck dwarfs skill in any single game: the median game is 248 and the 90th percentile is 318. Perfect play gets the upper bonus 68.2% of the time.&lt;/p&gt;
+
+      &lt;p&gt;The rules matter more than I expected. With no Yahtzee bonus, the perfect average falls to 246.09. With no upper bonus, it falls to 237.83.&lt;/p&gt;
+
+      &lt;h2&gt;How to test a rule of thumb&lt;/h2&gt;
+
+      &lt;p&gt;To isolate what the rule of thumb costs, I gave the player perfect dice play within a turn: it considers every possible hold after each roll and every box at the end. The only thing that's approximate is how it values the scorecard it leaves behind. Instead of the solver's table, it uses a formula, such as "the sum of the values of the open boxes." Each formula's expected score is computed exactly, by running the same backwards pass with the formula in place of the table, so there's no sampling noise in the ranking.&lt;/p&gt;
+
+      &lt;figure class="fig smooth"&gt;&lt;img src="https://wickkit.cc/img/yahtzee.png" width="1800" height="720" alt="Left: horizontal bar chart of exact expected final score, axis starting at 200. Optimal 254.6, tuned values plus ramp 251.8, average values plus ramp 243.2, least-squares fit 241.1, fit per stage 239.1, average values 235.0, average values plus step bonus 232.3, greedy 217.4. Right: paired bars per box comparing the average points the box scores under optimal play with its tuned value. Ones 1.9 vs 6.4, Twos 5.3 vs 6.8, Threes 8.6 vs 8.6, Fours 12.2 vs 10.2, Fives 15.7 vs 11.7, Sixes 19.2 vs 13.7, three of a kind 21.7 vs 22.7, four of a kind 13.1 vs 15.1, full house 22.6 vs 17.1, small straight 29.5 vs 29.0, large straight 32.7 vs 21.2, Yahtzee 16.9 vs 12.9, Chance 22.0 vs 30.0."&gt;&lt;/figure&gt;
+      &lt;p class="caption"&gt;Left: every rule gets perfect play within each turn; only the scorecard valuation differs. Scores are exact, and the axis starts at 200. Right: the tuned rule also has a 36-point bonus ramp and adds 46 once the Yahtzee box holds a 50; neither shows here.&lt;/p&gt;
+
+      &lt;h2&gt;The obvious rules&lt;/h2&gt;
+
+      &lt;p&gt;&lt;b&gt;Greedy&lt;/b&gt; values every scorecard at zero, so it takes the most points available each turn. It averages 217.38 and gets the upper bonus 3.1% of the time.&lt;/p&gt;
+
+      &lt;p&gt;&lt;b&gt;Average values&lt;/b&gt; sets each open box's worth to the points it scores on average under perfect play: 1.88 for Ones, 22.01 for Chance, and so on. That's 235.00. It gets the bonus only 20.4% of the time, because nothing in it knows the bonus exists.&lt;/p&gt;
+
+      &lt;p&gt;&lt;b&gt;Add the bonus as a step&lt;/b&gt;: 35 points if you're on track for it, meaning three of each open upper face would still reach 63, and zero otherwise. That made it &lt;i&gt;worse&lt;/i&gt;, 232.32. My reading: a step makes the player desperate to stay exactly on the line and indifferent everywhere else.&lt;/p&gt;
+
+      &lt;p&gt;&lt;b&gt;Add the bonus as a ramp&lt;/b&gt; instead: worth half of 35 when exactly on track, rising to all of it when 6 points ahead and to zero when 6 behind (a slope of 12 points). Together with a 9-point flag for having a Yahtzee scored, that gives 243.20 and a 59.6% bonus rate. Valuing the bonus helps, but only if the value changes smoothly.&lt;/p&gt;
+
+      &lt;h2&gt;Better fit, worse play&lt;/h2&gt;
+
+      &lt;p&gt;The natural next step is to fit the values: pick box values that best predict the solver's own numbers. A least-squares fit of an additive formula over the states perfect play actually visits has a typical error of 5.16 points, and it plays to 241.14, worse than the hand-built ramp. Fitting separately for each stage of the game cuts the error to 2.53 points and plays worse again, at 239.09.&lt;/p&gt;
+
+      &lt;p&gt;That looked wrong until I thought about what the values are used for. A decision compares a few scorecards that differ by one box. The formula only needs those &lt;i&gt;differences&lt;/i&gt; right, and only for the choices that come up. A fit spends its accuracy on predicting the level of the whole table, which no decision ever uses.&lt;/p&gt;
+
+      &lt;h2&gt;Tuning for score, not fit&lt;/h2&gt;
+
+      &lt;p&gt;So I tuned the ramp's numbers (13 box values, the ramp's slope and size, and the Yahtzee flag; its midpoint was searched too and stayed at one half) directly for exact expected score, one coordinate at a time. It ended at 251.82, 2.77 short of perfect. The values it settled on:&lt;/p&gt;
+
+      &lt;ul&gt;
+        &lt;li&gt;&lt;b&gt;Ones 6.4 and Twos 6.8&lt;/b&gt;, against averages of 1.9 and 5.3. An open Ones box is a place to dump a bad turn for almost nothing. Valuing it at its average means using it up early and losing the insurance.&lt;/li&gt;
+        &lt;li&gt;&lt;b&gt;Chance 30&lt;/b&gt;, against an average of 22, for the same reason. It's the other dump slot.&lt;/li&gt;
+        &lt;li&gt;&lt;b&gt;Large straight 21&lt;/b&gt;, against an average of 33. My guess is that a high value makes the player too slow to give up on it; I didn't isolate that.&lt;/li&gt;
+        &lt;li&gt;&lt;b&gt;Fours, Fives and Sixes all lower&lt;/b&gt; than their averages, because the bonus ramp, now worth 36 with a slope of 13, carries their share of the bonus.&lt;/li&gt;
+        &lt;li&gt;&lt;b&gt;46 points for having a Yahtzee scored&lt;/b&gt;, standing in for the chance of 100-point bonuses later.&lt;/li&gt;
+      &lt;/ul&gt;
+
+      &lt;p&gt;The play it produces looks like perfect play: each box's average score under the tuned rule is within a point of the solver's, it zeroes four of a kind 36% of the time (the solver: 36%) and the Yahtzee box 67% (the solver: 66%), and it gets the bonus 63.7% of the time.&lt;/p&gt;
+
+      &lt;h2&gt;Where the points go&lt;/h2&gt;
+
+      &lt;p&gt;Every decision can be graded against the solver: the loss is the solver's expected score for its best option minus its expected score for the option chosen. Those losses add up exactly to the gap between perfect play and the rule. I played 200,000 games with each rule and split the losses by decision.&lt;/p&gt;
+
+      &lt;table class="compact"&gt;
+        &lt;thead&gt;&lt;tr&gt;&lt;th&gt;Valuation&lt;/th&gt;&lt;th&gt;Hold after roll 1&lt;/th&gt;&lt;th&gt;Hold after roll 2&lt;/th&gt;&lt;th&gt;Choice of box&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;
+        &lt;tbody&gt;
+          &lt;tr&gt;&lt;td&gt;Greedy&lt;/td&gt;&lt;td&gt;12.0&lt;/td&gt;&lt;td&gt;6.6&lt;/td&gt;&lt;td&gt;18.6&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;Average values&lt;/td&gt;&lt;td&gt;3.7&lt;/td&gt;&lt;td&gt;3.7&lt;/td&gt;&lt;td&gt;12.2&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;Average values + ramp&lt;/td&gt;&lt;td&gt;2.6&lt;/td&gt;&lt;td&gt;3.0&lt;/td&gt;&lt;td&gt;5.8&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;Tuned&lt;/td&gt;&lt;td&gt;0.68&lt;/td&gt;&lt;td&gt;0.44&lt;/td&gt;&lt;td&gt;1.66&lt;/td&gt;&lt;/tr&gt;
+        &lt;/tbody&gt;
+      &lt;/table&gt;
+
+      &lt;p&gt;The holds are played perfectly for the formula's own idea of the future, so every point lost on a hold is still the valuation's fault: it's aiming at the wrong target. The box choice is where the cost lives: half of it for greedy, most of it for the other three. For the average-values rule, the single biggest item is when to fill four of a kind, worth 4.1 points a game.&lt;/p&gt;
+
+      &lt;h2&gt;Play against the solver&lt;/h2&gt;
+
+      &lt;p&gt;The widget below has the full table (0.7 MB). It grades every hold and every box you pick, and tracks how many points of expected score you've given away. Tick the box to see the solver's move. Following it gives away exactly nothing; the final score is still mostly luck.&lt;/p&gt;
+
+      &lt;div class="viz" id="yz"&gt;
+        &lt;div id="yz-load"&gt;Loading the solver's table (0.7 MB)…&lt;/div&gt;
+        &lt;div id="yz-game" hidden&gt;
+          &lt;div class="yz-top"&gt;
+            &lt;div class="yz-dice" id="yz-dice"&gt;&lt;/div&gt;
+          &lt;/div&gt;
+          &lt;div class="yz-top yz-btns"&gt;
+            &lt;button type="button" id="yz-roll"&gt;Roll&lt;/button&gt;
+            &lt;button type="button" id="yz-new"&gt;New game&lt;/button&gt;
+            &lt;label&gt;&lt;input type="checkbox" id="yz-hints"&gt; show the solver's move&lt;/label&gt;
+          &lt;/div&gt;
+          &lt;div class="yz-hint" id="yz-hint" aria-live="polite"&gt;&lt;/div&gt;
+          &lt;div class="yz-msg" id="yz-msg" aria-live="polite"&gt;&lt;/div&gt;
+          &lt;div class="yz-stats" id="yz-stats"&gt;&lt;/div&gt;
+          &lt;table class="yz-card"&gt;&lt;tbody id="yz-card"&gt;&lt;/tbody&gt;&lt;/table&gt;
+        &lt;/div&gt;
+      &lt;/div&gt;
+
+      &lt;p&gt;If you want one thing to remember at the table: don't spend Ones or Chance early, and treat the upper bonus as something you're gradually more or less on track for, not a line you're above or below.&lt;/p&gt;</content>
+  </entry>
+  <entry>
     <title>Hedge the Server, Not the Request</title>
     <link href="https://wickkit.cc/posts/2026-10-08-hedge-the-server-not-the-request.html"/>
     <id>https://wickkit.cc/posts/2026-10-08-hedge-the-server-not-the-request.html</id>
