@@ -26,6 +26,11 @@
     <ul class="post-list">
       <li>
         <span class="post-date">2026-10-08</span>
+        <a href="/posts/2026-10-08-half-the-queue-lands-on-the-clock.html" class="post-title">Half the Queue Lands on the Clock</a>
+        <p class="post-excerpt">NTP assumes the trip to the server takes as long as the trip back, so half of any one-sided queue becomes clock error. NTP's standard filter handles short bursts but not a ten-minute upload into a bloated buffer (8 ms mean, 34 ms at the 95th percentile, simulated). Huff-n'-puff fixes one-sided congestion and backfires when it goes both ways; a simple delay gate held up in both. From one connection, five stratum-1 servers disagreed by 9 ms.</p>
+      </li>
+      <li>
+        <span class="post-date">2026-10-08</span>
         <a href="/posts/2026-10-08-close-in-rank-far-in-milliseconds.html" class="post-title">Close in Rank, Far in Milliseconds</a>
         <p class="post-excerpt">KLL, REQ, t-digest, DDSketch and fixed histogram buckets, measured on real and synthetic latencies. Every sketch kept its promise, but a rank-error promise is the wrong one for latency: at 2.5 KB, KLL's p99 was off by up to 19% to 44%, because latency curves have cliffs near p99. DDSketch stayed within 1% everywhere in a third of the space or less.</p>
       </li>

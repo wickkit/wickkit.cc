@@ -8,6 +8,99 @@
   <updated>2026-10-08T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
   <entry>
+    <title>Half the Queue Lands on the Clock</title>
+    <link href="https://wickkit.cc/posts/2026-10-08-half-the-queue-lands-on-the-clock.html"/>
+    <id>https://wickkit.cc/posts/2026-10-08-half-the-queue-lands-on-the-clock.html</id>
+    <updated>2026-10-08T00:00:00Z</updated>
+    <summary>NTP assumes the trip to the server takes as long as the trip back, so half of any one-sided queue becomes clock error. NTP's standard filter handles short bursts but not a ten-minute upload into a bloated buffer (8 ms mean, 34 ms at the 95th percentile, simulated). Huff-n'-puff fixes one-sided congestion and backfires when it goes both ways; a simple delay gate held up in both. From one connection, five stratum-1 servers disagreed by 9 ms.</summary>
+    <content type="html">&lt;p&gt;Network time sync works by bouncing a packet off a server. The client notes when it sent the request (t1) and when the answer came back (t4); the server stamps when it received the request (t2) and when it replied (t3). If the trip there took as long as the trip back, the client's clock is off by ((t2 − t1) + (t3 − t4)) / 2. That "if" carries the whole method. When the two directions differ, the estimate is wrong by exactly half the difference, and nothing in the four timestamps can tell you. A fixed difference, like a longer route one way, is invisible for good.&lt;/p&gt;
+
+      &lt;p&gt;Queues are a different matter, because they come and go. If your upload link is busy, every request waits in your router's buffer on the way out, the answer comes straight back, and half of that wait shows up as clock error. I wanted to know how big that gets, which of the usual filters notice it, and how much public time servers disagree when I ask them from one ordinary connection.&lt;/p&gt;
+
+      &lt;p&gt;The short version: a link that's busy now and then costs well under a millisecond after NTP's standard filter, which keeps the fastest of the last 8 exchanges. A bulk upload that fills a bloated buffer for ten minutes is a different story: the standard filter left a mean error of 8 ms and a 95th percentile of 34 ms in my simulation, because 8 samples at 16-second intervals cover only two minutes. Two old fixes work: ntpd's huff-n'-puff filter (off by default) and simply ignoring exchanges that took much longer than the best one recently seen. When both directions get congested, huff-n'-puff made the bad cases worse than doing nothing, and only the second fix held up. From one ordinary connection, five stratum-1 servers, each keeping near-perfect time, put my clock at five different places spread over 9 ms.&lt;/p&gt;
+
+      &lt;h2&gt;The setup&lt;/h2&gt;
+
+      &lt;p&gt;The simulator sends one exchange every 16 seconds (some runs use 64) for 48 simulated hours, with the first 2 hours discarded. Each direction takes 10 ms plus a small random jitter (exponential, mean 0.2 ms), plus whatever queue is in the way. The client's clock wanders: its rate does a random walk of 0.1 parts per million per square root of an hour, a fairly well-behaved quartz clock. Every number below is the error against the true offset at the moment of the newest exchange, averaged over 20 seeds.&lt;/p&gt;
+
+      &lt;p&gt;Two kinds of queue:&lt;/p&gt;
+      &lt;ul&gt;
+        &lt;li&gt;&lt;b&gt;Short bursts&lt;/b&gt;: the waiting time in a single-server queue at a given utilisation (an M/M/1 queue with a 1 ms service time), independently for each exchange. This is a busy but healthy link.&lt;/li&gt;
+        &lt;li&gt;&lt;b&gt;Bulk transfers&lt;/b&gt;: a big upload or download switches on and off at random. While it runs, the buffer is full and every packet waits 60 to 100 ms; that's ordinary bufferbloat on a home connection. I varied how long a transfer lasts (2 minutes to 2 hours on average) and what share of the time one is running.&lt;/li&gt;
+      &lt;/ul&gt;
+
+      &lt;p&gt;The estimators, all from the same stream of exchanges:&lt;/p&gt;
+      &lt;ul&gt;
+        &lt;li&gt;&lt;b&gt;Single exchange&lt;/b&gt;: the formula above, newest sample only.&lt;/li&gt;
+        &lt;li&gt;&lt;b&gt;NTP clock filter&lt;/b&gt;: of the last 8 exchanges, use the one with the shortest round trip. This is the core of ntpd's per-server filter. (ntpd smooths the result further in its clock discipline loop, which averages noise but can't remove a bias.)&lt;/li&gt;
+        &lt;li&gt;&lt;b&gt;Huff-n'-puff&lt;/b&gt;: ntpd's optional filter for congested links. It remembers the shortest round trip in a long window (2 hours, the value the ntpd docs call reasonable) and assumes any extra delay on the current sample is all on one side; it guesses which side from the sign of the offset and takes half the extra off.&lt;/li&gt;
+        &lt;li&gt;&lt;b&gt;Slope fit&lt;/b&gt;: fit offset against round-trip time over the same 2-hour window and correct by the fitted slope, clipped to ±0.5. If extra delay is all outbound, offset rises by half of it and the slope is +0.5. This is the idea behind chrony's automatic asymmetry estimate; I didn't copy chrony's code.&lt;/li&gt;
+        &lt;li&gt;&lt;b&gt;Delay gate&lt;/b&gt;: accept the newest exchange only if its round trip is within 1 ms of the 2-hour minimum; otherwise keep the last accepted answer. chrony's &lt;code&gt;maxdelayratio&lt;/code&gt; and &lt;code&gt;maxdelaydevratio&lt;/code&gt; options reject samples in this spirit.&lt;/li&gt;
+      &lt;/ul&gt;
+      &lt;p&gt;I also ran the median and mean of the last 8, a 64-sample shortest-round-trip filter, and a filter that takes the best outbound and best return legs from different exchanges. Those are in the table further down.&lt;/p&gt;
+
+      &lt;p&gt;The simulator matches closed forms where I have them. With a busy upload queue and no jitter, a single exchange is off by half the mean wait on average: ρ/(2(1 − ρ)) ms, which is 2.00 ms at 80% utilisation; measured 2.01. The clock filter only fails when all 8 samples hit a queue; its expected error is ρ&lt;sup&gt;8&lt;/sup&gt;/(16(1 − ρ)), 0.0524 ms at 80%; measured 0.0523 over 2,000 simulated hours. With equal random jitter both ways (mean 1 ms each) a single exchange's error is a Laplace variable with mean absolute value 0.5 ms; measured 0.50 to 0.505.&lt;/p&gt;
+
+      &lt;figure class="fig smooth"&gt;&lt;img src="https://wickkit.cc/img/clock-sim.png" width="1650" height="690" alt="Two log-scale charts of mean offset error. Left: against upload utilisation from 0.3 to 0.95; a single exchange rises from 0.3 ms to 9.5 ms, the NTP clock filter stays under 0.1 ms up to 0.7 then rises to 0.9 ms, and huff-n-puff, slope fit and delay gate stay between 0.07 and 0.16 ms. Right: bulk transfers 30% of the time against typical transfer length from 2 minutes to 2 hours; single exchange about 12 ms throughout, the clock filter 4 to 10 ms, huff-n-puff, slope fit and gate around 0.1 ms for short transfers rising to about 3.5 ms at 2 hours. Dashed lines for congestion in both directions: huff-n-puff and slope fit stay at 1 to 10 ms, the gate stays low until 2 hours."&gt;&lt;/figure&gt;
+      &lt;p class="caption"&gt;20 seeds per point, one exchange every 16 seconds. Right panel: solid lines have bulk uploads only (30% of the time); dashed lines add downloads running independently (uploads 20%, downloads 30% of the time).&lt;/p&gt;
+
+      &lt;h2&gt;A busy link is mostly fine&lt;/h2&gt;
+
+      &lt;p&gt;At 80% upload utilisation a single exchange is off by 2.0 ms on average and 7 ms at the 95th percentile. The clock filter brings that to 0.12 ms, about what any of the fancier filters manage. It only starts to slip at 90% and above (0.33 ms, then 0.87 ms at 95%), because a run of 8 samples that all hit the queue stops being rare. Huff-n'-puff, the slope fit and the gate stay at 0.13 to 0.16 ms there.&lt;/p&gt;
+
+      &lt;p&gt;When both directions have independent short queues, picking the best outbound and best return legs separately beats the clock filter (0.16 vs 0.45 ms at 80%), because it doesn't need both directions to be empty on the same exchange. The gate is better still above 80%. Huff-n'-puff's one-sided assumption starts to cost: at 95% in both directions its 95th percentile was 9.4 ms against the clock filter's 7.3.&lt;/p&gt;
+
+      &lt;h2&gt;A long upload is not&lt;/h2&gt;
+
+      &lt;p&gt;A bulk transfer is the case the clock filter can't see. If the upload runs for ten minutes, every exchange in its two-minute window has the full queue, so its "best" sample is as bad as the rest. With transfers running 30% of the time and lasting 10 minutes on average:&lt;/p&gt;
+
+      &lt;table class="compact"&gt;
+        &lt;tr&gt;&lt;th&gt;offset error, ms (mean / 95th pct)&lt;/th&gt;&lt;th&gt;uploads only&lt;/th&gt;&lt;th&gt;uploads and downloads&lt;/th&gt;&lt;th&gt;uploads, clock wander 1 ppm/√h&lt;/th&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;single exchange&lt;/td&gt;&lt;td&gt;12.0 / 46.7&lt;/td&gt;&lt;td&gt;15.8 / 47.3&lt;/td&gt;&lt;td&gt;12.0 / 46.7&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;median of 8&lt;/td&gt;&lt;td&gt;11.7 / 42.6&lt;/td&gt;&lt;td&gt;15.2 / 43.1&lt;/td&gt;&lt;td&gt;11.8 / 42.6&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;NTP clock filter (best of 8)&lt;/td&gt;&lt;td&gt;8.0 / 33.6&lt;/td&gt;&lt;td&gt;11.2 / 34.6&lt;/td&gt;&lt;td&gt;8.1 / 33.7&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;best of 64 (17 minutes)&lt;/td&gt;&lt;td&gt;1.9 / 22.6&lt;/td&gt;&lt;td&gt;3.6 / 30.4&lt;/td&gt;&lt;td&gt;3.1 / 23.2&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;best legs separately (8)&lt;/td&gt;&lt;td&gt;8.0 / 33.7&lt;/td&gt;&lt;td&gt;11.0 / 34.2&lt;/td&gt;&lt;td&gt;8.1 / 33.8&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;huff-n'-puff&lt;/td&gt;&lt;td&gt;0.09 / 0.31&lt;/td&gt;&lt;td&gt;5.4 / 54.4&lt;/td&gt;&lt;td&gt;0.22 / 0.62&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;slope fit&lt;/td&gt;&lt;td&gt;0.11 / 0.45&lt;/td&gt;&lt;td&gt;9.9 / 39.1&lt;/td&gt;&lt;td&gt;0.56 / 3.1&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;delay gate&lt;/td&gt;&lt;td&gt;0.13 / 0.41&lt;/td&gt;&lt;td&gt;0.19 / 0.69&lt;/td&gt;&lt;td&gt;0.61 / 3.2&lt;/td&gt;&lt;/tr&gt;
+      &lt;/table&gt;
+      &lt;p class="caption"&gt;One exchange every 16 s, 20 seeds, 100 ms of bufferbloat. "Uploads and downloads": uploads 20% and downloads 30% of the time, independently.&lt;/p&gt;
+
+      &lt;p&gt;Three things stand out.&lt;/p&gt;
+
+      &lt;ul&gt;
+        &lt;li&gt;&lt;b&gt;With uploads only, the long-memory filters fix it completely&lt;/b&gt;: from 8 ms to about 0.1. They work because they compare against the best round trip of the last 2 hours, which almost always includes some quiet time. Polling slower helps the plain clock filter a lot when transfers are short (2-minute transfers, 64-second polling: 0.56 ms instead of 4.0 at 16 seconds), because its 8 samples now span 8.5 minutes.&lt;/li&gt;
+        &lt;li&gt;&lt;b&gt;Congestion both ways breaks the one-sided assumption.&lt;/b&gt; When an upload and a download overlap, huff-n'-puff sees a large extra delay, decides it's all on one side, and corrects by half of the total. If the two queues were roughly equal, the raw estimate was nearly right and the correction makes it wrong by a whole queue. Its mean still looked better than doing nothing (5.4 vs 15.8 ms), but its 95th percentile was 54 ms, worse than a single exchange's 47. With 30-minute transfers it was 60 ms. The slope fit didn't blow up, but didn't help much either (9.9 ms mean), because with independent queues in both directions the slope is close to zero. The gate doesn't guess a direction; it just refuses to use a slow exchange, so it stayed at 0.2 ms.&lt;/li&gt;
+        &lt;li&gt;&lt;b&gt;Nothing fixes a congestion that outlasts the window.&lt;/b&gt; With 2-hour transfers, the 2-hour minimum is often taken while the transfer is running, and huff-n'-puff, the slope fit and the gate all fell to a mean of about 3.5 ms (95th percentile around 22 ms). The window has to be longer than your longest busy spell.&lt;/li&gt;
+      &lt;/ul&gt;
+
+      &lt;p&gt;The cost of the gate is that it holds an old answer while the clock drifts. With my default wander of 0.1 ppm/√h that cost is invisible, but with a ten times worse clock (third column) the gate and the slope fit drift to 0.6 ms mean and 3 ms at the 95th percentile, while huff-n'-puff, which corrects each fresh sample instead of holding an old one, stays at 0.2. With a clock 30 times worse the gate's 95th percentile reached 9.6 ms. That's the real trade-off: huff-n'-puff for one-sided congestion and a poor clock, the gate when congestion can go either way and the clock is decent.&lt;/p&gt;
+
+      &lt;p&gt;And the fixed part never goes away. Give the outbound path 12 ms and the return 8 ms, no queues at all, and every estimator I tried is off by 2.0 ms, forever, with no sign anything is wrong.&lt;/p&gt;
+
+      &lt;h2&gt;What real servers say&lt;/h2&gt;
+
+      &lt;p&gt;Then I asked real servers. I wrote a small SNTP client and queried ten public time services in rotation for 90 minutes, each about every 17 seconds: roughly 300 exchanges per service. Five of them are stratum 1, meaning they sit next to a reference clock (GPS or an atomic standard): Apple, Google, Meta, NIST and Germany's PTB. Each of those knows UTC to far better than a millisecond. To take my own clock's drift out of the picture, I split the run into 5-minute blocks, kept each server's fastest exchange per block, and compared it with the median of the five stratum-1 answers from the same block.&lt;/p&gt;
+
+      &lt;figure class="fig smooth"&gt;&lt;img src="https://wickkit.cc/img/clock-real.png" width="1650" height="690" alt="Left: scatter of offset shift divided by extra round trip against extra round trip on a log axis from 1 to 300 ms. Apple's slow answers, 38 to 282 ms extra, sit on the +0.5 line marked all extra delay outbound, with two on the -0.5 line. A cluster of Microsoft answers around 15 ms extra sits near -0.45. Google's 3 to 8 ms delays lean negative. Right: each of ten servers' offset relative to the stratum-1 median with bars of plus or minus half the round trip; stratum-1 servers range from NIST at -5.7 ms to PTB at +3.4 ms; a shaded band from about -6.7 to +3.3 ms marks where all bars overlap."&gt;&lt;/figure&gt;
+      &lt;p class="caption"&gt;Left: every exchange at least 1 ms slower than that server's fastest, offset change divided by delay change (clipped at ±0.9; below about 2 ms of extra delay it's mostly noise). Right: dots are the mean of each server's per-block fastest-exchange offset, blue for stratum 1; bars are ± half that server's shortest round trip; the band is where all ten bars overlapped (median over blocks).&lt;/p&gt;
+
+      &lt;p&gt;The five stratum-1 servers disagreed by 9.1 ms: NIST at −5.7, Google −3.5, Meta 0.0, Apple +0.7 and PTB +3.4 ms. Those positions were stable; each moved by 0.2 to 0.9 ms (standard deviation) from block to block. Since all five keep near-perfect time, the spread is almost all path asymmetry, and it's what my connection would hand to anyone who trusted one of them. There's no way to tell from here which one is right. Every server's true offset has to lie within half its round trip of its estimate, so, as long as each server's own clock is right, the overlap of all ten ranges is a guaranteed bound: 8.8 to 10.4 ms wide in every block, never empty. It's set almost entirely by the closest server (Cloudflare, 9.4 ms round trip). That's the honest answer to "how accurate is my clock": within about ±5 ms, guaranteed, and the best single guess depends on whose path you believe.&lt;/p&gt;
+
+      &lt;p&gt;The extra delays also had a direction, and the left panel shows it the way the simulation predicts. 23 of Apple's 270 answers came back 38 to 282 ms late, and in 21 of them the offset jumped by almost exactly half the extra time, in the "outbound" direction. Whatever held those requests up (a busy front end, probably) did it before the server read its clock, so to the formula it looks exactly like a slow path out. One answer like that is a 100 ms clock error. They were isolated, though, so a best-of-8 filter throws them away. Microsoft's service had a different pattern: a third of its answers (97 of 299) took about 15 ms longer, and the offset moved by 0.44 of that the other way. That fits a slower return path some of the time, or a second server behind the same name whose clock is a few milliseconds off. The four timestamps can't tell those two apart, which is the whole problem in one example. Google's smaller 3 to 8 ms delays leaned the same way (−0.34).&lt;/p&gt;
+
+      &lt;h2&gt;What I'd do&lt;/h2&gt;
+
+      &lt;ul&gt;
+        &lt;li&gt;If an NTP client shares a link with big uploads, expect its clock to be off by up to half your bufferbloat while they run. Fixing the bloat (smart queue management on the router) fixes the clock too.&lt;/li&gt;
+        &lt;li&gt;NTP's standard 8-sample filter is good against short bursts and blind to anything longer than its window. At 16-second polling that's two minutes.&lt;/li&gt;
+        &lt;li&gt;If you turn on huff-n'-puff, know that it assumes congestion in one direction. With traffic both ways it made the worst cases worse than no filter at all.&lt;/li&gt;
+        &lt;li&gt;Rejecting exchanges whose round trip is well above the recent minimum is the most robust thing I tested, as long as the clock holds its rate while it waits.&lt;/li&gt;
+        &lt;li&gt;No filter can see a fixed asymmetry. Several servers in different directions can tell you how big it might be, but not which way it goes.&lt;/li&gt;
+      &lt;/ul&gt;</content>
+  </entry>
+  <entry>
     <title>Close in Rank, Far in Milliseconds</title>
     <link href="https://wickkit.cc/posts/2026-10-08-close-in-rank-far-in-milliseconds.html"/>
     <id>https://wickkit.cc/posts/2026-10-08-close-in-rank-far-in-milliseconds.html</id>
