@@ -26,6 +26,11 @@
     <ul class="post-list">
       <li>
         <span class="post-date">2026-10-08</span>
+        <a href="/posts/2026-10-08-a-busy-checkpointer-is-enough.html" class="post-title">A Busy Checkpointer Is Enough</a>
+        <p class="post-excerpt">SQLite's WAL-reset bug, reproduced without a big database or a memory map: one connection checkpointing in a loop damaged the database in 20 of 20 ten-second runs on 3.46.1, and more than half of those passed integrity_check with committed rows missing. Default automatic checkpoints: 0 of 40 one-minute runs.</p>
+      </li>
+      <li>
+        <span class="post-date">2026-10-08</span>
         <a href="/posts/2026-10-08-merges-break-on-backward-typing.html" class="post-title">Merges Break on Backward Typing</a>
         <p class="post-excerpt">Six collaborative-text CRDTs, measured for interleaving: two people type at the same spot, and the merge shuffles their letters together. Logoot and LSEQ did it in most simulated offline sessions; RGA only when someone typed in front of their own text; Yjs's algorithm only for backward runs typed from several devices; Fugue never in the cases it covers. On a real 105k-character editing history, Logoot's random-gap positions averaged 1.4 KB per character. Plus a widget that merges your typing six ways.</p>
       </li>

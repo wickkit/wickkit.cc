@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>A Busy Checkpointer Is Enough — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/den.html">den</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+
+    <article>
+      <h1>A Busy Checkpointer Is Enough</h1>
+      <div class="meta">2026-10-08 · Kit Wickham</div>
+
+      <p>SQLite's "WAL-reset bug" sat in every release from 3.7.0 (2010) to 3.51.2 and was fixed in 3.51.3 in March 2026. Tailscale traced months of trouble to it, and Phil Eaton's <a href="https://theconsensus.dev/p/2026/08/23/another-look-at-sqlite-wal-reset.html">"Another look at SQLite's WAL-Reset bug"</a> reproduces it with about 100 lines of C. His reproducer uses a 256 MB database and a 1 GB memory map, because unmapping that much memory slows the checkpoint down at exactly the wrong moment and gives a writer time to slip in.</p>
+
+      <p>I was reading SQLite's write-ahead log code and wanted to see whether you need that help. You don't. A tiny database, no memory map, and separate processes, with one connection running checkpoints in a loop while others commit small transactions, damaged the database in every one of 20 ten-second runs on an affected version. The fixed version came through all 20 clean.</p>
+
+      <h2>The race in one paragraph</h2>
+
+      <p>In WAL mode, commits append pages ("frames") to a log file, and a checkpoint copies them back into the database. A shared-memory header records how many frames the log holds (<code>mxFrame</code>) and how many have been copied back (<code>nBackfill</code>). Once everything is copied back, the next writer may restart the log from frame 1. The bug: a checkpoint reads <code>mxFrame</code>, a writer restarts the log and commits a few new frames, and the checkpoint carries on with its stale count. It sets <code>nBackfill</code> to the old, larger number, so SQLite believes the new frames were already copied back. Readers skip them and so does the next checkpoint. The fix rechecks the log's salt (its generation number) after the checkpoint takes its lock, and gives up if the log was restarted in the meantime.</p>
+
+      <h2>The setup</h2>
+
+      <p>Python's <code>sqlite3</code> module linked against SQLite 3.46.1 (affected), and the same script through <code>apsw</code> with SQLite 3.53.4 (fixed). Writer processes loop on <code>BEGIN IMMEDIATE</code>, insert a row with a 200-byte blob, bump a per-writer counter, and commit. Checkpointer processes loop on <code>PRAGMA wal_checkpoint(PASSIVE)</code>. The files live on a RAM-backed filesystem. At the end I run <code>integrity_check</code> and look for every row each writer was told was committed.</p>
+
+      <p>Spinning checkpoints keep copying the log back as fast as it fills, so it restarts constantly: about 8,000 restarts a second at about 90,000 commits a second, roughly one commit in eleven. Each restart is a chance for the race.</p>
+
+      <h2>Results</h2>
+
+      <table class="compact">
+        <tr><th>SQLite</th><th>Writers / checkpointers</th><th>Runs damaged</th><th>How</th></tr>
+        <tr><td>3.46.1</td><td>2 / 2</td><td>20 of 20</td><td>9 malformed; 11 pass integrity_check with 2 to 54 committed rows missing</td></tr>
+        <tr><td>3.53.4</td><td>2 / 2</td><td>0 of 20</td><td>clean</td></tr>
+        <tr><td>3.46.1</td><td>1 / 2</td><td>5 of 6</td><td>1 malformed; 4 pass with 1 to 20 rows missing</td></tr>
+        <tr><td>3.46.1</td><td>1 / 1</td><td>1 of 6</td><td>passes, 1 row missing</td></tr>
+        <tr><td>3.46.1</td><td>2 / 1</td><td>1 of 6</td><td>malformed</td></tr>
+      </table>
+
+      <p>All runs were 10 seconds. One writer and one checkpointer is enough, which matches Eaton's three-connection setup. More checkpointers mean more restarts and more chances. Like him, I saw lost writes more often than corruption: in more than half of the damaged runs <code>integrity_check</code> said "ok" while committed rows were gone. An integrity check verifies that the file is consistent with itself, not that it still holds what you wrote.</p>
+
+      <h2>You can watch it happen</h2>
+
+      <p>The <code>-shm</code> index that holds that header is an ordinary file, so a separate process can map it and poll the header about 600,000 times a second. The bug leaves a fingerprint that can't occur legitimately: <code>nBackfill</code> greater than <code>mxFrame</code>, more frames copied back than the log holds. There's one catch. While a log restart is in progress, SQLite writes the new header (with <code>mxFrame</code> = 0) slightly before it zeroes <code>nBackfill</code>. My first monitor flagged that window on the fixed version too, so I only count the fingerprint when <code>mxFrame</code> is above zero.</p>
+
+      <p>With that rule, the fingerprint showed up in every damaged run and in none of the 20 runs on the fixed version. It also showed up once in a run where every row survived. My guess is that the skipped frames in that run were overwritten by later commits before anything read them.</p>
+
+      <h2>Default settings were much safer</h2>
+
+      <p>With no explicit checkpointer, SQLite checkpoints automatically when the log passes 1,000 pages, and the connection that just committed runs it. I ran 40 one-minute runs on 3.46.1 with two or four writers and only automatic checkpoints: 316 million commits and at least 637,000 log restarts, with no fingerprint, no missing rows, and no corruption.</p>
+
+      <p>That's a rough comparison, but a telling one. With one writer and one spinning checkpointer, damage showed up about once per 146,000 restarts. At that rate, 637,000 restarts would be expected to produce about four damaged runs, and seeing none would be about a 1% chance. My guess is that the race needs a checkpoint that runs alongside a different connection's commit, and here the checkpoints almost always run right after a commit, in the connection that made it.</p>
+
+      <p>Two of my early attempts at this measurement were invalid. In the first, eight parallel runs filled the 4 GB RAM disk. In the second, writers died on "database is locked" and left most runs with a single writer. The locks weren't the bug: <code>BEGIN IMMEDIATE</code> waited out its full 5-second busy timeout because the other writers, looping flat out, kept grabbing the lock between its retries. The final runs log and retry those errors instead (there were 194 in 40 minutes).</p>
+
+      <h2>What I'd take from it</h2>
+
+      <ul>
+        <li>If you run SQLite older than 3.51.3 and checkpoint from a background thread or process, upgrade. Rows can go missing while the integrity check still passes.</li>
+        <li>The race doesn't need a big database or a memory map. A busy checkpointer plus small, frequent commits hit it within seconds here.</li>
+        <li>Default automatic checkpointing was far less exposed in my runs. That's not a guarantee, and it's no reason to stay on an affected version.</li>
+        <li>If you can't upgrade yet, a process that maps the <code>-shm</code> file and alarms on <code>nBackfill</code> &gt; <code>mxFrame</code> (with <code>mxFrame</code> &gt; 0) caught every damaged run here.</li>
+      </ul>
+
+      <p>Limits: one machine, a RAM-backed filesystem, and Python on top of SQLite, so the timing differs from a real disk and from C. Run counts for the smaller configurations are small (6 each). The autocheckpoint figure bounds this workload, not every workload.</p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+</body>
+</html>
