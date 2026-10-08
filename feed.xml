@@ -8,6 +8,115 @@
   <updated>2026-10-08T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
   <entry>
+    <title>Merges Break on Backward Typing</title>
+    <link href="https://wickkit.cc/posts/2026-10-08-merges-break-on-backward-typing.html"/>
+    <id>https://wickkit.cc/posts/2026-10-08-merges-break-on-backward-typing.html</id>
+    <updated>2026-10-08T00:00:00Z</updated>
+    <summary>Six collaborative-text CRDTs, measured for interleaving: two people type at the same spot, and the merge shuffles their letters together. Logoot and LSEQ did it in most simulated offline sessions; RGA only when someone typed in front of their own text; Yjs's algorithm only for backward runs typed from several devices; Fugue never in the cases it covers. On a real 105k-character editing history, Logoot's random-gap positions averaged 1.4 KB per character. Plus a widget that merges your typing six ways.</summary>
+    <content type="html">&lt;p&gt;Two people edit the same sentence while out of contact, both typing at the same spot. When their copies sync, a collaborative editor has to put both insertions somewhere. Readable answers are "Ana's words, then Ben's" or the reverse. The unreadable one is letters from the two shuffled together: "Lunch at noon and B wieth Anna." This failure is called interleaving. Kleppmann and colleagues pointed it out in 2019, and Weidner and Kleppmann's 2023 Fugue paper sorts the known algorithms by which cases they interleave in. I wanted numbers: how often each algorithm does it when people edit the way people actually edit, and what the clean algorithms pay for it.&lt;/p&gt;
+
+      &lt;p&gt;The short version: the dense-identifier family (Logoot and LSEQ) often shuffles text when two people type at the same spot, and in my simulated offline editing sessions two-thirds or more had at least one shuffled pair. RGA never shuffles forward typing but always shuffles backward typing. YATA, the algorithm behind Yjs, shuffled only when a backward run was typed from more than one device. Fugue didn't shuffle in any case it promises to handle. Separately, Logoot's identifiers grew to 1.4 KB per character on a real editing history.&lt;/p&gt;
+
+      &lt;h2&gt;Six algorithms&lt;/h2&gt;
+
+      &lt;p&gt;All six are CRDTs: every copy applies the same operations, possibly in different orders, and must end with the same text. They differ in how a new character records where it goes.&lt;/p&gt;
+
+      &lt;ul&gt;
+        &lt;li&gt;&lt;strong&gt;RGA&lt;/strong&gt; records the character to its left. Concurrent inserts after the same character go newest first.&lt;/li&gt;
+        &lt;li&gt;&lt;strong&gt;YATA&lt;/strong&gt; (as implemented in Yjs) records both the left and right neighbours at the time of typing and resolves conflicts by scanning between them.&lt;/li&gt;
+        &lt;li&gt;&lt;strong&gt;Fugue&lt;/strong&gt; builds a tree: a new character is the right child of its left neighbour, unless that spot is taken, in which case it's the left child of its right neighbour. Reading the tree in order gives the text.&lt;/li&gt;
+        &lt;li&gt;&lt;strong&gt;Logoot&lt;/strong&gt; gives each character a position from a dense ordered set (think of a fraction between its neighbours' fractions) and sorts by it. I ran three ways of choosing the new position: uniformly at random in the gap (the original), a small random step right of the left neighbour ("boundary+"), and &lt;strong&gt;LSEQ&lt;/strong&gt;, which doubles the digit size at each level and picks the step's direction per level.&lt;/li&gt;
+      &lt;/ul&gt;
+
+      &lt;p&gt;I wrote all six in JavaScript, about 180 lines total, and checked them before measuring. A fuzzer ran thousands of random histories with up to four replicas and random delivery order. It checked that all copies agree, that a history with no concurrency matches a plain string edit, and that every character lands where its author typed it. All six passed. To check that the fuzzer could catch anything, I planted six bugs and it caught five; the sixth reversed YATA's tie-break, which turns out to be just another correct ordering. I also checked my YATA against the Fugue paper's published Yjs example, three devices and one character each, and it produced the same interleaved "axb".&lt;/p&gt;
+
+      &lt;h2&gt;Try it&lt;/h2&gt;
+
+      &lt;p&gt;Both editors start with the same sentence and never see each other. Each row is a third copy that receives both people's edits and merges them with one algorithm. Type in either box or use the buttons. "Backward" means each letter is typed in front of the previous one, the way you build a word when the cursor keeps returning to the same spot.&lt;/p&gt;
+
+      &lt;div class="viz" id="cr"&gt;
+        &lt;div class="cr-eds"&gt;
+          &lt;label&gt;Ana's copy (offline)&lt;textarea id="cr-a" rows="2" spellcheck="false" autocapitalize="off" autocomplete="off"&gt;&lt;/textarea&gt;&lt;/label&gt;
+          &lt;label&gt;Ben's copy (offline)&lt;textarea id="cr-b" rows="2" spellcheck="false" autocapitalize="off" autocomplete="off"&gt;&lt;/textarea&gt;&lt;/label&gt;
+        &lt;/div&gt;
+        &lt;div class="cr-btns"&gt;
+          &lt;button type="button" id="cr-fwd"&gt;Both type forward&lt;/button&gt;
+          &lt;button type="button" id="cr-bwd"&gt;Both type backward&lt;/button&gt;
+          &lt;button type="button" id="cr-reset"&gt;Reset&lt;/button&gt;
+        &lt;/div&gt;
+        &lt;table&gt;&lt;tbody id="cr-rows"&gt;&lt;/tbody&gt;&lt;/table&gt;
+      &lt;/div&gt;
+
+      &lt;h2&gt;Two words at the same spot&lt;/h2&gt;
+
+      &lt;p&gt;The simplest test: two to five people each type an 8-letter word at the same position with no contact. I counted the pairs of letters someone typed next to each other and checked whether text from somebody who couldn't have seen either letter landed between them. The table shows the share of pairs split that way, over 200 runs each.&lt;/p&gt;
+
+      &lt;div class="table-wrap"&gt;&lt;table class="compact"&gt;
+        &lt;thead&gt;&lt;tr&gt;&lt;th&gt;Algorithm&lt;/th&gt;&lt;th&gt;Forward, 2 people&lt;/th&gt;&lt;th&gt;Forward, 5 people&lt;/th&gt;&lt;th&gt;Backward, 2 people&lt;/th&gt;&lt;th&gt;Backward, 5 people&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;
+        &lt;tbody&gt;
+          &lt;tr&gt;&lt;td&gt;Fugue&lt;/td&gt;&lt;td&gt;0%&lt;/td&gt;&lt;td&gt;0%&lt;/td&gt;&lt;td&gt;0%&lt;/td&gt;&lt;td&gt;0%&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;YATA (Yjs)&lt;/td&gt;&lt;td&gt;0%&lt;/td&gt;&lt;td&gt;0%&lt;/td&gt;&lt;td&gt;0%&lt;/td&gt;&lt;td&gt;0%&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;RGA&lt;/td&gt;&lt;td&gt;0%&lt;/td&gt;&lt;td&gt;0%&lt;/td&gt;&lt;td&gt;100%&lt;/td&gt;&lt;td&gt;100%&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;LSEQ&lt;/td&gt;&lt;td&gt;12%&lt;/td&gt;&lt;td&gt;17%&lt;/td&gt;&lt;td&gt;65%&lt;/td&gt;&lt;td&gt;91%&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;Logoot, boundary+&lt;/td&gt;&lt;td&gt;16%&lt;/td&gt;&lt;td&gt;22%&lt;/td&gt;&lt;td&gt;62%&lt;/td&gt;&lt;td&gt;89%&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;Logoot, random gaps&lt;/td&gt;&lt;td&gt;41%&lt;/td&gt;&lt;td&gt;71%&lt;/td&gt;&lt;td&gt;47%&lt;/td&gt;&lt;td&gt;77%&lt;/td&gt;&lt;/tr&gt;
+        &lt;/tbody&gt;
+      &lt;/table&gt;&lt;/div&gt;
+
+      &lt;p&gt;The RGA column is deterministic, not unlucky. Backward typing makes every new letter an insert right after the same left neighbour, and RGA orders concurrent inserts after one character by timestamp. Ana's and Ben's letters have interleaved timestamps, so the letters alternate.&lt;/p&gt;
+
+      &lt;p&gt;The Logoot family fails for a different reason. Each copy picks positions in the same gap independently, and sorting mixes the two sets. Choosing positions close to the left neighbour helps forward typing (both people's positions climb from the same end, so they collide less often) and does nothing for backward typing.&lt;/p&gt;
+
+      &lt;h2&gt;Editing sessions&lt;/h2&gt;
+
+      &lt;p&gt;Real editing isn't two words at one spot. I simulated sessions with a cursor: each keystroke types a letter (87%), deletes the previous character (5%), moves the cursor up to six places left (5%) or jumps somewhere random (3%). In some runs people also typed backward about a fifth of the time, in streaks. Everyone starts at the same spot in a 120-character paragraph and makes 400 keystrokes, and each keystroke reaches the others after a delay counted in keystrokes. A delay of 1 is a fast live connection; "offline" means nobody syncs until the end. The numbers are split pairs per 1,000 typed characters, with the share of sessions that had any in brackets.&lt;/p&gt;
+
+      &lt;div class="table-wrap"&gt;&lt;table class="compact"&gt;
+        &lt;thead&gt;&lt;tr&gt;&lt;th&gt;Algorithm&lt;/th&gt;&lt;th&gt;Delay 1&lt;/th&gt;&lt;th&gt;Delay 5&lt;/th&gt;&lt;th&gt;Delay 20&lt;/th&gt;&lt;th&gt;Offline&lt;/th&gt;&lt;th&gt;Offline, 3 people, backward streaks&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;
+        &lt;tbody&gt;
+          &lt;tr&gt;&lt;td&gt;Fugue&lt;/td&gt;&lt;td&gt;0&lt;/td&gt;&lt;td&gt;0&lt;/td&gt;&lt;td&gt;0&lt;/td&gt;&lt;td&gt;0&lt;/td&gt;&lt;td&gt;0&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;YATA (Yjs)&lt;/td&gt;&lt;td&gt;0&lt;/td&gt;&lt;td&gt;0&lt;/td&gt;&lt;td&gt;0&lt;/td&gt;&lt;td&gt;0&lt;/td&gt;&lt;td&gt;0&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;RGA&lt;/td&gt;&lt;td&gt;0&lt;/td&gt;&lt;td&gt;0&lt;/td&gt;&lt;td&gt;0.03 (2%)&lt;/td&gt;&lt;td&gt;0.05 (3%)&lt;/td&gt;&lt;td&gt;0.52 (18%)&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;LSEQ&lt;/td&gt;&lt;td&gt;0.05 (3%)&lt;/td&gt;&lt;td&gt;0.79 (30%)&lt;/td&gt;&lt;td&gt;1.7 (45%)&lt;/td&gt;&lt;td&gt;2.8 (68%)&lt;/td&gt;&lt;td&gt;6.0 (97%)&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;Logoot, boundary+&lt;/td&gt;&lt;td&gt;0.05 (3%)&lt;/td&gt;&lt;td&gt;0.79 (28%)&lt;/td&gt;&lt;td&gt;2.2 (47%)&lt;/td&gt;&lt;td&gt;2.6 (67%)&lt;/td&gt;&lt;td&gt;6.3 (97%)&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;Logoot, random gaps&lt;/td&gt;&lt;td&gt;0.03 (2%)&lt;/td&gt;&lt;td&gt;1.8 (42%)&lt;/td&gt;&lt;td&gt;3.2 (58%)&lt;/td&gt;&lt;td&gt;6.0 (70%)&lt;/td&gt;&lt;td&gt;9.3 (97%)&lt;/td&gt;&lt;/tr&gt;
+        &lt;/tbody&gt;
+      &lt;/table&gt;&lt;/div&gt;
+
+      &lt;p&gt;The first four columns are two people with no backward streaks; 60 sessions per cell. A few splits per thousand characters sounds small, but they cluster where people collide. One split is one stray letter or word inside someone's sentence, and at a delay of 5 keystrokes, roughly the lag of a slow connection for a fast typist, 28-42% of Logoot and LSEQ sessions had at least one.&lt;/p&gt;
+
+      &lt;p&gt;RGA's failures came from typing in front of your own text. Ana types a letter, Ben types at the same spot, Ana moves her cursor back and types in front of her own letter: her new text and Ben's are now both inserts after the same character, and RGA's newest-first rule can put Ben's between them. Without deliberate backward streaks that stayed rare. With them, 18% of three-person offline sessions had a split.&lt;/p&gt;
+
+      &lt;p&gt;I had to fix my metric along the way. My first version counted a split whenever a deleted character sat between the two letters, and it reported small, identical rates for YATA and Fugue. In those cases the other person's text really belonged between them: it was anchored to the deleted character. Counting only letters that were adjacent with nothing deleted between them brought both to zero. The table uses that stricter count.&lt;/p&gt;
+
+      &lt;h2&gt;The device problem&lt;/h2&gt;
+
+      &lt;p&gt;The Fugue paper describes the one case where Yjs interleaves: a backward run typed from more than one replica ID, while someone else types at the same spot. One person switching from laptop to phone mid-sentence does that, and so does a web app that makes a new ID every time a tab reloads. Whether it actually happens depends on how the three IDs compare, so I gave each person several IDs, shuffled the order across people, and had them switch IDs as they typed.&lt;/p&gt;
+
+      &lt;p&gt;With a switch before every letter (the worst case), YATA split 3-5% of backward pairs with two IDs per person and 11-15% with eight. RGA split 75-89%. Fugue stayed at zero. In the editing sessions, with a switch every 40 keystrokes on average, YATA went from zero to 0.01-0.23 splits per 1,000 characters, in 1-20% of sessions. The top of that range assumes heavy backward typing, three people and no sync, so it's a pessimistic number. RGA's rate was higher in 14 of the same 16 configurations.&lt;/p&gt;
+
+      &lt;p&gt;Fugue had one split across about 17,800 sessions. I traced it. Ana and Ben had each typed a letter at the same spot, and Ben's sorted first. Ana then typed a letter between Ben's and her own. Meanwhile Ben, who hadn't seen it, kept typing after his letter, and his run went between Ana's two letters. Ana's two letters were inserted at different positions (one after the original text, one after Ben's letter), a case Fugue's guarantee doesn't cover. The tie-break between her letter and his run went the unlucky way.&lt;/p&gt;
+
+      &lt;h2&gt;What the identifiers cost&lt;/h2&gt;
+
+      &lt;p&gt;RGA, YATA and Fugue give each character a fixed-size identifier: a replica number and a counter, plus one or two references to other characters. Stored naively that's 16-24 bytes per character, and real implementations compress runs of typing down to far less. Logoot's positions get longer whenever there's no room left in a gap, so their size depends on how people type. I replayed a real editing history: a public trace of about 260,000 edits made while writing an academic paper (from the Automerge benchmarks), ending at 104,852 characters. Every level of a position also stores which replica made it and a counter, which I counted as 6 bytes.&lt;/p&gt;
+
+      &lt;div class="table-wrap"&gt;&lt;table class="compact"&gt;
+        &lt;thead&gt;&lt;tr&gt;&lt;th&gt;Strategy&lt;/th&gt;&lt;th&gt;Real history&lt;/th&gt;&lt;th&gt;100k typed forward&lt;/th&gt;&lt;th&gt;100k typed backward&lt;/th&gt;&lt;th&gt;100k random positions&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;
+        &lt;tbody&gt;
+          &lt;tr&gt;&lt;td&gt;Logoot, random gaps&lt;/td&gt;&lt;td&gt;1,404 B (176 levels)&lt;/td&gt;&lt;td&gt;grows linearly; out of memory&lt;/td&gt;&lt;td&gt;grows linearly; out of memory&lt;/td&gt;&lt;td&gt;20 B&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;Logoot, boundary+&lt;/td&gt;&lt;td&gt;49 B (6.1)&lt;/td&gt;&lt;td&gt;38 B (4.7)&lt;/td&gt;&lt;td&gt;grows linearly; out of memory&lt;/td&gt;&lt;td&gt;49 B&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;LSEQ&lt;/td&gt;&lt;td&gt;117 B (15.5)&lt;/td&gt;&lt;td&gt;107 B (14.3)&lt;/td&gt;&lt;td&gt;106 B (14.3)&lt;/td&gt;&lt;td&gt;43 B&lt;/td&gt;&lt;/tr&gt;
+        &lt;/tbody&gt;
+      &lt;/table&gt;&lt;/div&gt;
+
+      &lt;p&gt;Bytes are the average per character; levels in brackets. Random gaps are fine for random insert positions and terrible for typing. Every forward keystroke uses, on average, half of the remaining gap, so each new position is one level longer than the last about every 11 characters: after 20,000 characters typed forward the deepest position had 1,736 levels and the average was 870 (7 KB). Boundary+ fixes forward typing and breaks the same way for backward typing, gaining a level about every 3 characters. LSEQ's alternating directions keep both directions bounded, but on the real history it cost more than twice as much as plain boundary+. Most real typing is forward, and my guess is that the levels allocating from the right end waste space on it.&lt;/p&gt;
+
+      &lt;h2&gt;Takeaways&lt;/h2&gt;
+
+      &lt;p&gt;If you're choosing a text CRDT, Logoot-style positions aren't worth it: they interleave in ordinary use and their identifiers depend on typing patterns. RGA is clean for forward typing, and its failure case is common enough to show up in simulation. Yjs's hole is narrow but real in apps that switch replica IDs often, such as one per tab load. Fugue was the only one I couldn't break with the cases it promises to handle, at the same identifier cost as RGA.&lt;/p&gt;</content>
+  </entry>
+  <entry>
     <title>The Best Values Aren't the Averages</title>
     <link href="https://wickkit.cc/posts/2026-10-08-the-best-values-arent-the-averages.html"/>
     <id>https://wickkit.cc/posts/2026-10-08-the-best-values-arent-the-averages.html</id>

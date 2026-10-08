@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Merges Break on Backward Typing — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/den.html">den</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+
+    <article>
+      <h1>Merges Break on Backward Typing</h1>
+      <div class="meta">2026-10-08 · Kit Wickham</div>
+
+      <p>Two people edit the same sentence while out of contact, both typing at the same spot. When their copies sync, a collaborative editor has to put both insertions somewhere. Readable answers are "Ana's words, then Ben's" or the reverse. The unreadable one is letters from the two shuffled together: "Lunch at noon and B wieth Anna." This failure is called interleaving. Kleppmann and colleagues pointed it out in 2019, and Weidner and Kleppmann's 2023 Fugue paper sorts the known algorithms by which cases they interleave in. I wanted numbers: how often each algorithm does it when people edit the way people actually edit, and what the clean algorithms pay for it.</p>
+
+      <p>The short version: the dense-identifier family (Logoot and LSEQ) often shuffles text when two people type at the same spot, and in my simulated offline editing sessions two-thirds or more had at least one shuffled pair. RGA never shuffles forward typing but always shuffles backward typing. YATA, the algorithm behind Yjs, shuffled only when a backward run was typed from more than one device. Fugue didn't shuffle in any case it promises to handle. Separately, Logoot's identifiers grew to 1.4 KB per character on a real editing history.</p>
+
+      <h2>Six algorithms</h2>
+
+      <p>All six are CRDTs: every copy applies the same operations, possibly in different orders, and must end with the same text. They differ in how a new character records where it goes.</p>
+
+      <ul>
+        <li><strong>RGA</strong> records the character to its left. Concurrent inserts after the same character go newest first.</li>
+        <li><strong>YATA</strong> (as implemented in Yjs) records both the left and right neighbours at the time of typing and resolves conflicts by scanning between them.</li>
+        <li><strong>Fugue</strong> builds a tree: a new character is the right child of its left neighbour, unless that spot is taken, in which case it's the left child of its right neighbour. Reading the tree in order gives the text.</li>
+        <li><strong>Logoot</strong> gives each character a position from a dense ordered set (think of a fraction between its neighbours' fractions) and sorts by it. I ran three ways of choosing the new position: uniformly at random in the gap (the original), a small random step right of the left neighbour ("boundary+"), and <strong>LSEQ</strong>, which doubles the digit size at each level and picks the step's direction per level.</li>
+      </ul>
+
+      <p>I wrote all six in JavaScript, about 180 lines total, and checked them before measuring. A fuzzer ran thousands of random histories with up to four replicas and random delivery order. It checked that all copies agree, that a history with no concurrency matches a plain string edit, and that every character lands where its author typed it. All six passed. To check that the fuzzer could catch anything, I planted six bugs and it caught five; the sixth reversed YATA's tie-break, which turns out to be just another correct ordering. I also checked my YATA against the Fugue paper's published Yjs example, three devices and one character each, and it produced the same interleaved "axb".</p>
+
+      <h2>Try it</h2>
+
+      <p>Both editors start with the same sentence and never see each other. Each row is a third copy that receives both people's edits and merges them with one algorithm. Type in either box or use the buttons. "Backward" means each letter is typed in front of the previous one, the way you build a word when the cursor keeps returning to the same spot.</p>
+
+      <div class="viz" id="cr">
+        <div class="cr-eds">
+          <label>Ana's copy (offline)<textarea id="cr-a" rows="2" spellcheck="false" autocapitalize="off" autocomplete="off"></textarea></label>
+          <label>Ben's copy (offline)<textarea id="cr-b" rows="2" spellcheck="false" autocapitalize="off" autocomplete="off"></textarea></label>
+        </div>
+        <div class="cr-btns">
+          <button type="button" id="cr-fwd">Both type forward</button>
+          <button type="button" id="cr-bwd">Both type backward</button>
+          <button type="button" id="cr-reset">Reset</button>
+        </div>
+        <table><tbody id="cr-rows"></tbody></table>
+      </div>
+
+      <h2>Two words at the same spot</h2>
+
+      <p>The simplest test: two to five people each type an 8-letter word at the same position with no contact. I counted the pairs of letters someone typed next to each other and checked whether text from somebody who couldn't have seen either letter landed between them. The table shows the share of pairs split that way, over 200 runs each.</p>
+
+      <div class="table-wrap"><table class="compact">
+        <thead><tr><th>Algorithm</th><th>Forward, 2 people</th><th>Forward, 5 people</th><th>Backward, 2 people</th><th>Backward, 5 people</th></tr></thead>
+        <tbody>
+          <tr><td>Fugue</td><td>0%</td><td>0%</td><td>0%</td><td>0%</td></tr>
+          <tr><td>YATA (Yjs)</td><td>0%</td><td>0%</td><td>0%</td><td>0%</td></tr>
+          <tr><td>RGA</td><td>0%</td><td>0%</td><td>100%</td><td>100%</td></tr>
+          <tr><td>LSEQ</td><td>12%</td><td>17%</td><td>65%</td><td>91%</td></tr>
+          <tr><td>Logoot, boundary+</td><td>16%</td><td>22%</td><td>62%</td><td>89%</td></tr>
+          <tr><td>Logoot, random gaps</td><td>41%</td><td>71%</td><td>47%</td><td>77%</td></tr>
+        </tbody>
+      </table></div>
+
+      <p>The RGA column is deterministic, not unlucky. Backward typing makes every new letter an insert right after the same left neighbour, and RGA orders concurrent inserts after one character by timestamp. Ana's and Ben's letters have interleaved timestamps, so the letters alternate.</p>
+
+      <p>The Logoot family fails for a different reason. Each copy picks positions in the same gap independently, and sorting mixes the two sets. Choosing positions close to the left neighbour helps forward typing (both people's positions climb from the same end, so they collide less often) and does nothing for backward typing.</p>
+
+      <h2>Editing sessions</h2>
+
+      <p>Real editing isn't two words at one spot. I simulated sessions with a cursor: each keystroke types a letter (87%), deletes the previous character (5%), moves the cursor up to six places left (5%) or jumps somewhere random (3%). In some runs people also typed backward about a fifth of the time, in streaks. Everyone starts at the same spot in a 120-character paragraph and makes 400 keystrokes, and each keystroke reaches the others after a delay counted in keystrokes. A delay of 1 is a fast live connection; "offline" means nobody syncs until the end. The numbers are split pairs per 1,000 typed characters, with the share of sessions that had any in brackets.</p>
+
+      <div class="table-wrap"><table class="compact">
+        <thead><tr><th>Algorithm</th><th>Delay 1</th><th>Delay 5</th><th>Delay 20</th><th>Offline</th><th>Offline, 3 people, backward streaks</th></tr></thead>
+        <tbody>
+          <tr><td>Fugue</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td></tr>
+          <tr><td>YATA (Yjs)</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td></tr>
+          <tr><td>RGA</td><td>0</td><td>0</td><td>0.03 (2%)</td><td>0.05 (3%)</td><td>0.52 (18%)</td></tr>
+          <tr><td>LSEQ</td><td>0.05 (3%)</td><td>0.79 (30%)</td><td>1.7 (45%)</td><td>2.8 (68%)</td><td>6.0 (97%)</td></tr>
+          <tr><td>Logoot, boundary+</td><td>0.05 (3%)</td><td>0.79 (28%)</td><td>2.2 (47%)</td><td>2.6 (67%)</td><td>6.3 (97%)</td></tr>
+          <tr><td>Logoot, random gaps</td><td>0.03 (2%)</td><td>1.8 (42%)</td><td>3.2 (58%)</td><td>6.0 (70%)</td><td>9.3 (97%)</td></tr>
+        </tbody>
+      </table></div>
+
+      <p>The first four columns are two people with no backward streaks; 60 sessions per cell. A few splits per thousand characters sounds small, but they cluster where people collide. One split is one stray letter or word inside someone's sentence, and at a delay of 5 keystrokes, roughly the lag of a slow connection for a fast typist, 28-42% of Logoot and LSEQ sessions had at least one.</p>
+
+      <p>RGA's failures came from typing in front of your own text. Ana types a letter, Ben types at the same spot, Ana moves her cursor back and types in front of her own letter: her new text and Ben's are now both inserts after the same character, and RGA's newest-first rule can put Ben's between them. Without deliberate backward streaks that stayed rare. With them, 18% of three-person offline sessions had a split.</p>
+
+      <p>I had to fix my metric along the way. My first version counted a split whenever a deleted character sat between the two letters, and it reported small, identical rates for YATA and Fugue. In those cases the other person's text really belonged between them: it was anchored to the deleted character. Counting only letters that were adjacent with nothing deleted between them brought both to zero. The table uses that stricter count.</p>
+
+      <h2>The device problem</h2>
+
+      <p>The Fugue paper describes the one case where Yjs interleaves: a backward run typed from more than one replica ID, while someone else types at the same spot. One person switching from laptop to phone mid-sentence does that, and so does a web app that makes a new ID every time a tab reloads. Whether it actually happens depends on how the three IDs compare, so I gave each person several IDs, shuffled the order across people, and had them switch IDs as they typed.</p>
+
+      <p>With a switch before every letter (the worst case), YATA split 3-5% of backward pairs with two IDs per person and 11-15% with eight. RGA split 75-89%. Fugue stayed at zero. In the editing sessions, with a switch every 40 keystrokes on average, YATA went from zero to 0.01-0.23 splits per 1,000 characters, in 1-20% of sessions. The top of that range assumes heavy backward typing, three people and no sync, so it's a pessimistic number. RGA's rate was higher in 14 of the same 16 configurations.</p>
+
+      <p>Fugue had one split across about 17,800 sessions. I traced it. Ana and Ben had each typed a letter at the same spot, and Ben's sorted first. Ana then typed a letter between Ben's and her own. Meanwhile Ben, who hadn't seen it, kept typing after his letter, and his run went between Ana's two letters. Ana's two letters were inserted at different positions (one after the original text, one after Ben's letter), a case Fugue's guarantee doesn't cover. The tie-break between her letter and his run went the unlucky way.</p>
+
+      <h2>What the identifiers cost</h2>
+
+      <p>RGA, YATA and Fugue give each character a fixed-size identifier: a replica number and a counter, plus one or two references to other characters. Stored naively that's 16-24 bytes per character, and real implementations compress runs of typing down to far less. Logoot's positions get longer whenever there's no room left in a gap, so their size depends on how people type. I replayed a real editing history: a public trace of about 260,000 edits made while writing an academic paper (from the Automerge benchmarks), ending at 104,852 characters. Every level of a position also stores which replica made it and a counter, which I counted as 6 bytes.</p>
+
+      <div class="table-wrap"><table class="compact">
+        <thead><tr><th>Strategy</th><th>Real history</th><th>100k typed forward</th><th>100k typed backward</th><th>100k random positions</th></tr></thead>
+        <tbody>
+          <tr><td>Logoot, random gaps</td><td>1,404 B (176 levels)</td><td>grows linearly; out of memory</td><td>grows linearly; out of memory</td><td>20 B</td></tr>
+          <tr><td>Logoot, boundary+</td><td>49 B (6.1)</td><td>38 B (4.7)</td><td>grows linearly; out of memory</td><td>49 B</td></tr>
+          <tr><td>LSEQ</td><td>117 B (15.5)</td><td>107 B (14.3)</td><td>106 B (14.3)</td><td>43 B</td></tr>
+        </tbody>
+      </table></div>
+
+      <p>Bytes are the average per character; levels in brackets. Random gaps are fine for random insert positions and terrible for typing. Every forward keystroke uses, on average, half of the remaining gap, so each new position is one level longer than the last about every 11 characters: after 20,000 characters typed forward the deepest position had 1,736 levels and the average was 870 (7 KB). Boundary+ fixes forward typing and breaks the same way for backward typing, gaining a level about every 3 characters. LSEQ's alternating directions keep both directions bounded, but on the real history it cost more than twice as much as plain boundary+. Most real typing is forward, and my guess is that the levels allocating from the right end waste space on it.</p>
+
+      <h2>Takeaways</h2>
+
+      <p>If you're choosing a text CRDT, Logoot-style positions aren't worth it: they interleave in ordinary use and their identifiers depend on typing patterns. RGA is clean for forward typing, and its failure case is common enough to show up in simulation. Yjs's hole is narrow but real in apps that switch replica IDs often, such as one per tab load. Fugue was the only one I couldn't break with the cases it promises to handle, at the same identifier cost as RGA.</p>
+    </article>
+  </main>
+  <script src="/js/crdt.js"></script>
+  <script src="/js/crdt-ui.js"></script>
+</body>
+</html>
