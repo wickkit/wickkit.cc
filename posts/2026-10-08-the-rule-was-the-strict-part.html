@@ -34,7 +34,7 @@
         <li><b>Token bucket</b>: a bucket holding up to B tokens refills at 100 per minute, and each request takes one. GCRA, the version many Redis-based limiters use, is the same thing written in terms of a "theoretical arrival time".</li>
       </ul>
 
-      <p>I wanted to know how far apart they really are, against an attacker and against ordinary clients, so I simulated them. The answer I didn't expect was that the cheap approximations aren't the main problem. The rule is. Taken literally, "at most 100 in any 60 seconds" rejects 29% of the requests from a client that averages 80 a minute in bursts, and no limiter, even one that knows the future, can serve more of that client without letting some minute go over 100. Every algorithm that serves more is quietly enforcing a looser rule. Two smaller findings: the sliding-window counter is beaten on both counts by a plain token bucket, and a sliding log that also records <em>rejected</em> requests can lock out a client using a quarter of its quota.</p>
+      <p>I wanted to know how far apart they really are, against an attacker and against ordinary clients, so I simulated them. The answer I didn't expect was that the cheap approximations aren't the main problem. The rule is. Taken literally, "at most 100 in any 60 seconds" rejects 29% of the requests from a client that averages 80 a minute in bursts, and no limiter, even one that knows the future, can serve more of that client without letting some minute go over 100. Every algorithm that serves more is quietly enforcing a looser rule. Two smaller findings: the sliding-window counter is matched or beaten on both counts, in 19 of 20 cases, by a plain token bucket, and a sliding log that also records <em>rejected</em> requests can lock out a client using a quarter of its quota.</p>
 
       <h2>The setup</h2>
 
@@ -83,7 +83,7 @@
       </table></div>
       <p class="caption">Mean of 20 runs of 2,000 minutes; standard errors at most 1.5 points. Busiest minute: the largest number admitted in any 60 seconds, averaged over runs.</p>
 
-      <p>The sliding log, the only limiter that never breaks the rule, is the strictest in every row. For page loads at 80% it rejects 29% of the client's requests; even at 30% of the limit it rejects 9%. Bursts are the reason. At 80% that's four page loads a minute on average, and both the number per minute and the size of each vary a lot, so minutes over 100 are routine.</p>
+      <p>The sliding log, the only limiter that never breaks the rule, is the strictest in every row but one (with big bursts the B = 50 bucket serves slightly less, 54.2% against 56.2%). For page loads at 80% it rejects 29% of the client's requests; even at 30% of the limit it rejects 9%. Bursts are the reason. At 80% that's four page loads a minute on average, and both the number per minute and the size of each vary a lot, so minutes over 100 are routine.</p>
 
       <p>It isn't the log's fault. Admitting a request whenever the last 60 seconds have room is the best possible policy for this rule: no schedule, even one chosen with the whole future known, admits more. That's a classic result about choosing intervals of equal length, and I checked it by brute force on 3,000 small random cases (it was never beaten; a deliberately weakened version was beaten in 1,621). So every limiter that served more in the table did it by letting some minute go over 100, which the brackets show.</p>
 
@@ -117,7 +117,7 @@
         </tbody>
       </table></div>
 
-      <p>Where all 20 runs locked, the client got 1% to 6% of its requests served over the 200 minutes. The lockout point sits somewhat above "tries × rate = limit", at roughly 1.5 to 2.2 times it, because a locked request's tries arrive in a clump and the window has to stay full at every moment to hold the lock. With rejects not counted, the same clients were served 95% to 99% at every rate and retry count. A sliding-window counter that counts rejects behaved the same way, locking slightly earlier.</p>
+      <p>Where all 20 runs locked, the client got 1% to 6% of its requests served over the 200 minutes. The lockout point sits somewhat above "tries × rate = limit", at roughly 1.6 to 3 times it (higher with more retries), because a locked request's tries arrive in a clump and the window has to stay full at every moment to hold the lock. With rejects not counted, the same clients were served 95% to 99% at every rate and retry count. A sliding-window counter that counts rejects behaved the same way, locking slightly earlier.</p>
 
       <p>The fix is one line: don't record a request you rejected. (If you want to punish clients that hammer a closed door, do it with a separate, explicit penalty, not as a side effect of the log.)</p>
 
@@ -129,7 +129,7 @@
 
       <ul>
         <li>Decide which promise you're making. "At most 100 in any minute" protects a backend precisely and rejects a lot of honest bursty traffic; nothing can do better at that promise than a sliding log. If you serve more, you're promising something looser, so say what: "100 a minute with bursts of up to 50" is a token bucket, and its worst case is exactly B + 99.</li>
-        <li>If you're going to break the literal rule anyway, a token bucket breaks it in a known, tunable way. The fixed window and the sliding-window counter both allow 200 in the worst case and served less than a token bucket with a smaller worst case.</li>
+        <li>If you're going to break the literal rule anyway, a token bucket breaks it in a known, tunable way. The sliding-window counter allows 200 in the worst case and served no more than a token bucket whose worst case is 174 in 19 of 20 cases (the 20th within 0.1 point).</li>
         <li>Never record rejected requests in a sliding limiter. Combined with ordinary retries it turns one spike into a lockout for a client using a quarter of its quota.</li>
         <li>Publish the burst size along with the rate. A client can't stay under "100 a minute" in practice without knowing how bursty it's allowed to be.</li>
       </ul>
