@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>The Cap Is Doing the Work — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/den.html">den</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+
+    <article>
+      <h1>The Cap Is Doing the Work</h1>
+      <div class="meta">2026-10-08 · Kit Wickham</div>
+
+      <p>When a request fails because something else got there first, the standard advice is to retry with exponential backoff plus jitter. The usual reference is Marc Brooker's 2015 AWS post, which simulated clients fighting over one database row and found "full jitter" (sleep a random time between zero and the exponential window) about as good as anything, "decorrelated jitter" close, "equal jitter" the loser, and no jitter far worse. I reproduced that test, then changed the parts it holds fixed: what a failed attempt costs, whether the clients arrive all at once or steadily, and how big the cap on the window is.</p>
+
+      <p>The short version: the jitter style matters less than two other things. The cap decides whether a system recovers from a burst. On the collision model, full jitter needs a cap of about twice the number of clients piled up; decorrelated jitter needs far more, because its typical sleep grows only about 10% per retry. And when failed attempts use up the server's capacity, no backoff strategy raises the load the system can sustain. Every one I tried collapsed at 15% to 20% of the server's capacity. Backoff helps you recover from a pile-up; it doesn't let you run hotter.</p>
+
+      <h2>Three ways to lose</h2>
+
+      <p>Time is measured in attempt-durations: one attempt takes 1.0. The three models differ only in what happens when attempts overlap:</p>
+
+      <ul>
+        <li><b>Collisions</b>: any overlap ruins both attempts, like two radios transmitting at once.</li>
+        <li><b>Failures free</b>: optimistic concurrency where the first to commit wins and everyone who overlapped it fails. Failed attempts cost the server nothing. This is Brooker's setting.</li>
+        <li><b>Failures use capacity</b>: the same first-commit-wins rule, but every attempt in flight shares one server, so <i>k</i> concurrent attempts each run <i>k</i> times slower. Doomed attempts slow down the one that will win.</li>
+      </ul>
+
+      <p>The strategies are the AWS formulas with a base of 1: no jitter (sleep min(cap, 2<sup>k−1</sup>) after the <i>k</i>-th failure), full jitter (uniform between 0 and that), equal jitter (half of it plus uniform up to the other half), decorrelated jitter (min(cap, uniform(base, 3 × last sleep))), and no backoff at all (retry immediately). Before trusting the simulator I checked it with retries turned off and Poisson arrivals. The collision model's goodput matched pure ALOHA's λe<sup>−2λ</sup> within 1% (0.1359 vs 0.1353 at λ = 1), the free model matched λ/(1 + λ) within 1%, and a plain processor-sharing queue matched the textbook mean time in system, 1/(1 − ρ), within 0.5% up to 60% load and 2.3% at 90%.</p>
+
+      <h2>The classic test holds, with a price tag</h2>
+
+      <p>Brooker's test starts <i>N</i> clients at the same instant, each needing one success. With 200 runs per point and a cap of 1,000, I got his ranking back. With 100 clients and free failures, full jitter used 7.4 attempts per client and finished everyone in 465; decorrelated used 7.5 and finished in 301; equal used 7.6 and took 615. Unjittered backoff used 50.5 attempts per client, exactly the same as no backoff, and took 90,000, because the clients that fail together sleep together. On the collision model it never finished at all: clients that start together collide forever.</p>
+
+      <p>Two things that comparison hides:</p>
+
+      <ul>
+        <li><b>With free failures, retrying immediately finishes first.</b> 100 clients done in exactly 100, the minimum possible, since every round has a winner. The cost is work: 50.5 attempts per client against 7.4. Backoff trades wasted attempts for idle time on the server. Whether that's a good trade depends on what a failed attempt costs, which this model sets to zero.</li>
+        <li><b>Not knowing <i>N</i> costs up to 1.6×.</b> I searched each strategy's base (0.25 to 64) and cap (100, 1,000, none) for the lowest mean latency, against the best fixed random window (uniform sleep between 0 and <i>W</i>, with <i>W</i> searched too). On collisions the fixed window won by 1.45× at 100 clients (292 vs 423 for the best exponential setting) and 1.56× at 1,000 (2,938 vs 4,592). With free failures the gap was 1.29× at 100 clients and 1.03× at 1,000. That's the price of a backoff that has to discover how crowded it is.</li>
+      </ul>
+
+      <figure class="fig smooth"><img src="/img/backoff.png" width="2025" height="690" alt="Left: sleep before retry k with a cap of 1000, log scale, median line and 10th to 90th percentile band. Full jitter's median doubles each retry until it flattens at 500 from retry 11; equal jitter flattens at 750. Decorrelated jitter's median climbs slowly, reaching about 25 at retry 10, 110 at retry 20 and 200 at retry 30, with a 10th percentile still under 10 at retry 30. Middle: mean latency against arrival rate as a fraction of server capacity, log scale. With failures free, no backoff stays under 25 up to 0.95 load, while full jitter climbs to 210 at 0.8 and most runs collapse at 0.9. With failures using capacity, both lines stop by 0.15: no backoff collapses at 0.15, full jitter at 0.2. Right: percent of 40 runs that drained a burst of 300 clients, against cap divided by burst size, log scale. On collisions (solid), equal and full jitter jump from 0 to 100% between 0.8 and 1.7 times the burst; decorrelated needs 3.3. With capacity-sharing (dashed), equal jitter reaches 60% at 6.7 and 100% at 13, full jitter 58% at 13 and 100% at 27, and decorrelated stays at 0% at every cap."></figure>
+      <p class="caption">Left: the sleep each strategy draws before its k-th retry (200,000 draws per point). Middle: steady arrivals, 20 runs per point, cap 1,000; the × marks the last load where most runs survived. Right: 300 clients arrive at once on top of steady traffic at 5% of capacity; on the solid lines full and equal jitter overlap from 1.7× up.</p>
+
+      <h2>Steady traffic: backoff doesn't raise the ceiling</h2>
+
+      <p>Real retries happen under continuous traffic, so the next test had clients arriving at random, at a steady rate, for 20,000 time units, with each one retrying until it succeeded. A run counts as collapsed once 3,000 clients are waiting.</p>
+
+      <ul>
+        <li><b>Failures free</b>: no backoff was best at every load. It held up to 95% of capacity with a mean latency of 21. Full jitter was already at 210 at 80% load, and most of its runs collapsed at 90%, because every sleep leaves the server idle while there's work waiting.</li>
+        <li><b>Collisions</b>: every jittered strategy collapsed at 15% of capacity in most runs. That's just under pure ALOHA's ceiling of 1/(2e) ≈ 18%, the most a collision channel delivers when attempts arrive at random.</li>
+        <li><b>Failures use capacity</b>: no backoff collapsed at 15% (12 of 20 runs), and full, equal and decorrelated jitter at 20% (16 to 19 of 20). Even with retries turned off entirely, this model delivers at most 29% of capacity as successes, at an attempt rate between 50% and 70%. Backoff added one step on my grid.</li>
+      </ul>
+
+      <p>The capacity-sharing result is the one I'd remember. The server could finish one attempt per time unit if attempts came one at a time, but first attempts come from new arrivals, and backoff can't schedule those. Two that overlap slow each other down and widen the window in which a third can ruin them. Backoff only controls retries, and retries were never the whole load.</p>
+
+      <h2>Bursts: where the cap earns its keep</h2>
+
+      <p>What backoff does well is recover from a pile-up. I added a burst of clients at time zero on top of steady traffic at 5% of capacity and counted the runs that drained it (40 runs per point, up to 60,000 time units).</p>
+
+      <ul>
+        <li><b>Collisions</b>: full jitter drained a burst of 300 at a cap of 500, but not at 250. A burst of 1,000 needed 2,000; 1,000 failed every time. Equal jitter got by with a cap about the size of the burst: 1,000 handled a burst of 1,000 in 38 of 40 runs. Decorrelated jitter needed 1,000 for a burst of 300, and 8,000 for a burst of 1,000 (that one took a 300,000-unit run to see), where it drained in 73,000 against full jitter's 15,000 at a cap of 4,000.</li>
+        <li><b>Failures use capacity</b>: everything needed much larger caps. A burst of 300 needed 4,000 for equal jitter and 8,000 for full jitter to always drain. Decorrelated jitter never drained even a burst of 100, at any cap up to 64,000, in 20 runs of 300,000 units each.</li>
+        <li><b>Failures free</b>: in a separate, shorter sweep (20 runs of 20,000 units, steady traffic at 2% to 10%), no backoff drained fastest at every burst size I tried, up to 1,000 clients (1,021 time units at 2%, against 1,257 to 2,688 for full jitter depending on the cap).</li>
+      </ul>
+
+      <p>A cap that's too big has a price too: the clients that end up at the cap sleep long after the crowd has gone. On collisions, a burst of 300 drained in 3,800 with full jitter capped at 1,000 and in 10,400 with a cap of 32,000, which never binds. The best cap is a little above the threshold, not as high as you can set it.</p>
+
+      <p>Equal jitter beats full jitter here for a dull reason: once capped, its average sleep is 0.75 of the cap against full jitter's 0.5, so it behaves like full jitter with a 50% larger cap. Decorrelated jitter fails for a more interesting one. Each sleep is uniform between the base and three times the previous sleep, and the average of the log of a uniform draw on (0, 3) is ln 3 − 1 ≈ 0.10. So a typical sleep grows only about 10% per retry, and a single short draw knocks it back down. After 30 retries with a cap of 1,000, its median sleep was 200 against full jitter's 500, and a tenth of its sleeps were under 8. With a crowd, there's always a stream of clients retrying almost immediately.</p>
+
+      <h2>What I'd do</h2>
+
+      <ul>
+        <li>Size the cap to the worst pile-up you expect, measured in attempt-durations: about twice the number of clients that can contend at once for full jitter. If an attempt takes 20 ms and a deploy can make 300 clients retry the same row, a 1-second cap is too small; that burst needs 10 seconds or more.</li>
+        <li>Use full or equal jitter. Avoid decorrelated jitter for anything that can see a large crowd.</li>
+        <li>If failed attempts are cheap for the server, as with a version check that fails before any work happens, back off less, or not at all.</li>
+        <li>If failed attempts eat capacity, don't expect backoff to buy headroom. The ceiling comes from overlapping first attempts, so the fixes are elsewhere: fewer conflicts, a queue or lock in front of the hot row, or rejecting work early. I didn't test those.</li>
+      </ul>
+
+      <p>Limits: one hot resource and one-unit attempts with no network delay or variation; all clients use the same strategy; base fixed at one attempt-duration except in the frontier search; no timeouts or retry limits in the steady and burst tests, so collapse means an unbounded queue. The capacity-sharing model is one idealization (equal sharing, all-or-nothing conflicts), and its exact thresholds will move with the details. The pattern that held across all three models is that the cap, not the jitter style, decided whether a burst drained.</p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+</body>
+</html>
