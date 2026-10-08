@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>The Ring Needs a Thousand Points — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/den.html">den</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+
+    <article>
+      <h1>The Ring Needs a Thousand Points</h1>
+      <div class="meta">2026-10-08 · Kit Wickham</div>
+
+      <p>When you spread keys over servers with <code>hash(key) mod n</code>, adding one server moves almost every key: going from 100 to 101 servers moved 99% of them in my runs, a hundred times the 1% that has to move. Consistent hashing is the family of schemes that move only that 1%. There are several, and they're usually compared on paper. I measured six of them on two things: how lopsided the busiest server gets, and how many keys move when a server joins or leaves, compared with the minimum.</p>
+
+      <p>The short version: the classic hash ring is badly lopsided unless you give each server hundreds to thousands of points, and the exact amount follows a clean formula. Rendezvous and jump hashing are as even as random assignment and move exactly the minimum. Maglev, Google's table-based scheme, moved 1.5 to 6.6 times the minimum. Capping each server's load works, but it costs extra moves unless you also use many points.</p>
+
+      <h2>The schemes</h2>
+
+      <ul>
+        <li><b>Ring</b> (Karger et al., 1997): each server hashes to <i>v</i> points on a circle; a key goes to the next point clockwise. Lookups are a binary search.</li>
+        <li><b>Rendezvous</b> (Thaler and Ravishankar, 1996): score every server against the key and take the highest. Even and minimal, but a lookup touches every server.</li>
+        <li><b>Jump</b> (Lamping and Veach, 2014): a few lines of arithmetic that pick a bucket from 0 to <i>n</i>−1 in about ln <i>n</i> steps, with no table at all. The catch is that buckets are numbered, so you can only add or remove the last one.</li>
+        <li><b>Maglev</b> (Eisenbud et al., 2016): each server walks its own pseudo-random permutation of a lookup table, and they take turns claiming slots until the table is full. A lookup is one array read.</li>
+        <li><b>Bounded loads</b> (Mirrokni, Thorup and Zadimoghaddam, 2018): a ring where no server may hold more than <i>c</i> times the average; a key whose server is full keeps walking clockwise. HAProxy ships it as <code>hash-balance-factor</code>.</li>
+      </ul>
+
+      <p>Every run used a million random keys with 10, 100 or 1,000 servers and 20 seeds per setting, about 1,600 runs in all. "Keys moved" compares the assignment before and after one server joins (or a random one leaves) with the minimum: the newcomer's fair share, or the departed server's own keys.</p>
+
+      <figure class="fig smooth"><img src="/img/chash.png" width="1650" height="690" alt="Left: log-log chart of the busiest server's load divided by the average, against points on the ring per server from 1 to 1,024, for 10, 100 and 1,000 servers. Simulated dots sit on dashed theory curves. With one point the busiest server carries about 3 times the average for 10 servers, 5.3 for 100 and 7.2 for 1,000; all three curves fall to between 1.06 and 1.11 at 1,024 points. Right: bar chart of keys moved when a 101st server joins, as a multiple of the minimum. Rendezvous 0.99, jump 1.01, ring with 256 points 1.01, Maglev with 65,537 slots 1.55, Maglev going from 1,000 to 1,001 servers 6.60, load cap 1.1 with 100 points 1.23, load cap 1.25 with 1 point 6.89.">
+        <figcaption>Left: ring imbalance, measured as exact arc shares so key noise doesn't blur it; 20 seeds per dot. Right: means over 20 seeds with a million keys; standard errors are under 0.07 except the one-point load cap (0.6).</figcaption>
+      </figure>
+
+      <h2>The ring is lopsided, exactly as predicted</h2>
+
+      <p>With one point per server, the busiest of 100 servers carried 5.3 times the average load; of 1,000 servers, 7.2 times. Arc lengths between random points on a circle are far from equal, and the busiest server is the one that drew the longest arc.</p>
+
+      <p>This has an exact answer. With <i>v</i> random points per server, the shares of the circle follow a Dirichlet distribution with every parameter equal to <i>v</i>, so the busiest server's load is the largest of <i>n</i> Gamma(<i>v</i>) draws divided by their mean. The dashed curves are that formula, computed numerically; 30 of the 33 simulated settings are within two standard errors of them and the rest within three. A good back-of-the-envelope version is 1 + √(2 ln <i>n</i> / <i>v</i>): for 16 or more points it was within 7% of the measured value. Flip it around and you get the points you need: about 2 ln <i>n</i> / ε<sup>2</sup> to keep the busiest server within 1 + ε of average. For 100 servers and 10% that's about 900 points each, and 1,024 points measured 1.08×.</p>
+
+      <div class="table-wrap"><table class="compact">
+        <thead><tr><th>points per server</th><th>10 servers</th><th>100 servers</th><th>1,000 servers</th></tr></thead>
+        <tbody>
+          <tr><td>1</td><td>2.97×</td><td>5.35×</td><td>7.23×</td></tr>
+          <tr><td>16</td><td>1.49×</td><td>1.67×</td><td>2.01×</td></tr>
+          <tr><td>256</td><td>1.11×</td><td>1.16×</td><td>1.23×</td></tr>
+          <tr><td>1,024</td><td>1.06×</td><td>1.08×</td><td>1.11×</td></tr>
+        </tbody>
+      </table></div>
+      <p class="note">Busiest server's share of the ring divided by the average share, mean of 20 seeds.</p>
+
+      <p>Sixteen points per server is a common setting (it's Cassandra's default since 4.0), and with random placement it leaves the busiest of 100 servers at 1.67 times average. Cassandra pairs it with an allocator that places new points deliberately rather than at random, which is the right fix; random placement at 16 points isn't good enough.</p>
+
+      <p>More points stop helping at some point, because the keys themselves are random too. With 1,000 keys per server, even perfectly random assignment leaves the busiest server at about 1.10× average, and the ring reaches that at about 1,000 points per server. Past roughly as many points as each server has keys, you're paying memory for nothing.</p>
+
+      <p>Points also decide who inherits a dead server's keys. With one point, all of them land on a single neighbor, which doubles that neighbor's load. With 16 points, they spread over about 15 servers; with 256 points over 91 of the remaining 99.</p>
+
+      <h2>Rendezvous and jump are as good as it gets</h2>
+
+      <p>Both hit the floor set by key randomness: the busiest of 100 servers held 1.026× and 1.024× average against a random-assignment benchmark of 1.025×, and adding a server moved 0.995× and 1.006× the minimum. On balance and movement there is nothing left to improve. The costs are elsewhere. Rendezvous scores every server on every lookup: at 1,000 servers a run took 5.4 seconds against 0.3 for jump. Jump can't remove an arbitrary server, only the last bucket, so it suits numbered shards rather than a pool of machines that fail at random.</p>
+
+      <h2>Maglev trades movement for speed</h2>
+
+      <p>Maglev's table spread keys as evenly as rendezvous did. But adding a server to 100 moved 1.55 times the minimum with its usual 65,537-slot table, and going from 1,000 to 1,001 servers with a 100,003-slot table moved 6.6 times the minimum: 0.66% of all keys instead of 0.1%. Removing a server moved about the same. When the server list changes, the turn-taking that fills the table plays out differently from the start, so slots change hands between servers that were never involved.</p>
+
+      <p>A bigger table helps. For 100 servers, a 10,007-slot table moved 2.6× the minimum, 65,537 moved 1.55× and 655,373 moved 1.14×. Small tables are worse: at 1,009 slots, ten per server, a join moved 4.4× the minimum. Maglev is built for packet load balancers, where a lookup must be one memory read and a few extra moved connections are tolerable; that's a sensible trade, but it is a trade.</p>
+
+      <h2>A load cap costs moves unless you have points</h2>
+
+      <p>The bounded-loads ring does what it promises: the busiest server never exceeded the cap. The price shows up on change. Keys that overflow a full server spill onto its neighbors, and when the server count changes, the cap changes with it and the spills land differently. I modeled it as reassigning the keys in a fixed order after each change.</p>
+
+      <div class="table-wrap"><table class="compact">
+        <thead><tr><th>cap (× average)</th><th>1 point</th><th>16 points</th><th>100 points</th></tr></thead>
+        <tbody>
+          <tr><td>1.05</td><td>12.4×</td><td>2.09×</td><td>1.44×</td></tr>
+          <tr><td>1.1</td><td>10.7×</td><td>1.75×</td><td>1.23×</td></tr>
+          <tr><td>1.25</td><td>6.9×</td><td>1.24×</td><td>1.05×</td></tr>
+          <tr><td>1.5</td><td>4.0×</td><td>0.97×</td><td>1.04×</td></tr>
+          <tr><td>2</td><td>2.2×</td><td>0.90×</td><td>1.04×</td></tr>
+        </tbody>
+      </table></div>
+      <p class="note">Keys moved when a 101st server joins, as a multiple of the minimum. 20 seeds each; values under 1 are the newcomer drawing less than its fair share. From 1.5 up with 100 points, and from 2 up with 16, the cap is never reached.</p>
+
+      <p>With one point per server the ring is so uneven that a tight cap is reached constantly, and a 1.25× cap moved 6.9 times the minimum. With 100 points the ring is already within about 1.27×, so the same cap almost never bites and costs 1.05×; even a 1.1× cap costs only 1.23×. Points do the bulk of the balancing, and the cap trims the tail.</p>
+
+      <h2>What I'd use</h2>
+
+      <ul>
+        <li>Numbered shards that only grow or shrink at the end: jump. Even, minimal and no memory.</li>
+        <li>A few dozen to a few hundred servers that come and go: rendezvous. A lookup over 100 servers is cheap, and you get the best possible balance and movement.</li>
+        <li>A ring: give it at least 2 ln <i>n</i> / ε<sup>2</sup> points per server for the evenness you want, or place points deliberately. If you also need a hard cap, add bounded loads on top of the points, not instead of them.</li>
+        <li>Maglev when lookup speed is everything, with the biggest table you can afford, knowing that changes move several times the minimum.</li>
+      </ul>
+
+      <p>Limits: uniform random keys with equal weights and equal-capacity servers, so this is the best case for every scheme; skewed key popularity adds its own imbalance on top. Maglev and the bounded-loads ring are my JavaScript implementations from the papers' descriptions, and the load cap is applied by reassigning in a fixed order, not to live traffic. Jump uses a different per-key random generator than the paper, with the same distribution.</p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+</body>
+</html>
