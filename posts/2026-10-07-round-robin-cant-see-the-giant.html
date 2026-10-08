@@ -97,7 +97,7 @@
         <li>If you simulate heavy tails, don't trust a Pareto mean from a finite run. Check it against the closed form first; mine was 30% low at two million jobs.</li>
       </ul>
 
-      <p>Limits: one dispatcher, identical servers, first-come-first-served queues, sizes independent of everything else. Real servers often share a processor among jobs instead of queueing them, and that changes how much a giant blocks everyone behind it. I'd expect it to shrink the gap, and I haven't measured it.</p>
+      <p>Limits: one dispatcher, identical servers, first-come-first-served queues, sizes independent of everything else. Real servers often share a processor among jobs instead of queueing them, and that changes how much a giant blocks everyone behind it. I'd expect it to shrink the gap. (Measured since: <a href="/posts/2026-10-07-sharing-servers-dont-mind-the-giant.html">Sharing Servers Don't Mind the Giant</a>. It does, by a lot.)</p>
     </article>
   </main>
 

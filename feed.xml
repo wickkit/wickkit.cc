@@ -8,6 +8,77 @@
   <updated>2026-10-07T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
   <entry>
+    <title>Sharing Servers Don't Mind the Giant</title>
+    <link href="https://wickkit.cc/posts/2026-10-07-sharing-servers-dont-mind-the-giant.html"/>
+    <id>https://wickkit.cc/posts/2026-10-07-sharing-servers-dont-mind-the-giant.html</id>
+    <updated>2026-10-07T00:00:00Z</updated>
+    <summary>The heavy-tail disaster for round robin was mostly a queueing disaster. When servers time-share, random and best of two stop caring how spread out job sizes are, and an old load board stays true for longer.</summary>
+    <content type="html">&lt;p&gt;&lt;a href="https://wickkit.cc/posts/2026-10-07-round-robin-cant-see-the-giant.html"&gt;Round Robin Can't See the Giant&lt;/a&gt; ended on a limit I hadn't tested. Every server there worked through its jobs one at a time, first come first served, so a single giant job blocked everything queued behind it. Real servers often don't work that way. A CPU or a web server slices its time among everything it's holding, so a small job that arrives behind a giant still gets its share right away. I guessed that would shrink the gap between policies. I measured it, and it does more than that: with sharing servers, the size spread stops mattering at all for most of the policies I tried.&lt;/p&gt;
+
+      &lt;h2&gt;The setup&lt;/h2&gt;
+
+      &lt;p&gt;Everything is as in the last post except the servers. There are 100 of them, jobs arrive at random, mean job size is one service time, and the score is the mean time a job spends in the system. Job sizes come from the same mix of two exponentials, with spread measured by the squared coefficient of variation (SCV): 1 for exponential sizes, up to 30, where 1 job in 61 is a giant averaging 30 service times and the giants carry half the work.&lt;/p&gt;
+
+      &lt;p&gt;The new part: each server now splits its capacity equally among the jobs it holds. With three jobs present, each runs at a third of full speed. Queueing people call this processor sharing. I ran 8 seeds of 2 million jobs for every point and compared against the first-come-first-served numbers from last time, at the same loads, spreads and staleness.&lt;/p&gt;
+
+      &lt;p&gt;One check before trusting it. For a single sharing server with random arrivals, there's an exact result: the mean time in system is the mean job size divided by (1 − load), whatever the size distribution. With random dispatch every server is exactly that, so at 90% load the answer has to be 10. I got 9.98, 10.04, 10.03 and 9.89 for exponential, fixed-size, SCV-30 and Pareto jobs (8 seeds each, standard errors 0.03 to 0.18). The same result says a job of size &lt;i&gt;x&lt;/i&gt; takes 10&lt;i&gt;x&lt;/i&gt; on average, so time in system divided by size should average 10 too: 9.98 to 10.22 across the four spreads, within two standard errors. And with exponential sizes, a dispatcher that only looks at counts should see exactly the same thing under either discipline, because counts move the same way. Best of two came out at 2.64 both ways.&lt;/p&gt;
+
+      &lt;h2&gt;The spread stops mattering&lt;/h2&gt;
+
+      &lt;div class="table-wrap"&gt;&lt;table class="compact"&gt;
+        &lt;thead&gt;&lt;tr&gt;&lt;th&gt;Job sizes&lt;/th&gt;&lt;th&gt;Random&lt;/th&gt;&lt;th&gt;Round robin&lt;/th&gt;&lt;th&gt;Best of two (live)&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;
+        &lt;tbody&gt;
+          &lt;tr&gt;&lt;td&gt;Exponential (SCV 1)&lt;/td&gt;&lt;td&gt;10.0 · 10.0&lt;/td&gt;&lt;td&gt;5.2 · 5.2&lt;/td&gt;&lt;td&gt;2.6 · 2.6&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;SCV 4&lt;/td&gt;&lt;td&gt;23.4 · 10.0&lt;/td&gt;&lt;td&gt;18.6 · 7.8&lt;/td&gt;&lt;td&gt;4.2 · 2.6&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;SCV 10&lt;/td&gt;&lt;td&gt;51.1 · 10.2&lt;/td&gt;&lt;td&gt;45.5 · 8.8&lt;/td&gt;&lt;td&gt;6.8 · 2.6&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;SCV 30&lt;/td&gt;&lt;td&gt;139.9 · 10.0&lt;/td&gt;&lt;td&gt;132.5 · 9.1&lt;/td&gt;&lt;td&gt;15.2 · 2.7&lt;/td&gt;&lt;/tr&gt;
+        &lt;/tbody&gt;
+      &lt;/table&gt;&lt;/div&gt;
+      &lt;p class="note"&gt;Mean time in system, in service times, at 90% load. Each cell: queueing servers · sharing servers.&lt;/p&gt;
+
+      &lt;p&gt;Random doesn't move, which is the exact result above. The surprise is best of two: 2.64, 2.64, 2.64, 2.66. A live least-loaded dispatcher is just as flat at 1.07. Queueing theorists have seen this before: Gupta, Harchol-Balter, Sigman and Whitt analyzed join-the-shortest-queue with sharing servers in 2007 and found it nearly insensitive to the size distribution. Here I couldn't detect any sensitivity at all.&lt;/p&gt;
+
+      &lt;p&gt;The intuition: under sharing, a job's speed depends only on how many jobs it shares the server with. A giant doesn't block anyone; it just takes one slot for a long time. Counting jobs is exactly the right signal, and job sizes never enter it.&lt;/p&gt;
+
+      &lt;p&gt;That also flips which piece of information is best. With queueing servers, an oracle that knows how much work every server has left was the best policy I tried (1.18 at SCV 30, against 1.50 for least loaded by count). With sharing servers it loses: 1.21 against 1.07. A server halfway through one giant has a lot of work left but only one job, and a new small job sent there runs at half speed, not behind 15 units of waiting.&lt;/p&gt;
+
+      &lt;p&gt;Round robin is the odd one. It still loses its edge as the spread grows, from half of random's time down to 9% better, but what it decays toward is random's 10, not 140. With sharing servers the worst it can do is merely bad.&lt;/p&gt;
+
+      &lt;h2&gt;Old information lasts even longer&lt;/h2&gt;
+
+      &lt;figure class="fig smooth"&gt;&lt;img src="https://wickkit.cc/img/lb-share.png" width="1650" height="690" alt="Left: log-scale chart of mean time in system at 90% load against job-size variability (SCV 1, 4, 10, 30). Dashed lines (queueing servers) for random and round robin climb from about 5 to 10 up to about 135; best of two climbs from 2.6 to 15; best of two with a board 100 service times old climbs from 21 to 45. Solid lines (sharing servers): random flat at 10, round robin rises from 5.2 to 9.1, best of two flat at 2.6, and best of two with the 100-old board falls from 21 to 6. Right: correlation between a server's job count on an old board and its count now, against board age from 1 to 500 service times; at age 500 it is 0.05 for exponential jobs, 0.27 at SCV 4, 0.46 at SCV 10 and 0.67 at SCV 30."&gt;
+        &lt;figcaption&gt;90% load, 100 servers, 8 seeds of 2 million jobs per point (12 for the queueing servers). Right panel: random dispatch to sharing servers, so the board has no effect on where jobs go.&lt;/figcaption&gt;
+      &lt;/figure&gt;
+
+      &lt;p&gt;The orange lines on the left are best of two reading a board refreshed every 100 service times. With queueing servers it gets worse as jobs spread out, from 21 to 45. With sharing servers it gets &lt;em&gt;better&lt;/em&gt;, from 21 to 6.0, which beats live round robin. Across the whole sweep:&lt;/p&gt;
+
+      &lt;div class="table-wrap"&gt;&lt;table class="compact"&gt;
+        &lt;thead&gt;&lt;tr&gt;&lt;th&gt;Job sizes&lt;/th&gt;&lt;th&gt;Best of two worse than random once &lt;i&gt;T&lt;/i&gt; is&lt;/th&gt;&lt;th&gt;…than round robin&lt;/th&gt;&lt;th&gt;Least loaded worse than round robin&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;
+        &lt;tbody&gt;
+          &lt;tr&gt;&lt;td&gt;Exponential&lt;/td&gt;&lt;td&gt;20–50&lt;/td&gt;&lt;td&gt;10–20&lt;/td&gt;&lt;td&gt;1–2&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;SCV 4&lt;/td&gt;&lt;td&gt;50–100&lt;/td&gt;&lt;td&gt;20–50&lt;/td&gt;&lt;td&gt;2–5&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;SCV 10&lt;/td&gt;&lt;td&gt;100–200&lt;/td&gt;&lt;td&gt;100–200&lt;/td&gt;&lt;td&gt;5–10&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;SCV 30&lt;/td&gt;&lt;td&gt;200–500&lt;/td&gt;&lt;td&gt;200–500&lt;/td&gt;&lt;td&gt;5–10&lt;/td&gt;&lt;/tr&gt;
+        &lt;/tbody&gt;
+      &lt;/table&gt;&lt;/div&gt;
+      &lt;p class="note"&gt;Sharing servers, 90% load. &lt;i&gt;T&lt;/i&gt; is the time between board refreshes, in service times; ranges are the grid points where the curve crosses.&lt;/p&gt;
+
+      &lt;p&gt;Against round robin, best of two's staleness budget is the same as with queueing servers or one grid step shorter, because round robin itself got better. Least loaded's budget shrank from "over 50" to 5–10 service times at SCV 30: its herd still costs something, and a round robin that doesn't collapse is harder to beat.&lt;/p&gt;
+
+      &lt;p&gt;Last time I guessed why old information stays useful with heavy tails: the thing worth knowing is which servers are holding giants, and that changes on a giant's time scale. I hadn't tested it. The right panel does. Under random dispatch, so that the board can't steer anything, I correlated each server's count on an old board with its count now. With exponential jobs a 500-unit-old board is noise (correlation 0.05). At SCV 30 it's still 0.67. The giants carry half the work, and under sharing every job's time in the system is proportional to its size, so about half the jobs present at any moment are giants, each staying around 300 service times. Most of what a count measures is still true long after it was taken.&lt;/p&gt;
+
+      &lt;h2&gt;What changes&lt;/h2&gt;
+
+      &lt;ul&gt;
+        &lt;li&gt;The heavy-tail disaster in the last post was mostly a queueing disaster. If servers share, random and round robin stay near 10 at 90% load instead of reaching 140.&lt;/li&gt;
+        &lt;li&gt;If your servers share, count jobs. Live best of two and least loaded are unaffected by the size spread, and counting beats knowing the exact work left.&lt;/li&gt;
+        &lt;li&gt;Best of two is still the safe default: it beat round robin with boards 100 service times old at SCV 10 and 30, under both disciplines.&lt;/li&gt;
+        &lt;li&gt;Least loaded on a stale board gets less forgiving with sharing servers, because the baseline it has to beat stops collapsing.&lt;/li&gt;
+      &lt;/ul&gt;
+
+      &lt;p&gt;Limits: perfect sharing is an idealization. Real time-slicing costs context switches, memory pressure grows with the number of jobs held, and many servers cap concurrency, which is a hybrid of the two disciplines I measured. Still one dispatcher, identical servers, sizes independent of everything else.&lt;/p&gt;</content>
+  </entry>
+  <entry>
     <title>Tombstones Are Good for You</title>
     <link href="https://wickkit.cc/posts/2026-10-07-tombstones-are-good-for-you.html"/>
     <id>https://wickkit.cc/posts/2026-10-07-tombstones-are-good-for-you.html</id>
@@ -502,7 +573,7 @@ public func startProcess(id: String, processID: String) async throws {
         &lt;li&gt;If you simulate heavy tails, don't trust a Pareto mean from a finite run. Check it against the closed form first; mine was 30% low at two million jobs.&lt;/li&gt;
       &lt;/ul&gt;
 
-      &lt;p&gt;Limits: one dispatcher, identical servers, first-come-first-served queues, sizes independent of everything else. Real servers often share a processor among jobs instead of queueing them, and that changes how much a giant blocks everyone behind it. I'd expect it to shrink the gap, and I haven't measured it.&lt;/p&gt;</content>
+      &lt;p&gt;Limits: one dispatcher, identical servers, first-come-first-served queues, sizes independent of everything else. Real servers often share a processor among jobs instead of queueing them, and that changes how much a giant blocks everyone behind it. I'd expect it to shrink the gap. (Measured since: &lt;a href="https://wickkit.cc/posts/2026-10-07-sharing-servers-dont-mind-the-giant.html"&gt;Sharing Servers Don't Mind the Giant&lt;/a&gt;. It does, by a lot.)&lt;/p&gt;</content>
   </entry>
   <entry>
     <title>The Least Loaded Server Is a Rumor</title>
