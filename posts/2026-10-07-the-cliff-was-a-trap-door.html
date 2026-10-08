@@ -48,7 +48,7 @@
 
       <p>So the balanced state needs (<i>k</i> − 1) × (typical spread) to be smaller than (1 − λ) × <i>T</i>, up to a constant. I measured the spread directly: the gap between the longest and shortest queue on the board times (1 − λ) came out at 2.1 to 2.8 across loads of 70 to 95% and two to five dispatchers, so the spread grows like 1/(1 − λ). Put together, the tipping point should scale like (<i>k</i> − 1)/(1 − λ)². That's where the (1 − load)² came from. In the first post I guessed it was the time a single queue takes to forget its starting point; that guess was wrong.</p>
 
-      <p>The right panel checks the prediction. For four to ten dispatchers, the tipping point times (1 − λ)² sits close to 0.85 × (<i>k</i> − 1) at 80, 90 and 95% load. At 90 and 95% load, three dispatchers tip earlier than the line (about 1.0 instead of 1.7); with an overshoot factor of only 2, the simple drain argument is at its weakest there. The constant 0.85 is fitted, not derived. Well below the threshold the balanced state lasts a handful of refreshes; above it, not one of 10 runs tipped in 1,000 refreshes. It's a sharp edge, not a slow leak.</p>
+      <p>The right panel checks the prediction. For four to ten dispatchers, the tipping point times (1 − λ)² sits close to 0.85 × (<i>k</i> − 1) at 80, 90 and 95% load. At 90 and 95% load, three dispatchers tip earlier than the line (about 1.0 instead of 1.7); with an overshoot factor of only 2, the simple drain argument is at its weakest there. The constant 0.85 is fitted, not derived (the update at the end derives the edge from a model and corrects the line). Well below the threshold the balanced state lasts a handful of refreshes; above it, not one of 10 runs tipped in 1,000 refreshes. It's a sharp edge, not a slow leak.</p>
 
       <h2>Why the herd never ends</h2>
 
@@ -64,12 +64,37 @@
 
       <ul>
         <li>Several dispatchers, each correcting a shared stale view with only its own sends, overcorrect together. With <i>k</i> of them, each refresh multiplies the imbalance by <i>k</i> − 1.</li>
-        <li>The balanced state survives only if queues drain that overshoot between refreshes: roughly <i>T</i> &gt; 0.85(<i>k</i> − 1)/(1 − λ)². At 90% load and five dispatchers that's about 340 service times.</li>
+        <li>The balanced state survives only if queues drain that overshoot between refreshes: roughly <i>T</i> &gt; 0.9(<i>k</i> − 2)/(1 − λ)² with many servers (see the update; I first fitted 0.85(<i>k</i> − 1) on 100 servers). At 90% load and five dispatchers that's about 290 service times.</li>
         <li>Past that point the herd still exists. A fleet-wide imbalance (a restart, a scale-out) can flip the system into it permanently, at 200 times the response time.</li>
         <li>Partition the servers among the dispatchers, or share the tally. Either removes the multiplication.</li>
       </ul>
 
-      <p>Limits: one simulator, exponential job sizes, 100 servers, identical dispatchers that each get a random share of the jobs. The constant 0.85 is measured on a coarse grid. I haven't tested whether real systems refresh their load views slowly enough to sit near this edge. The point that I'd carry over is that a cliff in a parameter sweep can hide two coexisting states, and a sweep that always starts from the same place can't tell you which one is the cliff.</p>
+      <p>Limits: one simulator, exponential job sizes, 100 servers, identical dispatchers that each get a random share of the jobs. I haven't tested whether real systems refresh their load views slowly enough to sit near this edge. The point that I'd carry over is that a cliff in a parameter sweep can hide two coexisting states, and a sweep that always starts from the same place can't tell you which one is the cliff.</p>
+
+      <h2>Update: deriving the edge</h2>
+
+      <p><i>Added 2026-10-08.</i> I called the 0.85 fitted, not derived. Here's a model that produces the edge with nothing fitted. Let the number of servers go to infinity, so the board is no longer a list of queue lengths but a distribution of them. One refresh period then turns one distribution into the next. Each dispatcher's tally raises its water level one job at a time. While the level is at <i>v</i>, every server whose board reads <i>v</i> or less gets one job from each dispatcher, at a random point in that dispatcher's pass, and the pass takes <i>k</i>F(<i>v</i>)/λ, where F(<i>v</i>) is the share of servers at or below <i>v</i>. Once the level clears the top of the board, everyone gets jobs at rate λ. Servers finish jobs at rate 1. The balanced state is a fixed point of that map.</p>
+
+      <p>The model matches the simulator where both can be checked. The average queue on the board at each refresh comes out within 1% of a 1,600-server simulation: 4.73 against 4.73 for one dispatcher at <i>T</i> = 600, 5.49 against 5.50 for five dispatchers at <i>T</i> = 400, 15.9 against 15.9 for five at <i>T</i> = 20, which is already herded. Following the balanced fixed point down from long refresh periods, it holds to a certain <i>T</i>, and just below that the map runs off from it into the herd. That's the edge:</p>
+
+      <div class="table-wrap"><table class="compact">
+        <thead><tr><th>Dispatchers</th><th>Model, 80% load</th><th>Model, 90% load</th><th>Simulator, 90% load, 800 servers</th></tr></thead>
+        <tbody>
+          <tr><td>3</td><td>0.87</td><td>0.99</td><td>0.95–1.05</td></tr>
+          <tr><td>4</td><td>2.11</td><td>1.97</td><td></td></tr>
+          <tr><td>5</td><td>3.17</td><td>2.90</td><td>2.9–3.0</td></tr>
+          <tr><td>7</td><td>5.02</td><td>4.63</td><td></td></tr>
+          <tr><td>10</td><td>7.96</td><td>7.07</td><td>7.2–7.5</td></tr>
+        </tbody>
+      </table></div>
+
+      <p>The numbers are <i>T</i>(1 − λ)² at the edge. The simulator column brackets the edge between the last refresh period where all four to six runs tipped and the first where at most one did.</p>
+
+      <p>Three things change. First, the line isn't 0.85(<i>k</i> − 1). At 90% load the model's edge goes up by about 0.85 per extra dispatcher, but it starts from about two dispatchers, not one: 0.9(<i>k</i> − 2) is within 10% of every 90%-load value above, model or simulator (at 80% load the model sits up to 15% above it). That's why three dispatchers looked low; it wasn't the drain argument breaking down. The model puts three dispatchers at 0.99 at 90% load and 0.96 at 95%, where the simulator had them. It also predicts that two dispatchers never tip, and they don't: with two, the simulator recovered from a half-loaded start with a backlog of 0.2<i>T</i> at every refresh period from 5 to 300. Each refresh flips the imbalance but doesn't grow it.</p>
+
+      <p>Second, the simulator's 100 servers put the edge about 10% high. At 90% load and five dispatchers, measured on a finer grid, the edge falls from about 3.5 with 25 servers to 3.2 with 100 and between 2.9 and 3.0 with 800 and 1,600. The model, with infinitely many, says 2.90. The (1 − λ)² scaling holds to within about 13% between 80 and 90% load.</p>
+
+      <p>Third, the 80% load, three-dispatcher point in the chart is wrong. My tipping test counted a run as tipped once the dispatchers stopped reaching every server for ten refreshes in a row. At 80% load with refresh periods this short, that happens with no herd at all: the mean time in the system stays between 3.5 and 5.6 for refresh periods from 20 to 45 with 100 or 800 servers, falling as the period grows. There's no sharp edge there to measure.</p>
     </article>
   </main>
 
