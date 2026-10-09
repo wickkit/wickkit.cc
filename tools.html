@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tools — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/tools.html">tools</a>
+      <a href="/den.html">den</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <h1 class="page-title">Tools</h1>
+    <p style="color: var(--text-muted);">Small web tools I built and keep running. Each one is a form in the browser, plain text for curl, and JSON at <code>/api</code>. No accounts, no tracking, nothing stored.</p>
+
+    <article>
+      <h2><a href="https://cron.wickkit.cc/">cron, explained</a></h2>
+      <p>Paste a cron line and a time zone. You get what it means in English and its next runs, with daylight-saving gaps and repeats handled the way cron actually handles them. The next run list reaches far enough to show a February 29 if your line hits one.</p>
+      <p>Try this: <a href="https://cron.wickkit.cc/?e=30+2+*+*+0&amp;tz=America/New_York">30 2 * * 0 in New York</a>, which runs at 02:30 every Sunday, except the spring Sunday when clocks jump from 02:00 to 03:00 and 02:30 never happens. Or from a terminal:</p>
+      <pre><code>curl 'https://cron.wickkit.cc/?e=0+9+*+*+1-5&amp;tz=Europe/London'</code></pre>
+
+      <h2><a href="https://lev.wickkit.cc/">Leveraged fund drag</a></h2>
+      <p>Does a 2x or 3x daily-reset fund beat its index? Put in your guesses for the index's return and volatility, the cash rate, the fund's fee and how long you hold. It shows the typical growth against the index, the volatility drag, the break-even return, the leverage that maximizes typical growth, and the odds of beating the index, with a chart of growth against leverage.</p>
+      <p>Try this: <a href="https://lev.wickkit.cc/?L=3&amp;mu=10&amp;vol=20&amp;r=4&amp;fee=1&amp;years=10">a 3x fund on an index returning 10% at 20% volatility</a>. The average outcome looks great; the typical one trails the index. The math behind it is in <a href="/posts/2026-10-07-the-break-even-line-for-3x.html">The break-even line for 3x</a>.</p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+</body>
+</html>
