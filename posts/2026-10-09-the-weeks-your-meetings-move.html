@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>The Weeks Your Meetings Move — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/tools.html">tools</a>
+      <a href="/den.html">den</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+    <article>
+      <h1>The Weeks Your Meetings Move</h1>
+      <div class="meta">2026-10-09 · Kit Wickham</div>
+
+      <p>Someone in Los Angeles and someone in London who both work 9 to 5 share a working hour on 15 weekdays in 2027. Not 15 per month: 15 in the whole year. Every one of them falls in the few weeks when the US has changed its clocks and Europe hasn't yet.</p>
+
+      <p>I found that while testing <a href="https://tz.wickkit.cc/">tz.wickkit.cc</a>, a small tool I built that shows when people in several time zones are all at work, week by week, through the clock changes. So I ran its own code over a whole year for sixteen city pairs you'd find on a typical company calendar.</p>
+
+      <h2>The setup</h2>
+
+      <p>Each pair: both people work Monday to Friday, 09:00 to 17:00 local time. The year is the 52 weeks from Monday 4 January 2027. For every weekday I asked whether the two working days overlap, by how much, and at which local times. Public holidays are ignored. The code scans the year in 15-minute steps; every real UTC offset and every clock change lands on a 15-minute boundary, so that loses nothing. I checked several of the results against the live tool.</p>
+
+      <h2>What it found</h2>
+
+      <div class="table-wrap"><table class="compact">
+        <thead><tr><th>Pair</th><th>Weekdays with overlap</th><th>Shared hours</th><th>When it changes</th></tr></thead>
+        <tbody>
+          <tr><td>New York – London</td><td>260</td><td>3 h; 4 h on 15 days</td><td>Mar 15–26, Nov 1–5</td></tr>
+          <tr><td>New York – Berlin</td><td>260</td><td>2 h; 3 h on 15 days</td><td>same weeks</td></tr>
+          <tr><td>Chicago – London</td><td>260</td><td>2 h; 3 h on 15 days</td><td>same weeks</td></tr>
+          <tr><td>Los Angeles – London</td><td>15</td><td>1 h</td><td>only Mar 15–26, Nov 1–5</td></tr>
+          <tr><td>London – Kolkata</td><td>260</td><td>3.5 h in British summer, 2.5 h otherwise</td><td>Mar 29, Nov 1</td></tr>
+          <tr><td>London – Singapore</td><td>155</td><td>1 h, British summer only</td><td>Mar 29–Oct 29</td></tr>
+          <tr><td>Berlin – Tokyo</td><td>155</td><td>1 h, European summer only</td><td>Mar 29–Oct 29</td></tr>
+          <tr><td>New York – São Paulo</td><td>260</td><td>7 h in US summer, 6 h otherwise</td><td>Mar 15, Nov 8</td></tr>
+          <tr><td>New York – Santiago</td><td>260</td><td>8 h, 7 h or 6 h</td><td>four times a year</td></tr>
+          <tr><td>Los Angeles – Sydney</td><td>208</td><td>3 h, 2 h or 1 h</td><td>four times a year</td></tr>
+          <tr><td>Los Angeles – Tokyo</td><td>72</td><td>1 h, US winter only</td><td>Jan–Mar 12, Nov 8–Dec</td></tr>
+          <tr><td>London – Berlin</td><td>260</td><td>7 h all year</td><td>never</td></tr>
+          <tr><td>London – Tokyo, London – Sydney, New York – Sydney, New York – Kolkata</td><td>0</td><td>none</td><td>—</td></tr>
+        </tbody>
+      </table></div>
+
+      <h2>Three kinds of moving</h2>
+
+      <p><strong>The mismatch weeks.</strong> The US moves its clocks forward on the second Sunday in March and back on the first Sunday in November. Most of Europe does it on the last Sunday of March and the last Sunday of October. In 2027 that leaves two weeks in March and one in November when New York is four hours behind London instead of five. A 10:00 New York call usually lands at 15:00 in London; for those three weeks it lands at 14:00. Nobody's calendar app is wrong, but the person who fixed "15:00 London" in their head is now an hour late or an hour early. For Los Angeles and London, those three weeks are the only time the two 9-to-5 days touch at all: 09:00 in LA is 16:00 in London.</p>
+
+      <p><strong>One side doesn't change.</strong> India, Singapore, Japan and (since 2019) Brazil don't change their clocks, so every shift comes from the other city. London and Kolkata lose an hour of overlap when Britain goes back to winter time. London and Singapore share 09:00–10:00 London time (16:00–17:00 in Singapore) all summer, and then nothing from November to late March. Berlin and Tokyo are the same: one hour, half the year. If your only shared hour with a team disappears in winter, that's not a scheduling failure; it's arithmetic.</p>
+
+      <p><strong>Both sides change, in opposite directions.</strong> Chile and Australia are in the southern hemisphere, so their summers are the northern winter. New York and Santiago work exactly the same hours from April to early September, then drift apart to a one-hour and then a two-hour gap as Chile springs forward in September and New York falls back in November. Los Angeles and Sydney go through three different gaps in a year: three shared hours in the northern winter (14:00–17:00 in LA is 09:00–12:00 the next morning in Sydney), two in the shoulder weeks, and only one from April to September. And it's Monday to Thursday only: Friday afternoon in Los Angeles is already Saturday morning in Sydney.</p>
+
+      <h2>What to do with it</h2>
+
+      <p>Decide on purpose which city's clock a recurring meeting follows. A calendar event usually keeps the time zone it was created in, so on the change dates it's the other side whose time moves. If the meeting sits at the edge of one person's day, like 16:00 in London, pin it to their time zone, so the hour that moves is in the middle of someone else's day instead. And put the change weeks in the calendar: for the US and Europe in 2027 that's the weeks of 15 March, 22 March and 1 November. For any set of cities, <a href="https://tz.wickkit.cc/">tz.wickkit.cc</a> will list them, for example <a href="https://tz.wickkit.cc/?z=America/Los_Angeles&amp;z=Australia/Sydney&amp;from=2027-03-08&amp;weeks=6">Los Angeles and Sydney around the March and April changes</a>.</p>
+
+      <p>The pair that surprised me most is still the first one. Two of the biggest business cities in the English-speaking world, and a plain 9-to-5 on both sides gives them three weeks a year.</p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+</body>
+</html>
