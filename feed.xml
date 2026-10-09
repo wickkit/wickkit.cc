@@ -8,6 +8,91 @@
   <updated>2026-10-08T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
   <entry>
+    <title>The Pause That Wasn't Incremental</title>
+    <link href="https://wickkit.cc/posts/2026-10-08-the-pause-that-wasnt-incremental.html"/>
+    <id>https://wickkit.cc/posts/2026-10-08-the-pause-that-wasnt-incremental.html</id>
+    <updated>2026-10-08T00:00:00Z</updated>
+    <summary>Python 3.14's incremental garbage collector, reverted in 3.14.5, was supposed to trade memory for shorter pauses. Reading the code, each pass starts with one unbroken mark of the whole live heap, then skips whole collections paying it off. With 4 million live objects, its worst pause was 214 ms against 0.2 ms for the old collector.</summary>
+    <content type="html">&lt;p&gt;Python 3.14.0 shipped a new incremental cycle collector. Its selling point was shorter pauses: instead of now and then scanning every long-lived object at once, it scans the old objects a slice at a time. In April, after reports of memory blowing up in production, the core team did something unusual for a patch release: &lt;a href="https://discuss.python.org/t/reverting-the-incremental-gc-in-python-3-14-and-3-15/107014"&gt;3.14.5 swapped it back&lt;/a&gt; for the generational collector from 3.13. The discussion treated it as a trade: the incremental collector uses more memory, but it does have shorter pauses.&lt;/p&gt;
+
+      &lt;p&gt;I read the 3.14.4 collector to see where the memory went, and measured it against 3.14.8. The memory story is real. The pause story depends on the workload. With a few million live objects and garbage that dies young, the incremental collector had by far the &lt;em&gt;longest&lt;/em&gt; pauses: 214 ms against 0.2 ms.&lt;/p&gt;
+
+      &lt;h2&gt;How the incremental collector budgets&lt;/h2&gt;
+
+      &lt;p&gt;Both collectors start a collection when about 2,000 more container objects have been created than destroyed. The generational one then collects the young objects, and only occasionally the older generations. The incremental one (&lt;code&gt;gc_collect_increment&lt;/code&gt; in 3.14.4's &lt;code&gt;Python/gc.c&lt;/code&gt;) keeps a running budget, &lt;code&gt;work_to_do&lt;/code&gt;. Each collection adds the number of new objects plus a slice proportional to the heap, capped at twice the new objects: about three units of work per new object. Scanning an object spends one unit. The young objects plus enough old ones to use up the budget make an increment, which is collected like a small generation.&lt;/p&gt;
+
+      &lt;p&gt;A pass over the old objects starts with &lt;code&gt;mark_at_start&lt;/code&gt;, which marks everything reachable from module globals and from the stacks of running frames, so the slices don't have to scan those. Its first line is a comment: &lt;code&gt;// TO DO -- Make this incremental&lt;/code&gt;. It isn't. It walks the whole reachable heap in one go, and in a long-running program that's most of the heap. The marked objects are then subtracted from the budget, twice: once inside &lt;code&gt;mark_at_start&lt;/code&gt; and once by its caller. (A &lt;a href="https://github.com/python/cpython/pull/127519"&gt;2024 change&lt;/a&gt; notes that the initial mark is counted twice and calls that beneficial.)&lt;/p&gt;
+
+      &lt;p&gt;Then this, at the top of each collection:&lt;/p&gt;
+
+      &lt;pre&gt;&lt;code&gt;gcstate-&amp;gt;work_to_do += assess_work_to_do(gcstate);
+if (gcstate-&amp;gt;work_to_do &amp;lt; 0) {
+    return;
+}&lt;/code&gt;&lt;/pre&gt;
+
+      &lt;p&gt;While the budget is negative, a collection does nothing at all, not even the young objects. Sergey Miryanov &lt;a href="https://github.com/python/cpython/issues/142002"&gt;described this early return&lt;/a&gt; in December, and Tim Peters watched young garbage go uncollected in the revert thread. They framed it as a memory problem. It's also a pause problem.&lt;/p&gt;
+
+      &lt;h2&gt;What a pass looks like&lt;/h2&gt;
+
+      &lt;p&gt;The test program holds a linked list of &lt;var&gt;L&lt;/var&gt; small lists that stays alive the whole run. It then creates 10 million pairs of lists that point at each other, so each pair can only be freed by the cycle collector. With &lt;var&gt;K&lt;/var&gt; = 0, each pair is dropped at once. With &lt;var&gt;K&lt;/var&gt; = 1,000,000, a ring buffer keeps each pair alive for a million steps before dropping it, so it outlives several collections first. I timed every collection with &lt;code&gt;gc.callbacks&lt;/code&gt; and sampled resident memory. Runs were one at a time on Linux arm64 using python-build-standalone builds, and figures are medians of three runs.&lt;/p&gt;
+
+      &lt;p&gt;A trace with 4 million live objects and garbage that dies young (&lt;var&gt;K&lt;/var&gt; = 0) on 3.14.4. This was a separate, instrumented run. Its pauses came out shorter than in the timed runs below (whose biggest were 182–216 ms), but the pattern was the same, four pauses over 10 ms per pass:&lt;/p&gt;
+
+      &lt;ul&gt;
+        &lt;li&gt;The pass starts with a 37 ms collection that frees nothing. That's the mark.&lt;/li&gt;
+        &lt;li&gt;The next 1,332 collections each return at once, paying off the debt.&lt;/li&gt;
+        &lt;li&gt;Then one collection takes 133 ms and frees 2,670,660 objects: every young object created while the debt was being paid off.&lt;/li&gt;
+        &lt;li&gt;Freeing those cost budget too, so the next pile is a third the size (890,888 objects, 43 ms), then a third again (296,294, 14 ms).&lt;/li&gt;
+        &lt;li&gt;Then the next pass starts with another mark, about 2 million steps after the first.&lt;/li&gt;
+      &lt;/ul&gt;
+
+      &lt;p&gt;The numbers follow from the code. Counting the mark twice puts the budget about 2 × 4M = 8M in debt. At three units per new object, that takes about 2.67M new objects to pay off, and those objects are the pile. Out of 9,990 collections in the run, 9,953 did nothing. The collector had stopped being incremental. It was a stop-the-world collector that ran every couple of million allocations, and its pause grew with the live heap.&lt;/p&gt;
+
+      &lt;h2&gt;Max pause vs live heap&lt;/h2&gt;
+
+      &lt;p&gt;Garbage that dies young (&lt;var&gt;K&lt;/var&gt; = 0). This is the easy case for a generational collector: nothing gets promoted, so it never has to scan the old objects.&lt;/p&gt;
+
+      &lt;table class="compact"&gt;
+        &lt;thead&gt;&lt;tr&gt;&lt;th&gt;live objects&lt;/th&gt;&lt;th&gt;3.14.4 max pause&lt;/th&gt;&lt;th&gt;3.14.8 max pause&lt;/th&gt;&lt;th&gt;3.14.4 extra MB&lt;/th&gt;&lt;th&gt;3.14.8 extra MB&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;
+        &lt;tbody&gt;
+          &lt;tr&gt;&lt;td&gt;0&lt;/td&gt;&lt;td&gt;1.0 ms&lt;/td&gt;&lt;td&gt;0.2 ms&lt;/td&gt;&lt;td&gt;2&lt;/td&gt;&lt;td&gt;1&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;100k&lt;/td&gt;&lt;td&gt;7.3 ms&lt;/td&gt;&lt;td&gt;0.2 ms&lt;/td&gt;&lt;td&gt;13&lt;/td&gt;&lt;td&gt;1&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;1M&lt;/td&gt;&lt;td&gt;54 ms&lt;/td&gt;&lt;td&gt;0.2 ms&lt;/td&gt;&lt;td&gt;68&lt;/td&gt;&lt;td&gt;1&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;4M&lt;/td&gt;&lt;td&gt;214 ms&lt;/td&gt;&lt;td&gt;0.2 ms&lt;/td&gt;&lt;td&gt;267&lt;/td&gt;&lt;td&gt;1&lt;/td&gt;&lt;/tr&gt;
+        &lt;/tbody&gt;
+      &lt;/table&gt;
+
+      &lt;p&gt;The generational collector's worst pause stays flat at 0.2 ms. The incremental collector's grows with the live heap, and so does its memory, by about 70 bytes per live object: the uncollected young pile. Total run time was about the same for both (2.2–2.6 s).&lt;/p&gt;
+
+      &lt;h2&gt;Where it does win&lt;/h2&gt;
+
+      &lt;p&gt;Garbage that outlives several collections (&lt;var&gt;K&lt;/var&gt; = 1,000,000) is the case the incremental design is for. The generational collector has to promote these pairs and then do full collections to find them dead.&lt;/p&gt;
+
+      &lt;table class="compact"&gt;
+        &lt;thead&gt;&lt;tr&gt;&lt;th&gt;live objects&lt;/th&gt;&lt;th&gt;run time 3.14.4 / 3.14.8&lt;/th&gt;&lt;th&gt;max pause 3.14.4 / 3.14.8&lt;/th&gt;&lt;th&gt;extra MB 3.14.4 / 3.14.8&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;
+        &lt;tbody&gt;
+          &lt;tr&gt;&lt;td&gt;0&lt;/td&gt;&lt;td&gt;2.4 / 4.5 s&lt;/td&gt;&lt;td&gt;27 / 92 ms&lt;/td&gt;&lt;td&gt;784 / 258&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;100k&lt;/td&gt;&lt;td&gt;2.5 / 4.5 s&lt;/td&gt;&lt;td&gt;29 / 93 ms&lt;/td&gt;&lt;td&gt;814 / 261&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;1M&lt;/td&gt;&lt;td&gt;2.3 / 4.4 s&lt;/td&gt;&lt;td&gt;41 / 127 ms&lt;/td&gt;&lt;td&gt;1,043 / 284&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;4M&lt;/td&gt;&lt;td&gt;2.3 / 4.3 s&lt;/td&gt;&lt;td&gt;135 / 239 ms&lt;/td&gt;&lt;td&gt;1,071 / 359&lt;/td&gt;&lt;/tr&gt;
+        &lt;/tbody&gt;
+      &lt;/table&gt;
+
+      &lt;p&gt;Here the incremental collector is nearly twice as fast and has shorter pauses, at about three times the memory (3.0–3.7×). That's the trade the revert discussion described, and it's real. But even here, its pause grows with the live heap (27 ms to 135 ms), because the mark at the start of each pass is still one piece.&lt;/p&gt;
+
+      &lt;p&gt;One check: in a parallel sweep of 20 configurations at three runs each, 3.14.8 matched 3.13.16 within noise (for example, 358.7 vs 358.4 MB extra at 4M live objects). The revert really did restore the old behavior. Both have a default first threshold of 2,000.&lt;/p&gt;
+
+      &lt;h2&gt;What I take from it&lt;/h2&gt;
+
+      &lt;ul&gt;
+        &lt;li&gt;"Incremental" described the scan of the old objects, not the whole collector. The mark that starts each pass was a single pause over everything reachable, and the source said so.&lt;/li&gt;
+        &lt;li&gt;Charging that mark to the budget, and then skipping whole collections while in debt, turned the mark's cost into a second, bigger pause: freeing everything that piled up in the meantime. Both pauses scale with the live heap. A long-running program with a big live heap and mostly short-lived garbage is a common shape, and for it this design gave the longest pauses. With longer-lived garbage the incremental collector still paused less than the generational one, but its pauses grew with the live heap there too.&lt;/li&gt;
+        &lt;li&gt;I suspect the same debt is part of how memory piled up in the production reports from the revert discussion, but I haven't reproduced those workloads (see Adam Johnson's &lt;a href="https://adamj.eu/tech/2026/04/20/django-python-3.14-incremental-gc/"&gt;Django migrations post&lt;/a&gt;). Tim Peters' proposed fix there, never letting the budget fall below the size of the young generation, should remove the second pause too. The first would remain until the mark is made incremental.&lt;/li&gt;
+      &lt;/ul&gt;
+
+      &lt;p&gt;Limits: one synthetic workload shape (pairs of lists, one linked-list live heap), one platform, and three runs per point. A live heap held mostly in objects that aren't reachable from globals or stacks would behave differently. Pause times are wall-clock per &lt;code&gt;gc.callbacks&lt;/code&gt; start/stop, so they include callback overhead (tiny next to these numbers). All of this is about a collector that is no longer shipped. If the incremental collector comes back through a PEP, as the revert thread suggested, a non-incremental mark and a budget that can skip young collections are the two things I'd test first.&lt;/p&gt;</content>
+  </entry>
+  <entry>
     <title>One Lock Per VM</title>
     <link href="https://wickkit.cc/posts/2026-10-08-one-lock-per-vm.html"/>
     <id>https://wickkit.cc/posts/2026-10-08-one-lock-per-vm.html</id>

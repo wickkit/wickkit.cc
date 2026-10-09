@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>The Pause That Wasn't Incremental — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/den.html">den</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+    <article>
+      <h1>The Pause That Wasn't Incremental</h1>
+      <div class="meta">2026-10-08 · Kit Wickham</div>
+
+      <p>Python 3.14.0 shipped a new incremental cycle collector. Its selling point was shorter pauses: instead of now and then scanning every long-lived object at once, it scans the old objects a slice at a time. In April, after reports of memory blowing up in production, the core team did something unusual for a patch release: <a href="https://discuss.python.org/t/reverting-the-incremental-gc-in-python-3-14-and-3-15/107014">3.14.5 swapped it back</a> for the generational collector from 3.13. The discussion treated it as a trade: the incremental collector uses more memory, but it does have shorter pauses.</p>
+
+      <p>I read the 3.14.4 collector to see where the memory went, and measured it against 3.14.8. The memory story is real. The pause story depends on the workload. With a few million live objects and garbage that dies young, the incremental collector had by far the <em>longest</em> pauses: 214 ms against 0.2 ms.</p>
+
+      <h2>How the incremental collector budgets</h2>
+
+      <p>Both collectors start a collection when about 2,000 more container objects have been created than destroyed. The generational one then collects the young objects, and only occasionally the older generations. The incremental one (<code>gc_collect_increment</code> in 3.14.4's <code>Python/gc.c</code>) keeps a running budget, <code>work_to_do</code>. Each collection adds the number of new objects plus a slice proportional to the heap, capped at twice the new objects: about three units of work per new object. Scanning an object spends one unit. The young objects plus enough old ones to use up the budget make an increment, which is collected like a small generation.</p>
+
+      <p>A pass over the old objects starts with <code>mark_at_start</code>, which marks everything reachable from module globals and from the stacks of running frames, so the slices don't have to scan those. Its first line is a comment: <code>// TO DO -- Make this incremental</code>. It isn't. It walks the whole reachable heap in one go, and in a long-running program that's most of the heap. The marked objects are then subtracted from the budget, twice: once inside <code>mark_at_start</code> and once by its caller. (A <a href="https://github.com/python/cpython/pull/127519">2024 change</a> notes that the initial mark is counted twice and calls that beneficial.)</p>
+
+      <p>Then this, at the top of each collection:</p>
+
+      <pre><code>gcstate-&gt;work_to_do += assess_work_to_do(gcstate);
+if (gcstate-&gt;work_to_do &lt; 0) {
+    return;
+}</code></pre>
+
+      <p>While the budget is negative, a collection does nothing at all, not even the young objects. Sergey Miryanov <a href="https://github.com/python/cpython/issues/142002">described this early return</a> in December, and Tim Peters watched young garbage go uncollected in the revert thread. They framed it as a memory problem. It's also a pause problem.</p>
+
+      <h2>What a pass looks like</h2>
+
+      <p>The test program holds a linked list of <var>L</var> small lists that stays alive the whole run. It then creates 10 million pairs of lists that point at each other, so each pair can only be freed by the cycle collector. With <var>K</var> = 0, each pair is dropped at once. With <var>K</var> = 1,000,000, a ring buffer keeps each pair alive for a million steps before dropping it, so it outlives several collections first. I timed every collection with <code>gc.callbacks</code> and sampled resident memory. Runs were one at a time on Linux arm64 using python-build-standalone builds, and figures are medians of three runs.</p>
+
+      <p>A trace with 4 million live objects and garbage that dies young (<var>K</var> = 0) on 3.14.4. This was a separate, instrumented run. Its pauses came out shorter than in the timed runs below (whose biggest were 182–216 ms), but the pattern was the same, four pauses over 10 ms per pass:</p>
+
+      <ul>
+        <li>The pass starts with a 37 ms collection that frees nothing. That's the mark.</li>
+        <li>The next 1,332 collections each return at once, paying off the debt.</li>
+        <li>Then one collection takes 133 ms and frees 2,670,660 objects: every young object created while the debt was being paid off.</li>
+        <li>Freeing those cost budget too, so the next pile is a third the size (890,888 objects, 43 ms), then a third again (296,294, 14 ms).</li>
+        <li>Then the next pass starts with another mark, about 2 million steps after the first.</li>
+      </ul>
+
+      <p>The numbers follow from the code. Counting the mark twice puts the budget about 2 × 4M = 8M in debt. At three units per new object, that takes about 2.67M new objects to pay off, and those objects are the pile. Out of 9,990 collections in the run, 9,953 did nothing. The collector had stopped being incremental. It was a stop-the-world collector that ran every couple of million allocations, and its pause grew with the live heap.</p>
+
+      <h2>Max pause vs live heap</h2>
+
+      <p>Garbage that dies young (<var>K</var> = 0). This is the easy case for a generational collector: nothing gets promoted, so it never has to scan the old objects.</p>
+
+      <table class="compact">
+        <thead><tr><th>live objects</th><th>3.14.4 max pause</th><th>3.14.8 max pause</th><th>3.14.4 extra MB</th><th>3.14.8 extra MB</th></tr></thead>
+        <tbody>
+          <tr><td>0</td><td>1.0 ms</td><td>0.2 ms</td><td>2</td><td>1</td></tr>
+          <tr><td>100k</td><td>7.3 ms</td><td>0.2 ms</td><td>13</td><td>1</td></tr>
+          <tr><td>1M</td><td>54 ms</td><td>0.2 ms</td><td>68</td><td>1</td></tr>
+          <tr><td>4M</td><td>214 ms</td><td>0.2 ms</td><td>267</td><td>1</td></tr>
+        </tbody>
+      </table>
+
+      <p>The generational collector's worst pause stays flat at 0.2 ms. The incremental collector's grows with the live heap, and so does its memory, by about 70 bytes per live object: the uncollected young pile. Total run time was about the same for both (2.2–2.6 s).</p>
+
+      <h2>Where it does win</h2>
+
+      <p>Garbage that outlives several collections (<var>K</var> = 1,000,000) is the case the incremental design is for. The generational collector has to promote these pairs and then do full collections to find them dead.</p>
+
+      <table class="compact">
+        <thead><tr><th>live objects</th><th>run time 3.14.4 / 3.14.8</th><th>max pause 3.14.4 / 3.14.8</th><th>extra MB 3.14.4 / 3.14.8</th></tr></thead>
+        <tbody>
+          <tr><td>0</td><td>2.4 / 4.5 s</td><td>27 / 92 ms</td><td>784 / 258</td></tr>
+          <tr><td>100k</td><td>2.5 / 4.5 s</td><td>29 / 93 ms</td><td>814 / 261</td></tr>
+          <tr><td>1M</td><td>2.3 / 4.4 s</td><td>41 / 127 ms</td><td>1,043 / 284</td></tr>
+          <tr><td>4M</td><td>2.3 / 4.3 s</td><td>135 / 239 ms</td><td>1,071 / 359</td></tr>
+        </tbody>
+      </table>
+
+      <p>Here the incremental collector is nearly twice as fast and has shorter pauses, at about three times the memory (3.0–3.7×). That's the trade the revert discussion described, and it's real. But even here, its pause grows with the live heap (27 ms to 135 ms), because the mark at the start of each pass is still one piece.</p>
+
+      <p>One check: in a parallel sweep of 20 configurations at three runs each, 3.14.8 matched 3.13.16 within noise (for example, 358.7 vs 358.4 MB extra at 4M live objects). The revert really did restore the old behavior. Both have a default first threshold of 2,000.</p>
+
+      <h2>What I take from it</h2>
+
+      <ul>
+        <li>"Incremental" described the scan of the old objects, not the whole collector. The mark that starts each pass was a single pause over everything reachable, and the source said so.</li>
+        <li>Charging that mark to the budget, and then skipping whole collections while in debt, turned the mark's cost into a second, bigger pause: freeing everything that piled up in the meantime. Both pauses scale with the live heap. A long-running program with a big live heap and mostly short-lived garbage is a common shape, and for it this design gave the longest pauses. With longer-lived garbage the incremental collector still paused less than the generational one, but its pauses grew with the live heap there too.</li>
+        <li>I suspect the same debt is part of how memory piled up in the production reports from the revert discussion, but I haven't reproduced those workloads (see Adam Johnson's <a href="https://adamj.eu/tech/2026/04/20/django-python-3.14-incremental-gc/">Django migrations post</a>). Tim Peters' proposed fix there, never letting the budget fall below the size of the young generation, should remove the second pause too. The first would remain until the mark is made incremental.</li>
+      </ul>
+
+      <p>Limits: one synthetic workload shape (pairs of lists, one linked-list live heap), one platform, and three runs per point. A live heap held mostly in objects that aren't reachable from globals or stacks would behave differently. Pause times are wall-clock per <code>gc.callbacks</code> start/stop, so they include callback overhead (tiny next to these numbers). All of this is about a collector that is no longer shipped. If the incremental collector comes back through a PEP, as the revert thread suggested, a non-incremental mark and a budget that can skip young collections are the two things I'd test first.</p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+</body>
+</html>

@@ -26,6 +26,11 @@
     <ul class="post-list">
       <li>
         <span class="post-date">2026-10-08</span>
+        <a href="/posts/2026-10-08-the-pause-that-wasnt-incremental.html" class="post-title">The Pause That Wasn't Incremental</a>
+        <p class="post-excerpt">Python 3.14's incremental garbage collector, reverted in 3.14.5, was supposed to trade memory for shorter pauses. Reading the code, each pass starts with one unbroken mark of the whole live heap, then skips whole collections paying it off. With 4 million live objects, its worst pause was 214 ms against 0.2 ms for the old collector.</p>
+      </li>
+      <li>
+        <span class="post-date">2026-10-08</span>
         <a href="/posts/2026-10-08-one-lock-per-vm.html" class="post-title">One Lock Per VM</a>
         <p class="post-excerpt">I patched Apple's container tool so each VM gets its own lock instead of sharing one across every boot. Starting 32 VMs at once drops from 20 s to 5 s, fifty rounds of deleting VMs mid-boot found no hangs, and what's left of the slowdown looks like plain CPU.</p>
       </li>
