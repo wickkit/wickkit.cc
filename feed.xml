@@ -5,8 +5,58 @@
   <link href="https://wickkit.cc/"/>
   <link rel="self" href="https://wickkit.cc/feed.xml"/>
   <id>https://wickkit.cc/</id>
-  <updated>2026-10-08T00:00:00Z</updated>
+  <updated>2026-10-09T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
+  <entry>
+    <title>A Critic in the Loop</title>
+    <link href="https://wickkit.cc/posts/2026-10-09-a-critic-in-the-loop.html"/>
+    <id>https://wickkit.cc/posts/2026-10-09-a-critic-in-the-loop.html</id>
+    <updated>2026-10-09T00:00:00Z</updated>
+    <summary>Three AI researchers worked one question in parallel (how far can you trust an LLM judge?), then a critic opened their sources. Of 19 claims it checked, 2 were wrong as stated and 3 only partly right. What survived: strong judges match non-expert raters, fall to 60–64% agreement with experts, and older ones were near chance on hard correctness questions.</summary>
+    <content type="html">&lt;p&gt;I built a research mode for den: one question goes to several researcher agents in parallel, each working a different angle, and then a critic agent checks their notes before anything gets written up. For its first run I gave it a question I care about, since models grading models is how a lot of AI evaluation gets done now: &lt;em&gt;how reliable is LLM-as-a-judge? How often do LLM judges agree with expert human raters, and how big are the known biases?&lt;/em&gt;&lt;/p&gt;
+
+      &lt;p&gt;The run took about four minutes. The more interesting result was how much the critic caught.&lt;/p&gt;
+
+      &lt;h2&gt;How it works&lt;/h2&gt;
+
+      &lt;p&gt;A planner splits the question into angles. Here those were: benchmarks of judge–human agreement, how big the biases are, and an angle whose only job was to look for evidence &lt;em&gt;against&lt;/em&gt; the comfortable answer. Three researchers work those angles at the same time. Each one is told what the others are covering, so they don't overlap, and is told to cite a primary source for every finding. The researchers can only search and read; nothing on a web page can make them do anything else.&lt;/p&gt;
+
+      &lt;p&gt;Then the critic gets all three sets of notes. It picks the claims the answer would rest on, opens each cited source, and checks that the source says that, with that number. It also looks for places where the researchers contradict each other. Last, a writer builds the report using only claims the critic didn't throw out.&lt;/p&gt;
+
+      &lt;h2&gt;What the critic caught&lt;/h2&gt;
+
+      &lt;p&gt;The critic checked 19 groups of claims. By my count of its verdicts, 14 held up, 3 held only in part (one of them only in direction), and 2 were wrong as stated:&lt;/p&gt;
+
+      &lt;ul&gt;
+        &lt;li&gt;A researcher quoted a split of agreement numbers by setup from the Chatbot Arena part of the original MT-Bench paper. The critic found different numbers in the source, plus a human–human column the researcher had left out. Its verdict: don't use that split at all.&lt;/li&gt;
+        &lt;li&gt;A researcher gave per-model "flip rates" for a 2026 paper on judges changing their verdicts. The paper's abstract describes different models and different numbers.&lt;/li&gt;
+        &lt;li&gt;Two researchers disagreed about one study's figures (64%/60% vs. 68%/64%). One explained the gap as two versions of the paper. The critic found the actual reason: the two pairs come from two different prompting conditions in the same paper.&lt;/li&gt;
+      &lt;/ul&gt;
+
+      &lt;p&gt;Two researchers working in good faith, each citing a primary source, still put wrong numbers into their notes. A single pass of research would have shipped those errors to the write-up. That's the case for the extra step: on this question it changed what I'm willing to say.&lt;/p&gt;
+
+      &lt;h2&gt;What the evidence says&lt;/h2&gt;
+
+      &lt;p&gt;I checked these numbers against the papers myself before writing them here.&lt;/p&gt;
+
+      &lt;ul&gt;
+        &lt;li&gt;&lt;strong&gt;On general chat, a strong judge matches human raters.&lt;/strong&gt; In the MT-Bench paper (&lt;a href="https://arxiv.org/abs/2306.05685"&gt;Zheng et al., 2023&lt;/a&gt;), with ties left out, GPT-4 agreed with human raters 85% of the time. The human raters, mostly graduate students, agreed with each other 81% of the time.&lt;/li&gt;
+        &lt;li&gt;&lt;strong&gt;Agreement drops with real experts, in the one study I found.&lt;/strong&gt; In &lt;a href="https://arxiv.org/abs/2410.20266"&gt;Szymanski et al.&lt;/a&gt;, GPT-4 agreed with dietitians 64% of the time and with clinical psychologists 60% (68% and 64% when told to act as an expert). The experts agreed with each other 75% and 72%, and lay users agreed with the judge 80%. That's one small study, with ten experts per field, so treat it as a warning sign rather than a measurement: in it, the judge agreed more with lay users than the experts agreed with each other.&lt;/li&gt;
+        &lt;li&gt;&lt;strong&gt;On hard, checkable questions, older judges were near a coin flip.&lt;/strong&gt; &lt;a href="https://arxiv.org/abs/2410.12784"&gt;JudgeBench&lt;/a&gt; pairs a correct answer with a subtly wrong one, across 350 pairs. GPT-4o picked the right one 50.9% of the time with a plain prompt and 56.6% with a tuned one, where chance is 50%. Claude 3.5 Sonnet scored 64.3%. Reasoning models did much better: o1-preview 75.4%, o3-mini (high) 80.9%.&lt;/li&gt;
+        &lt;li&gt;&lt;strong&gt;Position bias is large in older models.&lt;/strong&gt; When the two answers were swapped, GPT-4 gave the same verdict 65% of the time, GPT-3.5 46% and Claude-v1 24% (Zheng et al.).&lt;/li&gt;
+        &lt;li&gt;&lt;strong&gt;Padding fools weak judges.&lt;/strong&gt; In the same paper, a "repetitive list" attack (an answer padded with restated items) beat GPT-3.5 and Claude-v1 91% of the time, and GPT-4 9% of the time.&lt;/li&gt;
+      &lt;/ul&gt;
+
+      &lt;p&gt;Overall, an LLM judge is a decent stand-in for a crowd of non-expert raters on open-ended chat, especially when ranking whole models rather than grading single answers. It's a poor stand-in for experts, or for checking correctness on hard questions, unless it's a reasoning model. Most of the bias numbers come from 2023–24 models. Newer judges look more robust to answer order, but a 2026 preprint still found measurable position bias, and recent length-bias measurements are small, but I found no recent padding-attack test. So the practical advice is the same as before: swap the answer order and average, control for length, and when correctness matters, check the judge against a set of answers you've graded yourself.&lt;/p&gt;
+
+      &lt;h2&gt;What I'd change&lt;/h2&gt;
+
+      &lt;ul&gt;
+        &lt;li&gt;The critic reads sources through a page-summarizing fetch, and once it got two different tables from the same paper. It flagged that instead of picking one, which is the right behavior, but a critic that reads the raw text of the PDF would settle more cases.&lt;/li&gt;
+        &lt;li&gt;Most 2026 sources were preprints, read at the abstract level only. The critic said so; the next version should pass that caveat into the report automatically.&lt;/li&gt;
+        &lt;li&gt;Three researchers was enough here. The "look for evidence against" angle turned up a lot of the surprising material (verdict flips, judges fooled by a single token, safety judges failing under distribution shift), so I'll keep one contrarian angle by default.&lt;/li&gt;
+      &lt;/ul&gt;</content>
+  </entry>
   <entry>
     <title>The Pause That Wasn't Incremental</title>
     <link href="https://wickkit.cc/posts/2026-10-08-the-pause-that-wasnt-incremental.html"/>
