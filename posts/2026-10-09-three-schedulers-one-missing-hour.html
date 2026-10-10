@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Three Schedulers, One Missing Hour — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/tools.html">tools</a>
+      <a href="/den.html">den</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+    <article>
+      <h1>Three Schedulers, One Missing Hour</h1>
+      <div class="meta">2026-10-09 · Kit Wickham</div>
+
+      <p>Put a nightly job at 02:30 New York time. On 14 March 2027 the clocks jump from 02:00 straight to 03:00, so 02:30 never happens. Classic cron runs the job at 03:00. A systemd timer skips it until the next night. A Kubernetes CronJob skips it too. Then on 7 November the clocks go from 02:00 back to 01:00, and a job at 01:30 runs once under cron and systemd, and twice under Kubernetes, an hour apart.</p>
+
+      <p>None of the three is broken. They just picked different answers to a question most people only meet when a backup goes missing. I ran all three through both 2027 clock changes in New York and London to see what they actually do.</p>
+
+      <h2>How I tested</h2>
+
+      <p>Everything ran in a Debian 13 container with tzdata 2026c.</p>
+      <ul>
+        <li><strong>cron:</strong> <a href="https://github.com/cronie-crond/cronie">cronie</a> 1.7.2, the cron Fedora ships. I ran the real daemon under libfaketime at 60× speed, starting just before each change, with jobs that log when they fire.</li>
+        <li><strong>systemd:</strong> version 257. <code>systemd-analyze calendar --base-time=… --iterations=…</code> lists the times a timer with that <code>OnCalendar=</code> line would fire.</li>
+        <li><strong>Kubernetes:</strong> the <a href="https://github.com/kubernetes/kubernetes/blob/master/pkg/controller/cronjob/cronjob_controllerv2.go">CronJob controller</a> turns <code>.spec.timeZone</code> into a <code>TZ=</code> prefix and parses the schedule with <a href="https://github.com/robfig/cron">robfig/cron</a>, pinned at v3.0.1 in Kubernetes' <a href="https://github.com/kubernetes/kubernetes/blob/master/go.mod">go.mod</a>. I called that library's <code>Next()</code> the same way.</li>
+      </ul>
+      <p>The nights: New York skips 02:00–02:59 on 14 March and repeats 01:00–01:59 on 7 November. London skips 01:00–01:59 on 28 March and repeats 01:00–01:59 on 31 October. New York and London gave the same pattern, so the table uses New York times.</p>
+
+      <h2>What happened</h2>
+
+      <div class="table-wrap"><table class="compact">
+        <thead><tr><th>Job</th><th>cron (cronie)</th><th>systemd timer</th><th>Kubernetes CronJob</th></tr></thead>
+        <tbody>
+          <tr><td>Daily 02:30, spring night (02:30 doesn't exist)</td><td>Runs at 03:00</td><td>Skipped, next run the following night</td><td>Skipped</td></tr>
+          <tr><td>Daily 01:30, autumn night (01:30 happens twice)</td><td>Once</td><td>Once (the first)</td><td><strong>Twice</strong>, an hour apart</td></tr>
+          <tr><td>Every 30 minutes, autumn night</td><td>Runs through both 01:00 hours</td><td><strong>Skips the second</strong>: 90 minutes between runs</td><td>Runs through both 01:00 hours</td></tr>
+          <tr><td>Hourly, autumn night</td><td>Runs in both</td><td>Skips the second: 2 hours between runs</td><td>Runs in both</td></tr>
+          <tr><td>Every 30 minutes or hourly, spring night</td><td>Normal</td><td>Normal</td><td>Normal</td></tr>
+        </tbody>
+      </table></div>
+
+      <p>The spring row for interval jobs is "normal" because nothing is lost in real time: 01:30 EST is followed by 03:00 EDT, which is 30 minutes later.</p>
+
+      <h2>Three different ideas of what a schedule means</h2>
+
+      <p><strong>cron treats a daily job as "once a day, around this time."</strong> cronie's <a href="https://github.com/cronie-crond/cronie/blob/master/man/cron.8">manual</a> says so directly: for clock changes of less than three hours, jobs at a specific time "that would have run in the interval that has been skipped will be run immediately", and when the clock goes back, "running the same job twice is avoided." Jobs that run every hour or more often are "scheduled normally", so they run through both copies of the repeated hour. A bigger change than three hours counts as a clock correction, and cron just uses the new time. For nightly jobs it's the most forgiving of the three.</p>
+
+      <p><strong>systemd treats a calendar line as "the next moment the wall clock shows this."</strong> 02:30 never shows on the spring night, so the next match is 02:30 the following night. On the autumn night it takes the first 01:30, and even if you start the timer at 01:45 EDT, between the two, the next run is 01:30 the following day. The same rule hits interval timers: after firing at 01:30 EDT, the next time the clock reads a later :00 or :30 is 02:00 EST, so the second 01:00 hour is skipped entirely. An <code>OnCalendar=hourly</code> timer goes two real hours without firing.</p>
+
+      <p><strong>Kubernetes (through robfig/cron) treats it as "every instant whose wall clock matches."</strong> It walks forward an hour at a time in real time. In spring, the 02:00 hour never comes up, so a 02:30 job is skipped. In autumn, 01:00 comes up twice, so a 01:30 job runs at 05:30 and 06:30 UTC. If that job isn't safe to run twice, like sending invoices or appending to a ledger, that's a real bug once a year.</p>
+
+      <h2>What to do about it</h2>
+
+      <p><strong>Schedule in UTC when you can.</strong> UTC never changes its clocks, so all three schedulers behave the same. In Kubernetes, set <code>.spec.timeZone: "Etc/UTC"</code> (<a href="https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/">docs</a>). Without the field, the schedule is read in the controller's local time zone, and putting <code>TZ=</code> or <code>CRON_TZ=</code> inside <code>.spec.schedule</code> is rejected. In systemd, add the zone to the line (<a href="https://www.freedesktop.org/software/systemd/man/latest/systemd.time.html">systemd.time</a>): <code>OnCalendar=*-*-* 07:30 UTC</code>. In cronie, put <code>CRON_TZ=UTC</code> above the jobs in the crontab.</p>
+
+      <p><strong>If it has to follow local time, stay out of the change window.</strong> The US changes at 02:00 local time. The EU changes everywhere at once, at 01:00 UTC, which is 01:00 in London, 02:00 in Berlin and 03:00 in Helsinki. So in the US and Europe the skipped and repeated hours all fall between 01:00 and 04:00 local time, and a 04:30 job never notices. That's not true everywhere: Chile changes at midnight.</p>
+
+      <p><strong>For "every N minutes" in systemd, use a monotonic timer.</strong> <a href="https://www.freedesktop.org/software/systemd/man/latest/systemd.timer.html"><code>OnUnitActiveSec=30min</code></a> counts elapsed time from the last run and doesn't care what the wall clock says, so it has no gap in autumn.</p>
+
+      <p><strong>Make jobs safe to run twice anyway.</strong> Even cron's "avoid running twice" only holds for clock changes under three hours, and the Kubernetes docs say a CronJob can create two Jobs, or none, for one scheduled time in other situations too, and that Jobs should be idempotent.</p>
+
+      <p>My own <a href="https://cron.wickkit.cc/">cron.wickkit.cc</a>, which lists the next runs of a crontab line in a time zone, follows systemd's rule: a skipped time doesn't run, a repeated time runs once. That's right for a single daily job in systemd and wrong for cronie and Kubernetes in different ways, and a list that shows only one answer hides that. Showing all three side by side is the next thing I'm adding.</p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+</body>
+</html>
