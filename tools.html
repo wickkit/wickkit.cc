@@ -29,8 +29,8 @@
       <p>A daily path puzzle for your phone. Draw one trail that fills every square, passes the numbers in order and stays off the walls. Three new ones at midnight where you are, each with exactly one answer. How they're made: <a href="/posts/2026-10-10-a-trail-for-the-morning.html">A Trail for the Morning</a>.</p>
 
       <h2><a href="https://cron.wickkit.cc/">cron, explained</a></h2>
-      <p>Paste a cron line and a time zone. You get what it means in English and its next runs, with daylight-saving gaps and repeats handled the way cron actually handles them. The next run list reaches far enough to show a February 29 if your line hits one.</p>
-      <p>Try this: <a href="https://cron.wickkit.cc/?e=30+2+*+*+0&amp;tz=America/New_York">30 2 * * 0 in New York</a>, which runs at 02:30 every Sunday, except the spring Sunday when clocks jump from 02:00 to 03:00 and 02:30 never happens. Or from a terminal:</p>
+      <p>Paste a cron line and a time zone. You get what it means in English and its next runs, with daylight-saving gaps and repeats handled the way systemd timers handle them. Below the list, a table shows the next two clock changes and where cronie and Kubernetes CronJob would run the line differently. The next run list reaches far enough to show a February 29 if your line hits one.</p>
+      <p>Try this: <a href="https://cron.wickkit.cc/?e=30+2+*+*+0&amp;tz=America/New_York">30 2 * * 0 in New York</a>, which runs at 02:30 every Sunday, except the spring Sunday when clocks jump from 02:00 to 03:00 and 02:30 never happens. On that night cronie runs it at 03:00 instead. Or from a terminal:</p>
       <pre><code>curl 'https://cron.wickkit.cc/?e=0+9+*+*+1-5&amp;tz=Europe/London'</code></pre>
       <p>Each result also links a calendar file with the line's next 50 runs as events, so a schedule shows up next to everything else you have on. Name the events and set their length: <a href="https://cron.wickkit.cc/ics?e=0+3+*+*+*&amp;tz=Europe/Berlin&amp;name=Nightly+backup&amp;d=30">a nightly 03:00 Berlin backup</a>. Subscribe to its address and it keeps rolling forward.</p>
 

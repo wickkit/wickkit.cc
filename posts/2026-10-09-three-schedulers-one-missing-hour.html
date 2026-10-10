@@ -57,7 +57,7 @@
 
       <h2>Three different ideas of what a schedule means</h2>
 
-      <p><strong>cron treats a daily job as "once a day, around this time."</strong> cronie's <a href="https://github.com/cronie-crond/cronie/blob/master/man/cron.8">manual</a> says so directly: for clock changes of less than three hours, jobs at a specific time "that would have run in the interval that has been skipped will be run immediately", and when the clock goes back, "running the same job twice is avoided." Jobs that run every hour or more often are "scheduled normally", so they run through both copies of the repeated hour. A bigger change than three hours counts as a clock correction, and cron just uses the new time. For nightly jobs it's the most forgiving of the three.</p>
+      <p><strong>cron treats a daily job as "once a day, around this time."</strong> cronie's <a href="https://github.com/cronie-crond/cronie/blob/master/man/cron.8">manual</a> says so directly: for clock changes of less than three hours, jobs at a specific time "that would have run in the interval that has been skipped will be run immediately", and when the clock goes back, "running the same job twice is avoided." Jobs that run more often than that are "scheduled normally", and in my test an hourly job (<code>15 * * * *</code>) was too, so they run through both copies of the repeated hour. A bigger change than three hours counts as a clock correction, and cron just uses the new time. For nightly jobs it's the most forgiving of the three.</p>
 
       <p><strong>systemd treats a calendar line as "the next moment the wall clock shows this."</strong> 02:30 never shows on the spring night, so the next match is 02:30 the following night. On the autumn night it takes the first 01:30, and even if you start the timer at 01:45 EDT, between the two, the next run is 01:30 the following day. The same rule hits interval timers: after firing at 01:30 EDT, the next time the clock reads a later :00 or :30 is 02:00 EST, so the second 01:00 hour is skipped entirely. An <code>OnCalendar=hourly</code> timer goes two real hours without firing.</p>
 
@@ -74,6 +74,7 @@
       <p><strong>Make jobs safe to run twice anyway.</strong> Even cron's "avoid running twice" only holds for clock changes under three hours, and the Kubernetes docs say a CronJob can create two Jobs, or none, for one scheduled time in other situations too, and that Jobs should be idempotent.</p>
 
       <p>My own <a href="https://cron.wickkit.cc/">cron.wickkit.cc</a>, which lists the next runs of a crontab line in a time zone, follows systemd's rule: a skipped time doesn't run, a repeated time runs once. That's right for a single daily job in systemd and wrong for cronie and Kubernetes in different ways, and a list that shows only one answer hides that. Showing all three side by side is the next thing I'm adding.</p>
+      <p><strong>Update:</strong> it's there now. Below the list of next runs, the page shows the next two clock changes in your zone and every time within three hours of each where the three schedulers differ. <a href="https://cron.wickkit.cc/?e=*/30+*+*+*+*&amp;tz=America/New_York">*/30 in New York</a> shows the hour systemd drops; <a href="https://cron.wickkit.cc/?e=30+2+*+*+*&amp;tz=America/New_York">30 2 * * *</a> shows cronie's catch-up run.</p>
     </article>
   </main>
 
