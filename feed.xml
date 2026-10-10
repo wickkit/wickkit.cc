@@ -5,8 +5,55 @@
   <link href="https://wickkit.cc/"/>
   <link rel="self" href="https://wickkit.cc/feed.xml"/>
   <id>https://wickkit.cc/</id>
-  <updated>2026-10-09T00:00:00Z</updated>
+  <updated>2026-10-10T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
+  <entry>
+    <title>A Trail for the Morning</title>
+    <link href="https://wickkit.cc/posts/2026-10-10-a-trail-for-the-morning.html"/>
+    <id>https://wickkit.cc/posts/2026-10-10-a-trail-for-the-morning.html</id>
+    <updated>2026-10-10T00:00:00Z</updated>
+    <summary>I made a daily puzzle: draw one trail through every square, passing the numbers in order. How every puzzle gets exactly one answer, why walls are worth numbers, and why the order you remove numbers in changes how few you end up with.</summary>
+    <content type="html">&lt;p&gt;I made a puzzle. It's called &lt;a href="https://wickkit.cc/trail.html"&gt;Fox Trail&lt;/a&gt;, there are three new ones every day, and it's built for a phone and a cup of coffee.&lt;/p&gt;
+
+      &lt;p&gt;The rules fit in a sentence: draw one trail that fills every square on the grid, starting on 1, passing through the numbers in order, and ending on the biggest one. You can't go through the thick walls. If you've played LinkedIn's Zip, it's the same idea. The small one is a warm-up. The large one might take your coffee.&lt;/p&gt;
+
+      &lt;p&gt;&lt;a href="https://wickkit.cc/trail.html"&gt;&lt;strong&gt;Play today's trails →&lt;/strong&gt;&lt;/a&gt;&lt;/p&gt;
+
+      &lt;h2&gt;One answer, every time&lt;/h2&gt;
+
+      &lt;p&gt;A puzzle like this is only fair if it has exactly one answer. Otherwise you can solve it "wrong" and never know. So each puzzle starts from the answer:&lt;/p&gt;
+      &lt;ol&gt;
+        &lt;li&gt;Draw a random trail through every square. I start with a zigzag and reshape it a thousand or two times: pick an end, join it to a square next to it, break the trail just after that square, and turn the loose piece around so it's one trail again.&lt;/li&gt;
+        &lt;li&gt;Put a few walls on edges the trail doesn't use: 2 on the small grid, 4 on the medium, 6 on the large.&lt;/li&gt;
+        &lt;li&gt;Number every square along the trail. Then try removing the numbers one at a time, in random order. After each removal, a solver counts the trails that still fit. If it finds a second one, the number goes back.&lt;/li&gt;
+      &lt;/ol&gt;
+
+      &lt;p&gt;The first and last numbers always stay, since they mark the start and the finish. What's left in between is all needed: take any one of those away and a second answer appears. (Removing numbers only ever lets more trails fit, so one that couldn't go early on still can't go at the end.) A different program, written separately in another language, then checked all 1,200 puzzles again. Each one has exactly one answer, and it's the trail they started from.&lt;/p&gt;
+
+      &lt;h2&gt;Walls are worth numbers&lt;/h2&gt;
+
+      &lt;p&gt;I ran the same generator with no walls to see what they buy. They let the puzzle drop numbers, more of them on bigger grids:&lt;/p&gt;
+
+      &lt;table class="compact"&gt;
+        &lt;tr&gt;&lt;th&gt;Grid&lt;/th&gt;&lt;th&gt;Numbers, with walls&lt;/th&gt;&lt;th&gt;Numbers, no walls&lt;/th&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;5×5&lt;/td&gt;&lt;td&gt;5.7&lt;/td&gt;&lt;td&gt;6.2&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;6×6&lt;/td&gt;&lt;td&gt;6.9&lt;/td&gt;&lt;td&gt;8.1&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;7×7&lt;/td&gt;&lt;td&gt;8.7&lt;/td&gt;&lt;td&gt;10.5&lt;/td&gt;&lt;/tr&gt;
+      &lt;/table&gt;
+      &lt;p&gt;Averages over 400 puzzles of each size.&lt;/p&gt;
+
+      &lt;p&gt;A wall does the job of a number by saying where the trail &lt;em&gt;can't&lt;/em&gt; go, and it rules out a whole family of wrong trails at once.&lt;/p&gt;
+
+      &lt;h2&gt;The order you remove them in matters&lt;/h2&gt;
+
+      &lt;p&gt;Removing numbers one at a time doesn't find the fewest a puzzle could have. It finds a set where no single number can go. I took 120 puzzles of each size, kept their trail and walls, and redid the removal in 30 other random orders. For about four in five of them, the orders didn't all end with the same count. The worst spread was 3 numbers, which happened on 9 of the 120 large puzzles.&lt;/p&gt;
+
+      &lt;p&gt;So the puzzles you'll get aren't the hardest versions of themselves. That's on purpose: fewer numbers isn't more fun past a point, and a morning puzzle should be solvable before the coffee goes cold.&lt;/p&gt;
+
+      &lt;h2&gt;Small print&lt;/h2&gt;
+
+      &lt;p&gt;A new set appears at midnight wherever you are. Your times stay in your browser and nothing is sent anywhere. There are 400 days of puzzles in the box, so I'll have to make more next November. "Another one" pulls a random puzzle from the same collection, and "Show me" gives up gracefully.&lt;/p&gt;</content>
+  </entry>
   <entry>
     <title>Three Schedulers, One Missing Hour</title>
     <link href="https://wickkit.cc/posts/2026-10-09-three-schedulers-one-missing-hour.html"/>

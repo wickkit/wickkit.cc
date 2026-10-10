@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>A Trail for the Morning — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/tools.html">tools</a>
+      <a href="/den.html">den</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+    <article>
+      <h1>A Trail for the Morning</h1>
+      <div class="meta">2026-10-10 · Kit Wickham</div>
+
+      <p>I made a puzzle. It's called <a href="/trail.html">Fox Trail</a>, there are three new ones every day, and it's built for a phone and a cup of coffee.</p>
+
+      <p>The rules fit in a sentence: draw one trail that fills every square on the grid, starting on 1, passing through the numbers in order, and ending on the biggest one. You can't go through the thick walls. If you've played LinkedIn's Zip, it's the same idea. The small one is a warm-up. The large one might take your coffee.</p>
+
+      <p><a href="/trail.html"><strong>Play today's trails →</strong></a></p>
+
+      <h2>One answer, every time</h2>
+
+      <p>A puzzle like this is only fair if it has exactly one answer. Otherwise you can solve it "wrong" and never know. So each puzzle starts from the answer:</p>
+      <ol>
+        <li>Draw a random trail through every square. I start with a zigzag and reshape it a thousand or two times: pick an end, join it to a square next to it, break the trail just after that square, and turn the loose piece around so it's one trail again.</li>
+        <li>Put a few walls on edges the trail doesn't use: 2 on the small grid, 4 on the medium, 6 on the large.</li>
+        <li>Number every square along the trail. Then try removing the numbers one at a time, in random order. After each removal, a solver counts the trails that still fit. If it finds a second one, the number goes back.</li>
+      </ol>
+
+      <p>The first and last numbers always stay, since they mark the start and the finish. What's left in between is all needed: take any one of those away and a second answer appears. (Removing numbers only ever lets more trails fit, so one that couldn't go early on still can't go at the end.) A different program, written separately in another language, then checked all 1,200 puzzles again. Each one has exactly one answer, and it's the trail they started from.</p>
+
+      <h2>Walls are worth numbers</h2>
+
+      <p>I ran the same generator with no walls to see what they buy. They let the puzzle drop numbers, more of them on bigger grids:</p>
+
+      <table class="compact">
+        <tr><th>Grid</th><th>Numbers, with walls</th><th>Numbers, no walls</th></tr>
+        <tr><td>5×5</td><td>5.7</td><td>6.2</td></tr>
+        <tr><td>6×6</td><td>6.9</td><td>8.1</td></tr>
+        <tr><td>7×7</td><td>8.7</td><td>10.5</td></tr>
+      </table>
+      <p>Averages over 400 puzzles of each size.</p>
+
+      <p>A wall does the job of a number by saying where the trail <em>can't</em> go, and it rules out a whole family of wrong trails at once.</p>
+
+      <h2>The order you remove them in matters</h2>
+
+      <p>Removing numbers one at a time doesn't find the fewest a puzzle could have. It finds a set where no single number can go. I took 120 puzzles of each size, kept their trail and walls, and redid the removal in 30 other random orders. For about four in five of them, the orders didn't all end with the same count. The worst spread was 3 numbers, which happened on 9 of the 120 large puzzles.</p>
+
+      <p>So the puzzles you'll get aren't the hardest versions of themselves. That's on purpose: fewer numbers isn't more fun past a point, and a morning puzzle should be solvable before the coffee goes cold.</p>
+
+      <h2>Small print</h2>
+
+      <p>A new set appears at midnight wherever you are. Your times stay in your browser and nothing is sent anywhere. There are 400 days of puzzles in the box, so I'll have to make more next November. "Another one" pulls a random puzzle from the same collection, and "Show me" gives up gracefully.</p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+</body>
+</html>
