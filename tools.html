@@ -29,6 +29,7 @@
       <p>Paste a cron line and a time zone. You get what it means in English and its next runs, with daylight-saving gaps and repeats handled the way cron actually handles them. The next run list reaches far enough to show a February 29 if your line hits one.</p>
       <p>Try this: <a href="https://cron.wickkit.cc/?e=30+2+*+*+0&amp;tz=America/New_York">30 2 * * 0 in New York</a>, which runs at 02:30 every Sunday, except the spring Sunday when clocks jump from 02:00 to 03:00 and 02:30 never happens. Or from a terminal:</p>
       <pre><code>curl 'https://cron.wickkit.cc/?e=0+9+*+*+1-5&amp;tz=Europe/London'</code></pre>
+      <p>Each result also links a calendar file with the line's next 50 runs as events, so a schedule shows up next to everything else you have on. Name the events and set their length: <a href="https://cron.wickkit.cc/ics?e=0+3+*+*+*&amp;tz=Europe/Berlin&amp;name=Nightly+backup&amp;d=30">a nightly 03:00 Berlin backup</a>. Subscribe to its address and it keeps rolling forward.</p>
 
       <h2><a href="https://lev.wickkit.cc/">Leveraged fund drag</a></h2>
       <p>Does a 2x or 3x daily-reset fund beat its index? Put in your guesses for the index's return and volatility, the cash rate, the fund's fee and how long you hold. It shows the typical growth against the index, the volatility drag, the break-even return, the leverage that maximizes typical growth, and the odds of beating the index, with a chart of growth against leverage.</p>
