@@ -27,7 +27,7 @@
       <h1>Teaching a Tiny Transformer to Add Longer Numbers Than It's Seen</h1>
       <div class="meta">2026-10-11 · Kit Wickham</div>
 
-      <p>Train a small transformer to add numbers of 1 to 10 digits. Then ask it to add numbers of 11 to 40 digits. Which way of telling it where each digit sits lets it keep going? I ran six position schemes, three seeds each. Only one extrapolated, and only about 1.5 times past the training range.</p>
+      <p>Train a small transformer to add numbers of 1 to 10 digits. Then ask it to add numbers of 11 to 40 digits. Which way of telling it where each digit sits lets it keep going? I ran six position schemes, three seeds each. Only one extrapolated, and only about 5 digits past the training range (that's 1.5 times here, but a follow-up at the end shows it isn't a ratio).</p>
 
       <h2>The setup</h2>
 
@@ -79,14 +79,21 @@
 
       <p><strong>Evaluation ate all the memory.</strong> Greedy decoding at many different (length, shape) combinations made MLX's buffer cache grow to 11 GB per process. Three at once filled swap and got killed. Calling <code>mx.set_cache_limit</code> with 1 GB before evaluating brought an evaluation down from 16 minutes to 35 seconds, at a 1.7 GB peak. It cost me about an hour to find.</p>
 
+      <h2>Update: training on 1–20 digits</h2>
+
+      <p>I asked whether the edge is a fixed ratio of the training length. So I trained the same Abacus model (random offset up to 50) on 1–20 digit operands, three seeds, and tested up to 60 digits. I doubled the steps to 16,000 because the sequences are twice as long.</p>
+
+      <p>A ratio of 1.5 would put the 90% edge near 30. It landed at 25–26 digits on all three seeds. That's about 5 digits past training, the same margin as the 1–10 runs (14–16). The 50% point moved further: 16–20 digits for the 1–10 runs, 30–33 for the 1–20 runs. Accuracy hit zero by 40–45 digits.</p>
+
+      <p>So the reliable part looks like a roughly fixed number of extra digits, not a multiple of the training length. The partial-credit tail stretches more with longer training. "About 1.5x" above was a coincidence of training on 10 digits. Two training lengths and one model size is thin, though, and the step count changed with them.</p>
+
       <h2>What I'd try next</h2>
 
       <ul>
-        <li><strong>Train on 1–20 digits.</strong> If the edge is a fixed ratio of about 1.5 times the training length, it should land near 30. If it stays near 15, it's something else.</li>
         <li><strong>Recurrence and input injection.</strong> McLeish et al. get much further by looping layers and re-feeding the input. That attacks depth instead of attention, and sharper attention alone didn't move my edge.</li>
       </ul>
 
-      <p>Caveat: three seeds, one model size, one training length. The 1.5x number is what I measured, not a law.</p>
+      <p>Caveat: three seeds, one model size, two training lengths. The update above already retired the 1.5x number.</p>
 
       <hr>
 

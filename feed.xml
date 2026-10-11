@@ -13,7 +13,7 @@
     <id>https://wickkit.cc/posts/2026-10-11-teaching-a-tiny-transformer-to-add-longer-numbers.html</id>
     <updated>2026-10-11T00:00:00Z</updated>
     <summary>Train on 1 to 10 digits, test up to 40. Of six position schemes, only Abacus embeddings with a random offset extrapolate, and only about 1.5x. Sharper attention (SSMax) adds partial credit but doesn't move the edge.</summary>
-    <content type="html">&lt;p&gt;Train a small transformer to add numbers of 1 to 10 digits. Then ask it to add numbers of 11 to 40 digits. Which way of telling it where each digit sits lets it keep going? I ran six position schemes, three seeds each. Only one extrapolated, and only about 1.5 times past the training range.&lt;/p&gt;
+    <content type="html">&lt;p&gt;Train a small transformer to add numbers of 1 to 10 digits. Then ask it to add numbers of 11 to 40 digits. Which way of telling it where each digit sits lets it keep going? I ran six position schemes, three seeds each. Only one extrapolated, and only about 5 digits past the training range (that's 1.5 times here, but a follow-up at the end shows it isn't a ratio).&lt;/p&gt;
 
       &lt;h2&gt;The setup&lt;/h2&gt;
 
@@ -65,14 +65,21 @@
 
       &lt;p&gt;&lt;strong&gt;Evaluation ate all the memory.&lt;/strong&gt; Greedy decoding at many different (length, shape) combinations made MLX's buffer cache grow to 11 GB per process. Three at once filled swap and got killed. Calling &lt;code&gt;mx.set_cache_limit&lt;/code&gt; with 1 GB before evaluating brought an evaluation down from 16 minutes to 35 seconds, at a 1.7 GB peak. It cost me about an hour to find.&lt;/p&gt;
 
+      &lt;h2&gt;Update: training on 1–20 digits&lt;/h2&gt;
+
+      &lt;p&gt;I asked whether the edge is a fixed ratio of the training length. So I trained the same Abacus model (random offset up to 50) on 1–20 digit operands, three seeds, and tested up to 60 digits. I doubled the steps to 16,000 because the sequences are twice as long.&lt;/p&gt;
+
+      &lt;p&gt;A ratio of 1.5 would put the 90% edge near 30. It landed at 25–26 digits on all three seeds. That's about 5 digits past training, the same margin as the 1–10 runs (14–16). The 50% point moved further: 16–20 digits for the 1–10 runs, 30–33 for the 1–20 runs. Accuracy hit zero by 40–45 digits.&lt;/p&gt;
+
+      &lt;p&gt;So the reliable part looks like a roughly fixed number of extra digits, not a multiple of the training length. The partial-credit tail stretches more with longer training. "About 1.5x" above was a coincidence of training on 10 digits. Two training lengths and one model size is thin, though, and the step count changed with them.&lt;/p&gt;
+
       &lt;h2&gt;What I'd try next&lt;/h2&gt;
 
       &lt;ul&gt;
-        &lt;li&gt;&lt;strong&gt;Train on 1–20 digits.&lt;/strong&gt; If the edge is a fixed ratio of about 1.5 times the training length, it should land near 30. If it stays near 15, it's something else.&lt;/li&gt;
         &lt;li&gt;&lt;strong&gt;Recurrence and input injection.&lt;/strong&gt; McLeish et al. get much further by looping layers and re-feeding the input. That attacks depth instead of attention, and sharper attention alone didn't move my edge.&lt;/li&gt;
       &lt;/ul&gt;
 
-      &lt;p&gt;Caveat: three seeds, one model size, one training length. The 1.5x number is what I measured, not a law.&lt;/p&gt;
+      &lt;p&gt;Caveat: three seeds, one model size, two training lengths. The update above already retired the 1.5x number.&lt;/p&gt;
 
       &lt;hr&gt;
 
