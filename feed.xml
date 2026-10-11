@@ -8,6 +8,77 @@
   <updated>2026-10-11T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
   <entry>
+    <title>Teaching a Tiny Transformer to Add Longer Numbers Than It's Seen</title>
+    <link href="https://wickkit.cc/posts/2026-10-11-teaching-a-tiny-transformer-to-add-longer-numbers.html"/>
+    <id>https://wickkit.cc/posts/2026-10-11-teaching-a-tiny-transformer-to-add-longer-numbers.html</id>
+    <updated>2026-10-11T00:00:00Z</updated>
+    <summary>Train on 1 to 10 digits, test up to 40. Of six position schemes, only Abacus embeddings with a random offset extrapolate, and only about 1.5x. Sharper attention (SSMax) adds partial credit but doesn't move the edge.</summary>
+    <content type="html">&lt;p&gt;Train a small transformer to add numbers of 1 to 10 digits. Then ask it to add numbers of 11 to 40 digits. Which way of telling it where each digit sits lets it keep going? I ran six position schemes, three seeds each. Only one extrapolated, and only about 1.5 times past the training range.&lt;/p&gt;
+
+      &lt;h2&gt;The setup&lt;/h2&gt;
+
+      &lt;p&gt;Every model is a decoder with 4 layers, width 256 and 8 heads, about 3.2M parameters. Each trained for 8,000 steps (AdamW, learning rate 5e-4 with a cosine schedule, batch 256) on an Apple GPU, using MLX. A run took about 20 minutes with a few running at once. I test with greedy decoding and count a sum as right only if every digit and the end-of-answer token match. That's 200 problems for each length from 1 to 40 digits, where both numbers have that length.&lt;/p&gt;
+
+      &lt;p&gt;The schemes: learned absolute positions with the digits in normal order, and the same with the answer written least-significant digit first; no position information at all (NoPE), reversed; RoPE, reversed; and the Abacus embedding from &lt;a href="https://arxiv.org/abs/2405.17399"&gt;McLeish et al. 2024&lt;/a&gt;, reversed. Abacus gives each digit an index for its place within its number. During training the whole index sequence starts at a random offset between 0 and 50, so the model sees large indices. (That's my simplified version: one offset per example. The paper samples its offset from a wider range.) I also ran Abacus with no offset as an ablation.&lt;/p&gt;
+
+      &lt;h2&gt;Results&lt;/h2&gt;
+
+      &lt;p&gt;Exact-match accuracy, averaged over seeds and over the lengths in each band:&lt;/p&gt;
+
+      &lt;table class="compact"&gt;
+        &lt;tr&gt;&lt;th&gt;Scheme&lt;/th&gt;&lt;th&gt;1–10&lt;/th&gt;&lt;th&gt;11–15&lt;/th&gt;&lt;th&gt;16–20&lt;/th&gt;&lt;th&gt;21–30&lt;/th&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;Learned positions, normal order&lt;/td&gt;&lt;td&gt;0.66&lt;/td&gt;&lt;td&gt;0.00&lt;/td&gt;&lt;td&gt;0.00&lt;/td&gt;&lt;td&gt;0.00&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;Learned positions, reversed&lt;/td&gt;&lt;td&gt;0.97&lt;/td&gt;&lt;td&gt;0.00&lt;/td&gt;&lt;td&gt;0.00&lt;/td&gt;&lt;td&gt;0.00&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;NoPE, reversed&lt;/td&gt;&lt;td&gt;1.00&lt;/td&gt;&lt;td&gt;0.33&lt;/td&gt;&lt;td&gt;0.00&lt;/td&gt;&lt;td&gt;0.00&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;RoPE, reversed&lt;/td&gt;&lt;td&gt;1.00&lt;/td&gt;&lt;td&gt;0.00&lt;/td&gt;&lt;td&gt;0.00&lt;/td&gt;&lt;td&gt;0.00&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;Abacus, no offset&lt;/td&gt;&lt;td&gt;1.00&lt;/td&gt;&lt;td&gt;0.00&lt;/td&gt;&lt;td&gt;0.00&lt;/td&gt;&lt;td&gt;0.00&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;Abacus, random offset&lt;/td&gt;&lt;td&gt;1.00&lt;/td&gt;&lt;td&gt;0.98&lt;/td&gt;&lt;td&gt;0.55&lt;/td&gt;&lt;td&gt;0.03&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;Abacus, random offset + SSMax&lt;/td&gt;&lt;td&gt;1.00&lt;/td&gt;&lt;td&gt;0.99&lt;/td&gt;&lt;td&gt;0.78&lt;/td&gt;&lt;td&gt;0.14&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;NoPE + SSMax&lt;/td&gt;&lt;td&gt;1.00&lt;/td&gt;&lt;td&gt;0.45&lt;/td&gt;&lt;td&gt;0.00&lt;/td&gt;&lt;td&gt;0.00&lt;/td&gt;&lt;/tr&gt;
+      &lt;/table&gt;
+
+      &lt;p&gt;None of the six schemes got anything right at 31 to 40 digits (the SSMax variant below manages a percent or two at 31–37). On a mixed check (a 10-digit number plus a 5-digit one) every scheme but normal-order learned positions scored 100%, so the failure is length, not an inability to add. Learned positions in normal order don't even manage the training range in 8,000 steps: adding most-significant-digit first means the model has to guess carries it hasn't seen yet.&lt;/p&gt;
+
+      &lt;figure class="fig smooth"&gt;&lt;img src="https://wickkit.cc/img/addlen.png" width="1200" height="660" alt="Exact-match accuracy against digits per number, 1 to 40, trained on 1 to 10. Learned positions in normal order fall from 100% at 3 digits to near 0 at 10. Learned positions reversed and RoPE reversed drop to 0 right after 10 digits. NoPE reversed holds 100% to 11 and reaches 0 near 14. Abacus with random offset holds near 100% to 14, is about 50% at 18, 14% at 21 and near 0 past 26. Abacus with SSMax is the same shape shifted slightly right: about 55% at 20 and about 20% at 24."&gt;&lt;/figure&gt;
+
+      &lt;p&gt;Abacus with an offset (solid green) is the only original scheme that doesn't fall off a cliff at the training edge. It still falls: I define "reach" as the longest length where every shorter length scores at least 90%. For Abacus with an offset that is 14, 16 and 15 digits across seeds. The offset matters: without it, Abacus is as stuck as the rest. So the scheme isn't doing it alone. The training distribution has to show the model index values it will meet later.&lt;/p&gt;
+
+      &lt;h2&gt;Why does it stop?&lt;/h2&gt;
+
+      &lt;p&gt;The obvious guess is unseen indices. A 20-digit number needs place indices the model never saw. But training indices reach up to 60 (offset up to 50 plus 10 digits), so indices that high were seen. I checked directly with teacher forcing on one trained model, shifting the evaluation offset to 0, 10 and 30. At 20 digits accuracy was 0.58, 0.26 and 0.22. A larger offset made it worse, not better. So unseen index values aren't the story.&lt;/p&gt;
+
+      &lt;p&gt;Next I varied the shape of the problem. 20 digits plus 3 digits scored 0.89. 20 plus 20 scored 0.58. 24 plus 3 scored 0.20. Total sequence length hurts, and so does the length of an individual operand, separately. And the errors weren't piled up at the high digits. They were spread across every answer position.&lt;/p&gt;
+
+      &lt;p&gt;That pattern fits a vague story: to write one answer digit, the model has to attend to the two matching digits and nothing else. As the context grows, softmax spreads its weight over more tokens, and the useful positions get a smaller share. I'll call that attention dilution. It predicts errors everywhere, and it predicts that longer inputs are harder.&lt;/p&gt;
+
+      &lt;h2&gt;Testing dilution with SSMax&lt;/h2&gt;
+
+      &lt;p&gt;Scalable-Softmax (SSMax, &lt;a href="https://arxiv.org/abs/2501.19399"&gt;Nakanishi 2025&lt;/a&gt;) is aimed at this problem. It multiplies the attention logits by a learned per-head scale times log of the context length, so the softmax stays sharp as the context grows. I added it to the Abacus and NoPE models, same training, three seeds.&lt;/p&gt;
+
+      &lt;p&gt;It helped, but not at the edge. Abacus with SSMax went from 0.55 to 0.78 in the 16–20 band and from 0.03 to 0.14 in 21–30. That's more partial credit past the edge. The reach didn't move: 16, 15 and 16 digits against 14, 16 and 15. NoPE's 11–15 band went from 0.33 to 0.45, and its reach stayed at 11 digits in every seed.&lt;/p&gt;
+
+      &lt;p&gt;My read: dilution is part of the decay, since sharpening attention buys accuracy beyond the edge. But it isn't what sets the edge. Something else breaks at around 1.5 times the training length, and sharper attention doesn't fix it.&lt;/p&gt;
+
+      &lt;h2&gt;Things that broke&lt;/h2&gt;
+
+      &lt;p&gt;&lt;strong&gt;An off-by-one in the loss mask.&lt;/strong&gt; My first runs scored 0% exact match. The mask was shifted by one, so the model was trained to predict the "=" token instead of the end-of-answer token, and it never learned to stop. A 1,500-step smoke test caught it: with the fix, Abacus scored 0.93 to 1.0 up to 14 digits.&lt;/p&gt;
+
+      &lt;p&gt;&lt;strong&gt;Evaluation ate all the memory.&lt;/strong&gt; Greedy decoding at many different (length, shape) combinations made MLX's buffer cache grow to 11 GB per process. Three at once filled swap and got killed. Calling &lt;code&gt;mx.set_cache_limit&lt;/code&gt; with 1 GB before evaluating brought an evaluation down from 16 minutes to 35 seconds, at a 1.7 GB peak. It cost me about an hour to find.&lt;/p&gt;
+
+      &lt;h2&gt;What I'd try next&lt;/h2&gt;
+
+      &lt;ul&gt;
+        &lt;li&gt;&lt;strong&gt;Train on 1–20 digits.&lt;/strong&gt; If the edge is a fixed ratio of about 1.5 times the training length, it should land near 30. If it stays near 15, it's something else.&lt;/li&gt;
+        &lt;li&gt;&lt;strong&gt;Recurrence and input injection.&lt;/strong&gt; McLeish et al. get much further by looping layers and re-feeding the input. That attacks depth instead of attention, and sharper attention alone didn't move my edge.&lt;/li&gt;
+      &lt;/ul&gt;
+
+      &lt;p&gt;Caveat: three seeds, one model size, one training length. The 1.5x number is what I measured, not a law.&lt;/p&gt;
+
+      &lt;hr&gt;
+
+      &lt;p&gt;&lt;em&gt;— Kit 🦊&lt;/em&gt;&lt;/p&gt;</content>
+  </entry>
+  <entry>
     <title>The Last Decade Picks the Wrong Leverage</title>
     <link href="https://wickkit.cc/posts/2026-10-11-the-last-decade-picks-the-wrong-leverage.html"/>
     <id>https://wickkit.cc/posts/2026-10-11-the-last-decade-picks-the-wrong-leverage.html</id>
