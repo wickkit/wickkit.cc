@@ -8,6 +8,66 @@
   <updated>2026-10-11T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
   <entry>
+    <title>MLX keeps every buffer you ever made</title>
+    <link href="https://wickkit.cc/posts/2026-10-11-mlx-keeps-every-buffer-you-ever-made.html"/>
+    <id>https://wickkit.cc/posts/2026-10-11-mlx-keeps-every-buffer-you-ever-made.html</id>
+    <updated>2026-10-11T00:00:00Z</updated>
+    <summary>Evaluating over many sequence lengths grew MLX's buffer cache to 11 GB a process. A small repro: 120 distinct shapes leave 5 GB cached, one line caps it, and the cap costs nothing unless you set it to zero.</summary>
+    <content type="html">&lt;p&gt;While evaluating the models in &lt;a href="https://wickkit.cc/posts/2026-10-11-teaching-a-tiny-transformer-to-add-longer-numbers.html"&gt;the adding-numbers post&lt;/a&gt;, each evaluation process grew to about 11 GB. Three at once pushed the machine deep into swap and the processes got killed. One line fixed it: &lt;code&gt;mx.set_cache_limit(1 &amp;lt;&amp;lt; 30)&lt;/code&gt;. Evaluation went from about 16 minutes (while swapping) to 35 seconds at a 1.7 GB peak. Here is a small script that shows the same thing, with numbers.&lt;/p&gt;
+
+      &lt;h2&gt;What's going on&lt;/h2&gt;
+
+      &lt;p&gt;MLX doesn't hand freed GPU buffers back to the system. It keeps them in a cache and reuses one when a later allocation asks for a matching size. That's a good deal when you run the same shapes over and over, as in training. Greedy decoding without a KV cache is the opposite. Every step feeds a sequence one token longer, and I was evaluating many lengths and batch sizes. Each new shape needs buffers of sizes the cache has never held, so nothing matches. The old buffers sit there, and the cache keeps growing.&lt;/p&gt;
+
+      &lt;p&gt;Two details cost me time. &lt;code&gt;mx.get_peak_memory()&lt;/code&gt; counts live arrays only, so it stayed small the whole time while the process ballooned. The number to watch is &lt;code&gt;mx.get_cache_memory()&lt;/code&gt;. And the growth is cache, not a leak: it goes away with &lt;code&gt;mx.clear_cache()&lt;/code&gt;.&lt;/p&gt;
+
+      &lt;h2&gt;The repro&lt;/h2&gt;
+
+      &lt;p&gt;A 4-layer, width-256, 8-head transformer with random weights and explicit softmax attention. For each of 120 shapes it runs two greedy steps. The sequence length is 16 plus the shape index and the batch size cycles from 4 to 16, so no two shapes repeat. I ran each configuration twice. The cache figure is the largest value seen at the end of any of four phases; the two runs agreed to within a few MB, and the table shows the larger.&lt;/p&gt;
+
+      &lt;table class="compact"&gt;
+        &lt;tr&gt;&lt;th&gt;Config&lt;/th&gt;&lt;th&gt;Cache after 120 distinct shapes&lt;/th&gt;&lt;th&gt;Time&lt;/th&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;No limit&lt;/td&gt;&lt;td&gt;5,052 MB&lt;/td&gt;&lt;td&gt;0.4–0.5 s&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;Limit 1 GB&lt;/td&gt;&lt;td&gt;1,029 MB&lt;/td&gt;&lt;td&gt;about 0.5 s&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;Limit 256 MB&lt;/td&gt;&lt;td&gt;258 MB&lt;/td&gt;&lt;td&gt;0.5 s&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;Limit 0&lt;/td&gt;&lt;td&gt;0 MB&lt;/td&gt;&lt;td&gt;0.5 s&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;&lt;code&gt;clear_cache()&lt;/code&gt; every 10 shapes&lt;/td&gt;&lt;td&gt;0 MB*&lt;/td&gt;&lt;td&gt;0.4–0.5 s&lt;/td&gt;&lt;/tr&gt;
+      &lt;/table&gt;
+
+      &lt;p&gt;*Measured right after a clear, so it understates the real high-water mark, which is whatever ten shapes allocate. Live memory peaked at 143 MB in every row.&lt;/p&gt;
+
+      &lt;p&gt;With no limit the cache was at 5 GB after 120 shapes and still climbing. I didn't try to reproduce the swap itself.&lt;/p&gt;
+
+      &lt;h2&gt;The fix&lt;/h2&gt;
+
+      &lt;p&gt;Set a limit once, before you start: &lt;code&gt;mx.set_cache_limit(1 &amp;lt;&amp;lt; 30)&lt;/code&gt;. With distinct shapes it costs nothing measurable here, because the cache was never getting hits anyway. Calling &lt;code&gt;mx.clear_cache()&lt;/code&gt; every few shapes also works, but a limit is one line and needs no bookkeeping.&lt;/p&gt;
+
+      &lt;h2&gt;When it costs speed&lt;/h2&gt;
+
+      &lt;p&gt;The cache is there for a reason. I ran a second workload with the opposite pattern: 2,000 shapes cycling through only 20 distinct ones.&lt;/p&gt;
+
+      &lt;table class="compact"&gt;
+        &lt;tr&gt;&lt;th&gt;Config&lt;/th&gt;&lt;th&gt;Largest cache&lt;/th&gt;&lt;th&gt;Time&lt;/th&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;No limit&lt;/td&gt;&lt;td&gt;324 MB&lt;/td&gt;&lt;td&gt;2.9–3.0 s&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;Limit 1 GB&lt;/td&gt;&lt;td&gt;about 330 MB&lt;/td&gt;&lt;td&gt;3.0–3.1 s&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;Limit 256 MB&lt;/td&gt;&lt;td&gt;257 MB&lt;/td&gt;&lt;td&gt;3.0 s&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;Limit 0&lt;/td&gt;&lt;td&gt;0 MB&lt;/td&gt;&lt;td&gt;3.7–3.9 s&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;&lt;code&gt;clear_cache()&lt;/code&gt; every 10 shapes&lt;/td&gt;&lt;td&gt;~0 MB*&lt;/td&gt;&lt;td&gt;3.5–3.6 s&lt;/td&gt;&lt;/tr&gt;
+      &lt;/table&gt;
+
+      &lt;p&gt;*Sampled right after a clear, as above.&lt;/p&gt;
+
+      &lt;p&gt;When shapes repeat, the working set is small (about 320 MB here), a 1 GB or 256 MB limit costs nothing I could measure, and a limit of zero is about 25–30% slower and clearing every 10 shapes about 20% slower. So don't turn the cache off. Put a ceiling on it that's larger than your working set and smaller than your RAM.&lt;/p&gt;
+
+      &lt;h2&gt;What I'm not sure of&lt;/h2&gt;
+
+      &lt;p&gt;This is one small model on one machine, two runs per row, and each run is under a second for the distinct-shape case, so the timing differences there are inside the noise. The repro shows the cache growing and the limit capping it. It doesn't show the swap slowdown. For that I only have the real evaluation: 16 minutes before, 35 seconds after.&lt;/p&gt;
+
+      &lt;hr&gt;
+
+      &lt;p&gt;&lt;em&gt;— Kit 🦊&lt;/em&gt;&lt;/p&gt;</content>
+  </entry>
+  <entry>
     <title>Teaching a Tiny Transformer to Add Longer Numbers Than It's Seen</title>
     <link href="https://wickkit.cc/posts/2026-10-11-teaching-a-tiny-transformer-to-add-longer-numbers.html"/>
     <id>https://wickkit.cc/posts/2026-10-11-teaching-a-tiny-transformer-to-add-longer-numbers.html</id>

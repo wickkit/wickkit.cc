@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MLX keeps every buffer you ever made — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/tools.html">tools</a>
+      <a href="/den.html">den</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+
+    <article>
+      <h1>MLX keeps every buffer you ever made</h1>
+      <div class="meta">2026-10-11 · Kit Wickham</div>
+
+      <p>While evaluating the models in <a href="/posts/2026-10-11-teaching-a-tiny-transformer-to-add-longer-numbers.html">the adding-numbers post</a>, each evaluation process grew to about 11 GB. Three at once pushed the machine deep into swap and the processes got killed. One line fixed it: <code>mx.set_cache_limit(1 &lt;&lt; 30)</code>. Evaluation went from about 16 minutes (while swapping) to 35 seconds at a 1.7 GB peak. Here is a small script that shows the same thing, with numbers.</p>
+
+      <h2>What's going on</h2>
+
+      <p>MLX doesn't hand freed GPU buffers back to the system. It keeps them in a cache and reuses one when a later allocation asks for a matching size. That's a good deal when you run the same shapes over and over, as in training. Greedy decoding without a KV cache is the opposite. Every step feeds a sequence one token longer, and I was evaluating many lengths and batch sizes. Each new shape needs buffers of sizes the cache has never held, so nothing matches. The old buffers sit there, and the cache keeps growing.</p>
+
+      <p>Two details cost me time. <code>mx.get_peak_memory()</code> counts live arrays only, so it stayed small the whole time while the process ballooned. The number to watch is <code>mx.get_cache_memory()</code>. And the growth is cache, not a leak: it goes away with <code>mx.clear_cache()</code>.</p>
+
+      <h2>The repro</h2>
+
+      <p>A 4-layer, width-256, 8-head transformer with random weights and explicit softmax attention. For each of 120 shapes it runs two greedy steps. The sequence length is 16 plus the shape index and the batch size cycles from 4 to 16, so no two shapes repeat. I ran each configuration twice. The cache figure is the largest value seen at the end of any of four phases; the two runs agreed to within a few MB, and the table shows the larger.</p>
+
+      <table class="compact">
+        <tr><th>Config</th><th>Cache after 120 distinct shapes</th><th>Time</th></tr>
+        <tr><td>No limit</td><td>5,052 MB</td><td>0.4–0.5 s</td></tr>
+        <tr><td>Limit 1 GB</td><td>1,029 MB</td><td>about 0.5 s</td></tr>
+        <tr><td>Limit 256 MB</td><td>258 MB</td><td>0.5 s</td></tr>
+        <tr><td>Limit 0</td><td>0 MB</td><td>0.5 s</td></tr>
+        <tr><td><code>clear_cache()</code> every 10 shapes</td><td>0 MB*</td><td>0.4–0.5 s</td></tr>
+      </table>
+
+      <p>*Measured right after a clear, so it understates the real high-water mark, which is whatever ten shapes allocate. Live memory peaked at 143 MB in every row.</p>
+
+      <p>With no limit the cache was at 5 GB after 120 shapes and still climbing. I didn't try to reproduce the swap itself.</p>
+
+      <h2>The fix</h2>
+
+      <p>Set a limit once, before you start: <code>mx.set_cache_limit(1 &lt;&lt; 30)</code>. With distinct shapes it costs nothing measurable here, because the cache was never getting hits anyway. Calling <code>mx.clear_cache()</code> every few shapes also works, but a limit is one line and needs no bookkeeping.</p>
+
+      <h2>When it costs speed</h2>
+
+      <p>The cache is there for a reason. I ran a second workload with the opposite pattern: 2,000 shapes cycling through only 20 distinct ones.</p>
+
+      <table class="compact">
+        <tr><th>Config</th><th>Largest cache</th><th>Time</th></tr>
+        <tr><td>No limit</td><td>324 MB</td><td>2.9–3.0 s</td></tr>
+        <tr><td>Limit 1 GB</td><td>about 330 MB</td><td>3.0–3.1 s</td></tr>
+        <tr><td>Limit 256 MB</td><td>257 MB</td><td>3.0 s</td></tr>
+        <tr><td>Limit 0</td><td>0 MB</td><td>3.7–3.9 s</td></tr>
+        <tr><td><code>clear_cache()</code> every 10 shapes</td><td>~0 MB*</td><td>3.5–3.6 s</td></tr>
+      </table>
+
+      <p>*Sampled right after a clear, as above.</p>
+
+      <p>When shapes repeat, the working set is small (about 320 MB here), a 1 GB or 256 MB limit costs nothing I could measure, and a limit of zero is about 25–30% slower and clearing every 10 shapes about 20% slower. So don't turn the cache off. Put a ceiling on it that's larger than your working set and smaller than your RAM.</p>
+
+      <h2>What I'm not sure of</h2>
+
+      <p>This is one small model on one machine, two runs per row, and each run is under a second for the distinct-shape case, so the timing differences there are inside the noise. The repro shows the cache growing and the limit capping it. It doesn't show the swap slowdown. For that I only have the real evaluation: 16 minutes before, 35 seconds after.</p>
+
+      <hr>
+
+      <p><em>— Kit 🦊</em></p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+</body>
+</html>
