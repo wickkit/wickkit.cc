@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>The Last Decade Picks the Wrong Leverage — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/tools.html">tools</a>
+      <a href="/den.html">den</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+
+    <article>
+      <h1>The Last Decade Picks the Wrong Leverage</h1>
+      <div class="meta">2026-10-11 · Kit Wickham</div>
+
+      <p>In <a href="/posts/2026-10-07-the-break-even-line-for-3x.html">The Break-Even Line for 3x</a> I boiled a daily-reset leveraged fund down to one line:</p>
+
+      <pre><code>growth(L) = r + L·(μ − r) − fee − L²·σ²/2</code></pre>
+
+      <p>3x beats the plain index only when the index beats cash by more than about twice its variance. I checked it on 2020–2026, which is one stretch of one market. This time I ran it over 55 years: every trading day of the Nasdaq Composite from February 1971 to October 2026, about 14,000 days, with the 3-month Treasury bill rate as the cash rate. Both series are public on FRED.</p>
+
+      <h2>The setup</h2>
+
+      <p>Each simulated fund day returns <em>L</em> times the index's day, minus borrowing on the extra <em>L</em> − 1 at the T-bill rate plus 0.4% a year, minus a 0.95% yearly fee. The Composite is a price index, so I add back 1% a year for dividends. That's my rough guess; dropping it changes the levels but not the conclusions (numbers at the end). Nobody sold a 3x Nasdaq fund in 1971, so this is what one would have done, not a record of a real fund.</p>
+
+      <h2>Fifty-five years</h2>
+
+      <table class="compact">
+        <tr><th>Fund</th><th>Growth per year</th><th>$1 became</th><th>Worst fall</th></tr>
+        <tr><td>1x</td><td>11.7%</td><td>$478</td><td>−77%</td></tr>
+        <tr><td>2x</td><td>13.1%</td><td>$935</td><td>−97.9%</td></tr>
+        <tr><td>3x</td><td>10.8%</td><td>$300</td><td>−99.93%</td></tr>
+      </table>
+
+      <p>2x won. 3x ended behind the plain index, after a peak-to-bottom fall of 99.93%: $1,000 at the top became 70 cents. The formula's best leverage for the whole period is 2.1, which matches the table: the index beat cash by enough to pay for some leverage, not for three times.</p>
+
+      <h2>Decade by decade</h2>
+
+      <table class="compact">
+        <tr><th>Years</th><th>1x</th><th>3x (formula)</th><th>Best leverage</th></tr>
+        <tr><td>1971–80</td><td>8.4%</td><td>4.5% (4.6%)</td><td>1.4</td></tr>
+        <tr><td>1981–90</td><td>7.4%</td><td>−3.0% (−2.6%)</td><td>below 0</td></tr>
+        <tr><td>1991–2000</td><td>21.9%</td><td>38.3% (38.7%)</td><td>3.4</td></tr>
+        <tr><td>2001–10</td><td>1.7%</td><td>−21.1% (−21.1%)</td><td>0.4</td></tr>
+        <tr><td>2011–20</td><td>18.3%</td><td>43.1% (43.7%)</td><td>4.8</td></tr>
+        <tr><td>2021–26</td><td>15.1%</td><td>21.2% (21.1%)</td><td>2.7</td></tr>
+      </table>
+
+      <p>Two things stand out. First, the formula is very good once you know the decade's average return and volatility: across 549 rolling ten-year windows (one starting every month), it called 3x's growth within 0.3 points a year on average and never missed by more than 0.6. It got "does 3x beat 1x?" right in 98.7% of them. The math was never the hard part.</p>
+
+      <p>Second, the right leverage swings wildly. In the 1980s cash beat the index, so the best leverage was below zero. In the 2010s it was almost 5. A 3x fund made 38% a year in the 1990s and then lost 21% a year for the next ten.</p>
+
+      <h2>Can the last decade tell you?</h2>
+
+      <p>The formula needs next decade's return and volatility, and you don't have them. The obvious stand-in is the last decade's. So I asked the simplest version: if 3x beat 1x over the past ten years, does it beat 1x over the next ten?</p>
+
+      <p>Across 429 pairs of back-to-back ten-year windows, "do what worked last decade" was right 34% of the time. Always betting on 3x, ignoring history entirely, was right 55% of the time. The past decade wasn't just useless as a guide, it pointed the wrong way more often than not: 1990s boom into 2000s bust, 2000s bust into 2010s boom.</p>
+
+      <p>I wouldn't lean on "it points the wrong way" too hard. The windows overlap, and 55 years holds only about five truly separate decade-to-decade handoffs. What the data does support is the weaker claim: a great decade for leverage gave no sign that the next one would be good.</p>
+
+      <h2>Checks</h2>
+
+      <p>The results under other assumptions:</p>
+
+      <table class="compact">
+        <tr><th>Assumption</th><th>1x / 2x / 3x per year</th><th>3x won (windows)</th><th>Last decade right</th></tr>
+        <tr><td>Main (1% dividends, +0.4% borrowing)</td><td>11.7 / 13.1 / 10.8%</td><td>53%</td><td>34%</td></tr>
+        <tr><td>No dividends</td><td>10.6 / 10.8 / 7.5%</td><td>45%</td><td>38%</td></tr>
+        <tr><td>No borrowing spread</td><td>10.6 / 11.3 / 8.4%</td><td>50%</td><td>36%</td></tr>
+        <tr><td>Dividends, no spread</td><td>11.7 / 13.5 / 11.7%</td><td>58%</td><td>34%</td></tr>
+      </table>
+
+      <p>(The "no spread" row is without dividends.) In every version, 2x beats 3x over the full period, 3x wins about half the ten-year windows, and the last decade's winner predicts the next one worse than a coin flip.</p>
+
+      <h2>What I take from it</h2>
+
+      <p>The break-even line holds up. It's the input that fails. Leverage is a bet on how far the index will beat cash, relative to how much it will swing, over the years you hold it. Fifty-five years of Nasdaq say you can't read that off the years just behind you, and when you guess wrong at 3x, the worst case isn't a bad decade. It's losing 99.9%.</p>
+
+      <p>If I held one anyway, 2x would be my ceiling. It was the full-period winner here, its worst case is merely terrible, and it needs a smaller edge to pay off: with Nasdaq-like volatility, about 7.5 points a year over cash, against 9 for 3x. The <a href="https://lev.wickkit.cc/">calculator</a> will show you how much edge your own guess needs.</p>
+
+      <hr>
+
+      <p><em>— Kit 🦊</em></p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+</body>
+</html>
