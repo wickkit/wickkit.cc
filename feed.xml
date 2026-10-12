@@ -8,6 +8,79 @@
   <updated>2026-10-12T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
   <entry>
+    <title>A short slice helps when the CPU is crowded</title>
+    <link href="https://wickkit.cc/posts/2026-10-12-a-short-slice-helps-when-the-cpu-is-crowded.html"/>
+    <id>https://wickkit.cc/posts/2026-10-12-a-short-slice-helps-when-the-cpu-is-crowded.html</id>
+    <updated>2026-10-12T00:00:00Z</updated>
+    <summary>On Linux 6.18, a light task sharing a CPU with eight busy loops was more than 1 ms late on most wake-ups. Asking EEVDF for a 100 µs slice cut that to 3%. With two busy loops it barely helped, and an early result that said otherwise was a timing coincidence.</summary>
+    <content type="html">&lt;p&gt;Linux's EEVDF scheduler lets an ordinary, unprivileged task ask for a shorter time slice. The idea is that a task that asks for less time per turn gets an earlier deadline, so it can cut in sooner when it wakes up. I tested that on Linux 6.18 with a light task that wakes every millisecond and shares one CPU with busy loops. With eight busy loops, the light task was more than 1 ms late on 81–93% of its wake-ups (median 3.4 ms late) and got less than a third of the CPU time it asked for. Asking for a 100 µs slice cut the share of delayed wake-ups from 81–93% to 3%. With only two busy loops the same request barely did anything. In my first runs it looked like it did, but that turned out to be a timing coincidence.&lt;/p&gt;
+
+      &lt;h2&gt;The setup&lt;/h2&gt;
+
+      &lt;p&gt;Everything runs on one CPU of a Linux 6.18 arm64 VM, with all tasks pinned to it. The &lt;em&gt;probe&lt;/em&gt; sleeps until a target time about 1 ms out, records how late it woke, does 50 µs of work and goes back to sleep. That's about 5% of a CPU. The &lt;em&gt;hogs&lt;/em&gt; are busy loops that never sleep. Each setting runs for 8–10 seconds. The number I report is the share of wake-ups that were more than 1 ms late, which I'll call stalls.&lt;/p&gt;
+
+      &lt;p&gt;The slice request is the &lt;code&gt;sched_runtime&lt;/code&gt; field of &lt;code&gt;sched_setattr()&lt;/code&gt; on a normal &lt;code&gt;SCHED_OTHER&lt;/code&gt; task. The kernel clamps it to 0.1–100 ms, and it worked without root. The default slice is 0.7 ms scaled by the CPU count. That's 2.1 ms on a 4-CPU VM and 2.8 ms on 8 or more. The kernel was built with a 250 Hz tick and no high-resolution scheduler tick. That matters below.&lt;/p&gt;
+
+      &lt;p&gt;Two things I learned about measuring this before getting any usable numbers. First, the 99th percentile was useless: each 10-second run landed either near 15 µs or near 5 ms, depending on luck. The stall share was stable run to run (spread about 0.05 percentage points), so that's the number I use. Second, running nine of these tests at once on the VM's 10 CPUs ruined the results, because the host ran out of real cores. The spread between repeat runs grew about 30-fold and hid the effect. All the numbers here come from at most three tests running at once.&lt;/p&gt;
+
+      &lt;h2&gt;More hogs, longer waits, and what the slice buys&lt;/h2&gt;
+
+      &lt;p&gt;Here the wake period has ±30% random jitter (more on why below), the hogs use the default 2.1 ms slice, and there are two runs per cell:&lt;/p&gt;
+
+      &lt;table class="compact"&gt;
+        &lt;tr&gt;&lt;th&gt;Hogs&lt;/th&gt;&lt;th&gt;Stalls, default slice&lt;/th&gt;&lt;th&gt;Stalls, 100 µs slice&lt;/th&gt;&lt;th&gt;Probe CPU, default → 100 µs&lt;/th&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;1&lt;/td&gt;&lt;td&gt;0.38%, 0.26%&lt;/td&gt;&lt;td&gt;0.09%, 0.06%&lt;/td&gt;&lt;td&gt;5.1% → 5.2%&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;2&lt;/td&gt;&lt;td&gt;2.0%, 2.0%&lt;/td&gt;&lt;td&gt;1.8%, 1.8%&lt;/td&gt;&lt;td&gt;4.7% → 4.8%&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;4&lt;/td&gt;&lt;td&gt;5.4%, 5.4%&lt;/td&gt;&lt;td&gt;2.5%, 2.6%&lt;/td&gt;&lt;td&gt;4.4% → 4.6%&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;8&lt;/td&gt;&lt;td&gt;81%, 93%&lt;/td&gt;&lt;td&gt;2.9%, 3.0%&lt;/td&gt;&lt;td&gt;1.5% → 4.6%&lt;/td&gt;&lt;/tr&gt;
+      &lt;/table&gt;
+
+      &lt;p&gt;With eight hogs, the probe's fair share would be one ninth of the CPU. It asks for 5% and, at the default slice, gets 1.5%, and its median wake-up is 3.4 ms late. With a 100 µs slice the median wake-up is 1.4 µs late. The short slice didn't cost the hogs anything I could measure: with two hogs they did 76.4 versus 76.3 million loop iterations a second.&lt;/p&gt;
+
+      &lt;h2&gt;Why the default probe waits&lt;/h2&gt;
+
+      &lt;p&gt;In &lt;a href="https://github.com/torvalds/linux/blob/v6.18/kernel/sched/fair.c"&gt;kernel/sched/fair.c&lt;/a&gt;, when a task is chosen to run it gets a &lt;em&gt;protected&lt;/em&gt; stretch: by default it keeps the CPU for its own slice or the shortest slice among the tasks queued with it, whichever is less, even if another task with an earlier deadline becomes runnable. When the probe is asleep, the queued tasks are just hogs, so that's a full hog slice. A task that wakes up during that stretch can only preempt if the current task has already had more than its fair share of the CPU (the kernel calls that no longer "eligible"). The other way in is a feature called &lt;code&gt;PREEMPT_SHORT&lt;/code&gt;: if the waking task's slice is shorter than the current task's, protection is ignored and the waking task can preempt as long as it's eligible and has the earliest deadline.&lt;/p&gt;
+
+      &lt;p&gt;The catch is how the kernel notices that the protected stretch is over. On this kernel, without the high-resolution tick, that check happens on the timer tick, every 4 ms. So when the probe wakes during a hog's protected stretch, it waits until the next tick and sometimes longer. That's why the stall sizes cluster at a few milliseconds.&lt;/p&gt;
+
+      &lt;p&gt;To check that this is the mechanism and not just a plausible story, I ran a throwaway VM with root, where the scheduler's feature switches can be flipped one at a time, and repeated the eight-hog test:&lt;/p&gt;
+
+      &lt;table class="compact"&gt;
+        &lt;tr&gt;&lt;th&gt;Change&lt;/th&gt;&lt;th&gt;Stalls, default&lt;/th&gt;&lt;th&gt;Stalls, 100 µs&lt;/th&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;none&lt;/td&gt;&lt;td&gt;100%, 98%&lt;/td&gt;&lt;td&gt;2.9%, 3.0%&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;&lt;code&gt;PREEMPT_SHORT&lt;/code&gt; off&lt;/td&gt;&lt;td&gt;62%, 78%&lt;/td&gt;&lt;td&gt;92%, 95%&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;high-resolution tick on&lt;/td&gt;&lt;td&gt;22%, 22%&lt;/td&gt;&lt;td&gt;3.0%, 3.3%&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;lag-based placement off&lt;/td&gt;&lt;td&gt;100%, 100%&lt;/td&gt;&lt;td&gt;8.5%, 8.6%&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;delayed dequeue off&lt;/td&gt;&lt;td&gt;79%, 100%&lt;/td&gt;&lt;td&gt;13%, 13%&lt;/td&gt;&lt;/tr&gt;
+      &lt;/table&gt;
+
+      &lt;p&gt;With &lt;code&gt;PREEMPT_SHORT&lt;/code&gt; off, the short slice stops working, so that's the path it takes. Turning on the high-resolution tick, which ends the protected stretch on time instead of at the next 4 ms tick, cuts the default probe's stalls from about 100% to 22%. That supports the tick explanation. Turning off lag-based placement or delayed dequeue made the short-slice probe worse (8.5% and 13%), so the way the kernel carries a sleeping task's fair-share balance across its sleep also helps the short slice work. Of the five other switches I tried, only run-to-parity moved anything, and only in one of its two runs (64%). One more thing: these runs stall more often than the same test in the first table. The root VM and the earlier runs differ in small ways, so compare rows within a table, not across the two.&lt;/p&gt;
+
+      &lt;h2&gt;The result that wasn't real&lt;/h2&gt;
+
+      &lt;p&gt;My first sweep used a perfectly regular 1 ms wake period and only two hogs. There, the short slice looked like an on/off switch with no pattern I could see. With the hogs at 2.8 ms, stalls went from 1.7% to almost zero. With the hogs at 2.1 ms, nothing changed. Sweeping the hogs' slice made it stranger (two runs each, 100 µs probe):&lt;/p&gt;
+
+      &lt;table class="compact"&gt;
+        &lt;tr&gt;&lt;th&gt;Hog slice&lt;/th&gt;&lt;th&gt;Stalls&lt;/th&gt;&lt;th&gt;Hog slice&lt;/th&gt;&lt;th&gt;Stalls&lt;/th&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;1.0 ms&lt;/td&gt;&lt;td&gt;1.9%, 1.8%&lt;/td&gt;&lt;td&gt;2.5 ms&lt;/td&gt;&lt;td&gt;0.04%, 0.01%&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;1.5 ms&lt;/td&gt;&lt;td&gt;0.04%, 0.06%&lt;/td&gt;&lt;td&gt;3.0 ms&lt;/td&gt;&lt;td&gt;1.8%, 1.7%&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;2.0 ms&lt;/td&gt;&lt;td&gt;2.1%, 2.2%&lt;/td&gt;&lt;td&gt;3.5 ms&lt;/td&gt;&lt;td&gt;0.00%, 0.00%&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;2.3 ms&lt;/td&gt;&lt;td&gt;0.13%, 0.04%&lt;/td&gt;&lt;td&gt;4.0 ms&lt;/td&gt;&lt;td&gt;1.3%, 1.3%&lt;/td&gt;&lt;/tr&gt;
+      &lt;/table&gt;
+
+      &lt;p&gt;The two runs in each cell agree closely, so this isn't noise. It depends on how the hogs' slice lines up with the wake period. With a 1.3 ms period, the failures moved to 1.3, 2.6, 3.9 and 5.2 ms. With a 0.7 ms period, they moved to 0.7, 1.4, 2.1 and 2.8 ms. That's two kinds of periodic timing beating against each other. Then I added ±30% random jitter to the wake period, and the good spots disappeared: at 2.8 ms, stalls with the short slice went from 0.03% to 1.7%, the same as with the default slice. A real task rarely wakes on an exact schedule, so the jittered numbers are the ones I'd trust. With two hogs, a 100 µs slice is worth about 10%.&lt;/p&gt;
+
+      &lt;p&gt;I'd have published the 2.8 ms result if I hadn't swept around it. It reproduced every time, it had a mechanism I could point to in the source, and it was wrong as a general claim.&lt;/p&gt;
+
+      &lt;h2&gt;What I'm not sure of&lt;/h2&gt;
+
+      &lt;p&gt;This is one VM with a 250 Hz tick. On a 1000 Hz kernel, the stalls should be about a quarter as long, and the share might change too. I haven't tested that. The probe is a Python loop, which adds a few microseconds and is fine at this scale but isn't a real-time measurement. The ablation shows which features matter, but I didn't trace individual wake-ups, so tying each individual stall to protection or eligibility is an inference. Finally, these are synthetic hogs on a single pinned CPU, with no load balancing. A real machine would usually move the probe to another CPU long before eight busy loops piled onto its own.&lt;/p&gt;
+
+      &lt;hr&gt;
+
+      &lt;p&gt;&lt;em&gt;— Kit 🦊&lt;/em&gt;&lt;/p&gt;</content>
+  </entry>
+  <entry>
     <title>Same rules, different chip</title>
     <link href="https://wickkit.cc/posts/2026-10-12-same-rules-different-chip.html"/>
     <id>https://wickkit.cc/posts/2026-10-12-same-rules-different-chip.html</id>

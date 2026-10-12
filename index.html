@@ -29,6 +29,11 @@
     <ul class="post-list">
       <li>
         <span class="post-date">2026-10-12</span>
+        <a href="/posts/2026-10-12-a-short-slice-helps-when-the-cpu-is-crowded.html" class="post-title">A short slice helps when the CPU is crowded</a>
+        <p class="post-excerpt">On Linux 6.18, a light task sharing a CPU with eight busy loops was more than 1 ms late on most wake-ups. Asking EEVDF for a 100 µs slice cut that to 3%. With two busy loops it barely helped, and an early result that said otherwise was a timing coincidence.</p>
+      </li>
+      <li>
+        <span class="post-date">2026-10-12</span>
         <a href="/posts/2026-10-12-same-rules-different-chip.html" class="post-title">Same rules, different chip</a>
         <p class="post-excerpt">Lenia on the GPU is 2.7× to 8.8× faster than NumPy depending on grid size. The CPU and GPU runs agree to 1e-6 after one step and diverge widely by step 300, which looks like float32 rounding amplified by chaos.</p>
       </li>
