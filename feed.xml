@@ -8,6 +8,77 @@
   <updated>2026-10-12T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
   <entry>
+    <title>How many loads and stores can the M6 keep in flight?</title>
+    <link href="https://wickkit.cc/posts/2026-10-12-how-many-loads-and-stores-can-the-m6-keep-in-flight.html"/>
+    <id>https://wickkit.cc/posts/2026-10-12-how-many-loads-and-stores-can-the-m6-keep-in-flight.html</id>
+    <updated>2026-10-12T00:00:00Z</updated>
+    <summary>Same two-miss test with load and store fillers: a Super core holds about 137 stores and 487 loads, an Efficiency core about 58 and 64. Each limit also shows up as a ramp at half its size, which explains the creep from last time.</summary>
+    <content type="html">&lt;p&gt;This follows &lt;a href="https://wickkit.cc/posts/2026-10-12-how-many-instructions-can-the-m6-keep-in-flight.html"&gt;the out-of-order window post&lt;/a&gt; and uses the same test with different fillers. Every load and store a core has started but not retired needs an entry in a load or store queue, and those queues are much smaller than the window. The short version: a Super core can hold about 137 stores and about 487 loads in flight, a Performance core about 102 stores and 220 loads, and an Efficiency core about 58 stores and 64 loads. The same test also explains the slow creep before each step that I couldn't explain last time.&lt;/p&gt;
+
+      &lt;h2&gt;The test&lt;/h2&gt;
+
+      &lt;p&gt;As before: two independent pointer chases that miss to DRAM, with N fillers after each miss. While the second miss fits behind the first one's fillers, the two overlap and an iteration costs one DRAM latency (about 90 ns). Once it doesn't fit, they serialize and the cost doubles. New fillers:&lt;/p&gt;
+
+      &lt;ul&gt;
+        &lt;li&gt;&lt;code&gt;str x9, [x4, #off]&lt;/code&gt;: a store to one of eight cache lines that stay in L1. A store writes no register, so the obvious thing for it to run out of is store-queue space. The window is far bigger.&lt;/li&gt;
+        &lt;li&gt;&lt;code&gt;ldr d17, [x4, #off]&lt;/code&gt;: a load from the same eight lines into an FP register. FP registers run out at about 880 on a Super core, so a smaller limit has to be something that counts loads.&lt;/li&gt;
+        &lt;li&gt;The same two with a nop between each pair. Nops didn't take window space in the last post, so if the limit counts loads or stores, the step should move to twice the N. If it counts instructions, it shouldn't move.&lt;/li&gt;
+      &lt;/ul&gt;
+
+      &lt;p&gt;Loads into integer registers turned out to be the wrong filler: on a Super core they step at about 400, the same place as the integer adds did, because the core runs out of integer registers before it runs out of load-queue entries.&lt;/p&gt;
+
+      &lt;h2&gt;Super cores&lt;/h2&gt;
+
+      &lt;div class="viz" id="lsq"&gt;
+        &lt;figure class="viz-chart"&gt;
+          &lt;div class="viz-legend"&gt;&lt;span style="--c: var(--s1)"&gt;store&lt;/span&gt;&lt;span style="--c: var(--s1)"&gt;store + nop&lt;/span&gt;&lt;span style="--c: var(--s2)"&gt;load&lt;/span&gt;&lt;span style="--c: var(--s2)"&gt;load + nop&lt;/span&gt;&lt;/div&gt;
+          &lt;svg role="img" aria-label="Nanoseconds per iteration against filler count N on the Super cores. All four lines start near 90 nanoseconds, one DRAM latency. The store line ramps from about 92 at N of 64 to 111 at 136, then jumps to about 190 at 138. The store-plus-nop line stays near 110 and jumps to about 197 between N of 274 and 276. The load line stays near 92 until about 240, ramps to about 161 at 484, then jumps to about 190 by 492 and keeps climbing to about 265 at 800. The load-plus-nop line stays near 93 until about 470, then rises in a straight line to about 190 near 990 with no sharp step."&gt;&lt;/svg&gt;
+          &lt;div class="viz-tip" hidden&gt;&lt;/div&gt;
+          &lt;figcaption&gt;Nanoseconds per loop iteration on the Super cores, median per N, against the number of fillers after each load. About 90 is two overlapped DRAM misses, about 190 is two serialized ones. Dashed lines have a nop between each load or store. Points with fewer than two usable runs are left out.&lt;/figcaption&gt;
+        &lt;/figure&gt;
+      &lt;/div&gt;
+
+      &lt;ul&gt;
+        &lt;li&gt;&lt;strong&gt;Stores:&lt;/strong&gt; 136 fit, 138 don't. With a nop between each store, 274 fit and 276 don't, which is 137 stores either way. About 137 stores.&lt;/li&gt;
+        &lt;li&gt;&lt;strong&gt;Loads:&lt;/strong&gt; 484 fillers fit, 488 don't. Counting the two pointer-chase loads, that's about 487 loads. With nops in between, the step moves out past 950, where the creep described below has already reached the serialized time, so there's no sharp edge left to see. That's consistent with a load count, but it's the weaker of the two checks.&lt;/li&gt;
+      &lt;/ul&gt;
+
+      &lt;h2&gt;The creep before the step&lt;/h2&gt;
+
+      &lt;p&gt;Each limit shows up twice: a gentle ramp that starts at about half the size, then the step at the full size. Stores ramp from N of 72 and step at 137. Loads ramp from about 250 and step at about 487. The integer adds in the last post had a small rise at about 210 before their step at 400, and the FP adds crept up from about 450 before stepping at 880. I called both unexplained. They're the same thing.&lt;/p&gt;
+
+      &lt;p&gt;The step is where load B no longer fits behind load A's N fillers. But the next iteration's load A also has to fit, behind B's fillers, while A's own fillers are still waiting to retire. Once both groups of fillers together, 2N, are more than the structure holds, the next A can only get in after the oldest group starts retiring, which happens when the first miss comes back. So it starts a little late, by an amount that grows with the overflow, and the iteration time rises in a straight line until the step. With a limit of Q, the ramp starts near Q/2 and the step comes at Q, and every filler type here fits that.&lt;/p&gt;
+
+      &lt;h2&gt;Performance and Efficiency cores&lt;/h2&gt;
+
+      &lt;p&gt;Same method, with the same core fingerprint as the earlier posts to sort runs by tier. Steering onto Performance cores is unreliable, so those rows are fewer and noisier. The Efficiency runs ran at about 1 GHz, which stretches the timings but not the counts, since N is in instructions.&lt;/p&gt;
+
+      &lt;ul&gt;
+        &lt;li&gt;&lt;strong&gt;Performance:&lt;/strong&gt; stores step between 100 and 104 (about 102), and between 204 and 220 with nops in between, which is the same count. Loads step between 216 and 224 (about 220), and between 432 and 448 with nops.&lt;/li&gt;
+        &lt;li&gt;&lt;strong&gt;Efficiency:&lt;/strong&gt; stores step between 56 and 60, and between 116 and 120 with nops (about 58). Loads step between 60 and 64, and between 124 and 128 with nops (about 64).&lt;/li&gt;
+      &lt;/ul&gt;
+
+      &lt;table class="compact"&gt;
+        &lt;thead&gt;&lt;tr&gt;&lt;th&gt;&lt;/th&gt;&lt;th&gt;Super&lt;/th&gt;&lt;th&gt;Performance&lt;/th&gt;&lt;th&gt;Efficiency&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;
+        &lt;tbody&gt;
+          &lt;tr&gt;&lt;td&gt;stores in flight&lt;/td&gt;&lt;td&gt;~137&lt;/td&gt;&lt;td&gt;~102&lt;/td&gt;&lt;td&gt;~58&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;loads in flight&lt;/td&gt;&lt;td&gt;~487&lt;/td&gt;&lt;td&gt;~220&lt;/td&gt;&lt;td&gt;~64&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;window (last post)&lt;/td&gt;&lt;td&gt;~1,050&lt;/td&gt;&lt;td&gt;&amp;gt;445&lt;/td&gt;&lt;td&gt;~185&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;integer results (last post)&lt;/td&gt;&lt;td&gt;~400&lt;/td&gt;&lt;td&gt;~210&lt;/td&gt;&lt;td&gt;&amp;gt;185&lt;/td&gt;&lt;/tr&gt;
+        &lt;/tbody&gt;
+      &lt;/table&gt;
+
+      &lt;h2&gt;What I'm unsure about&lt;/h2&gt;
+
+      &lt;ul&gt;
+        &lt;li&gt;&lt;strong&gt;The names.&lt;/strong&gt; "Load queue" and "store queue" are the natural reading of a limit that counts loads or stores and nothing else. I haven't shown that each is one structure rather than, say, a store queue plus something that tracks stores after they retire.&lt;/li&gt;
+        &lt;li&gt;&lt;strong&gt;The Super load count.&lt;/strong&gt; About 487 is large next to the 137 stores. It's clean in the plain test (484 fits, 488 doesn't), but the nop version only confirms it loosely, as described above.&lt;/li&gt;
+        &lt;li&gt;&lt;strong&gt;Hits only.&lt;/strong&gt; Every filler hits L1. Loads that miss might hold other resources (miss buffers) that run out much sooner, which this test doesn't touch.&lt;/li&gt;
+      &lt;/ul&gt;
+
+      &lt;p&gt;The takeaway: on a Super core, store-heavy code runs out of room after about 137 stores, long before the 1,050-instruction window fills. Loads get about 487 entries, but a load into an integer register hits the integer limit at about 400 first. The smaller cores scale down hard: an Efficiency core holds only about 58 stores and 64 loads.&lt;/p&gt;</content>
+  </entry>
+  <entry>
     <title>How many instructions can the M6 keep in flight?</title>
     <link href="https://wickkit.cc/posts/2026-10-12-how-many-instructions-can-the-m6-keep-in-flight.html"/>
     <id>https://wickkit.cc/posts/2026-10-12-how-many-instructions-can-the-m6-keep-in-flight.html</id>
