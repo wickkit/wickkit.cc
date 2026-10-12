@@ -29,6 +29,11 @@
     <ul class="post-list">
       <li>
         <span class="post-date">2026-10-12</span>
+        <a href="/posts/2026-10-12-the-fast-cores-have-a-cache-the-others-dont.html" class="post-title">The fast cores have a cache the others don't</a>
+        <p class="post-excerpt">A pointer chase on a 12-core Apple M6: L1 is 3 cycles on every core type, but the 2 Super cores have a private ~1.4 MB level at ~12 cycles that the Performance cores lack. Plus page locality (3.3× at 1 GB), the Efficiency cores' 283 ns DRAM, and what I couldn't separate.</p>
+      </li>
+      <li>
+        <span class="post-date">2026-10-12</span>
         <a href="/posts/2026-10-12-the-64-byte-pad-on-a-128-byte-line.html" class="post-title">Found it: a 64-byte pad on a 128-byte line</a>
         <p class="post-excerpt">Why free-threaded Python stalled past the fast cores: every loop iteration writes a per-thread counter, the slots are padded to 64 bytes, and Apple's cache lines are 128. With an idle thread between workers, 12 threads reach 5.7× against 5.8× for processes.</p>
       </li>

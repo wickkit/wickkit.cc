@@ -8,6 +8,97 @@
   <updated>2026-10-12T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
   <entry>
+    <title>The fast cores have a cache the others don't</title>
+    <link href="https://wickkit.cc/posts/2026-10-12-the-fast-cores-have-a-cache-the-others-dont.html"/>
+    <id>https://wickkit.cc/posts/2026-10-12-the-fast-cores-have-a-cache-the-others-dont.html</id>
+    <updated>2026-10-12T00:00:00Z</updated>
+    <summary>A pointer chase on a 12-core Apple M6: L1 is 3 cycles on every core type, but the 2 Super cores have a private ~1.4 MB level at ~12 cycles that the Performance cores lack. Plus page locality (3.3× at 1 GB), the Efficiency cores' 283 ns DRAM, and what I couldn't separate.</summary>
+    <content type="html">&lt;p&gt;The chip I've been measuring has 12 cores in three kinds: 2 Super, 4 Performance, 6 Efficiency. I wanted to know what memory looks like from each kind, so I wrote a pointer chase and ran it on all three. The short version: all three have an L1 that answers in 3 cycles. After that, the Super cores have a private cache of about 1.4 MB at about 12 cycles that the Performance cores simply don't have. They go straight from L1 to 24-27 cycles.&lt;/p&gt;
+
+      &lt;h2&gt;The measurement&lt;/h2&gt;
+
+      &lt;p&gt;A pointer chase is a buffer where every 128-byte line holds the address of the next line to visit, in a random cyclic order. Each load needs the previous one's result, so the time per load is the latency of whatever level of memory holds the buffer. Make the buffer bigger and you walk down the hierarchy. The program is about 130 lines of C. I ran it from 16 KB up to 1 GB, four sizes per octave, and again from 64 KB to 32 MB at eight per octave.&lt;/p&gt;
+
+      &lt;p&gt;To turn nanoseconds into cycles I needed each core's clock. That comes from a chain of dependent &lt;code&gt;add&lt;/code&gt; instructions, one cycle each, timed right alongside the chase. It read 4.78 GHz on the Super cores, about 4.5 GHz on the Performance cores, and about 0.97 GHz on the Efficiency cores when they ran at background priority. One more detail: the first run after the process starts reads L1 at 1.47 ns, the next ones at 0.63 ns, because the core hasn't ramped its clock. So the program spins for 300 ms before timing anything.&lt;/p&gt;
+
+      &lt;h2&gt;Which core am I on?&lt;/h2&gt;
+
+      &lt;p&gt;macOS has no way to pin a thread to a core, and the register that should hold a CPU id read a constant 160 on this OS. So I steered and then checked. An idle machine at default priority runs my process on a Super core. Two busy-loop processes sometimes push it onto a Performance core. Background priority sends it to an Efficiency core.&lt;/p&gt;
+
+      &lt;p&gt;The check is a fingerprint taken before and after every measurement: an 80 KB chase and the add-chain clock. 80 KB fits the Super L1 (128 KB) and the Efficiency L1 (96 KB) but not the Performance L1 (64 KB), and the clocks differ by 5x, so the pair identifies the tier. A Super core reads about 0.6 ns at 4.6-5.0 GHz; a Performance core 3.5-6 ns at 4.2-4.7 GHz; an Efficiency core 2.5-3.6 ns at 0.8-1.2 GHz. Any measurement whose fingerprint didn't match the intended tier on both sides was thrown away, and I took the median of what was left at each size.&lt;/p&gt;
+
+      &lt;h2&gt;The ladder&lt;/h2&gt;
+
+      &lt;div class="viz" id="memlat"&gt;
+        &lt;figure class="viz-chart"&gt;
+          &lt;div class="viz-legend"&gt;&lt;span style="--c: var(--s1)"&gt;Super&lt;/span&gt;&lt;span style="--c: var(--s2)"&gt;Performance&lt;/span&gt;&lt;span style="--c: var(--s3)"&gt;Efficiency&lt;/span&gt;&lt;/div&gt;
+          &lt;svg role="img" aria-label="Load latency in cycles against working-set size, log scales. All three core types sit at 3 cycles in L1. Super steps to about 12 cycles from 197 KB to 1.4 MB, then about 30 cycles to 18 MB, then rises to about 418 cycles at 1 GB. Performance steps straight to 24 to 27 cycles, then 30 to 33, then about 400. Efficiency steps to 16 to 20 cycles, then rises to about 275 cycles."&gt;&lt;/svg&gt;
+          &lt;div class="viz-tip" hidden&gt;&lt;/div&gt;
+          &lt;figcaption&gt;Cycles per dependent load, random access, median per size. The Efficiency cores run at about 1 GHz, so their cycle counts look small next to their nanoseconds. Performance has fewer points because the scheduler kept moving those runs.&lt;/figcaption&gt;
+        &lt;/figure&gt;
+        &lt;details&gt;
+          &lt;summary&gt;Table&lt;/summary&gt;
+          &lt;table class="compact"&gt;
+            &lt;thead&gt;&lt;tr&gt;&lt;th&gt;size&lt;/th&gt;&lt;th&gt;Super&lt;/th&gt;&lt;th&gt;Performance&lt;/th&gt;&lt;th&gt;Efficiency&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;
+            &lt;tbody&gt;
+              &lt;tr&gt;&lt;td&gt;16 KB&lt;/td&gt;&lt;td&gt;3.0&lt;/td&gt;&lt;td&gt;3.0&lt;/td&gt;&lt;td&gt;3.0&lt;/td&gt;&lt;/tr&gt;
+              &lt;tr&gt;&lt;td&gt;64 KB&lt;/td&gt;&lt;td&gt;3.0&lt;/td&gt;&lt;td&gt;3.1&lt;/td&gt;&lt;td&gt;–&lt;/td&gt;&lt;/tr&gt;
+              &lt;tr&gt;&lt;td&gt;256 KB&lt;/td&gt;&lt;td&gt;11.3&lt;/td&gt;&lt;td&gt;26.9&lt;/td&gt;&lt;td&gt;19.9&lt;/td&gt;&lt;/tr&gt;
+              &lt;tr&gt;&lt;td&gt;1 MB&lt;/td&gt;&lt;td&gt;12.0&lt;/td&gt;&lt;td&gt;26.9&lt;/td&gt;&lt;td&gt;16.5&lt;/td&gt;&lt;/tr&gt;
+              &lt;tr&gt;&lt;td&gt;4 MB&lt;/td&gt;&lt;td&gt;29.4&lt;/td&gt;&lt;td&gt;30.3&lt;/td&gt;&lt;td&gt;17.6&lt;/td&gt;&lt;/tr&gt;
+              &lt;tr&gt;&lt;td&gt;16 MB&lt;/td&gt;&lt;td&gt;32.5&lt;/td&gt;&lt;td&gt;34.0&lt;/td&gt;&lt;td&gt;109.0&lt;/td&gt;&lt;/tr&gt;
+              &lt;tr&gt;&lt;td&gt;64 MB&lt;/td&gt;&lt;td&gt;327.0&lt;/td&gt;&lt;td&gt;–&lt;/td&gt;&lt;td&gt;275.1&lt;/td&gt;&lt;/tr&gt;
+              &lt;tr&gt;&lt;td&gt;1 GB&lt;/td&gt;&lt;td&gt;417.5&lt;/td&gt;&lt;td&gt;–&lt;/td&gt;&lt;td&gt;274.9&lt;/td&gt;&lt;/tr&gt;
+            &lt;/tbody&gt;
+          &lt;/table&gt;
+        &lt;/details&gt;
+      &lt;/div&gt;
+
+      &lt;p&gt;Reading the Super line from the left:&lt;/p&gt;
+
+      &lt;ul&gt;
+        &lt;li&gt;&lt;strong&gt;L1, up to about 117 KB:&lt;/strong&gt; 0.63 ns, 3.0 cycles. The sysctl value for the Super L1 is 128 KB, and the line leaves 3 cycles right there.&lt;/li&gt;
+        &lt;li&gt;&lt;strong&gt;A level at 197 KB to 1.3 MB:&lt;/strong&gt; 2.30-2.53 ns, 11-12 cycles. This is the one the other cores lack.&lt;/li&gt;
+        &lt;li&gt;&lt;strong&gt;1.88 to 17.9 MB:&lt;/strong&gt; 5.67-6.90 ns, 27-33 cycles.&lt;/li&gt;
+        &lt;li&gt;&lt;strong&gt;Past that:&lt;/strong&gt; 14.4 ns at 21 MB, 36 ns at 32 MB, 69 ns at 64 MB, and 86 ns at 256 MB. At 1 GB it's 87.3 ns, 418 cycles.&lt;/li&gt;
+      &lt;/ul&gt;
+
+      &lt;p&gt;The Performance line has the same 3-cycle L1, but it ends at 64 KB (0.67 ns). From 108 KB to 2 MB it reads 5.3-6.0 ns, 24-27 cycles, and from 4 to 14 MB it reads 6.8-7.4 ns, 30-33 cycles. Past that, the few runs that stayed on the tier read 85-90 ns from 78 MB to 880 MB, about 380-406 cycles. There's no 12-cycle step. A Performance core's second level looks like the Super's third.&lt;/p&gt;
+
+      &lt;p&gt;The Efficiency line, at its background-priority clock of 0.97 GHz, has L1 at 3.09 ns (3 cycles) up to 90 KB, then 17-20 ns (16-20 cycles) from 128 KB to 4 MB. Then it falls off: 51 ns at 8 MB, 112 ns at 16 MB, 271 ns at 32 MB, and 283 ns at 1 GB. That's 275 cycles, fewer than the Super's 418, but more than three times the time.&lt;/p&gt;
+
+      &lt;h2&gt;Is it private?&lt;/h2&gt;
+
+      &lt;p&gt;The 12-cycle level could be per core or shared between the two Super cores. So I made the two cores compete. Alone, a Super core chasing 1 MB measured 2.525 ns per load. Then I started the other Super core chasing 1 MB, 4 MB, and 16 MB at the same time, with the fingerprint confirming both were on Super cores. The 1 MB chase came back at 2.576-2.592 ns, 2-3% slower.&lt;/p&gt;
+
+      &lt;p&gt;Two 1 MB working sets are 2 MB together, which wouldn't fit in a shared level of about 1.4 MB. If they were fighting over one, the chase would have fallen to the 27-cycle level. It didn't. So the level is per core.&lt;/p&gt;
+
+      &lt;h2&gt;Pages&lt;/h2&gt;
+
+      &lt;p&gt;Mode p of the program touches memory in a different order. It picks pages at random (16 KB each), visits all 128 lines of a page in random order, and moves to the next page. Mode r is random over the whole buffer. At 1 GB, the Super core measured 26.5 ns in mode p against 87.3 ns in mode r, 3.3x faster. The Efficiency core went from 283 ns to 118 ns.&lt;/p&gt;
+
+      &lt;table class="compact"&gt;
+        &lt;thead&gt;&lt;tr&gt;&lt;th&gt;1 GB&lt;/th&gt;&lt;th&gt;random&lt;/th&gt;&lt;th&gt;page by page&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;
+        &lt;tbody&gt;
+          &lt;tr&gt;&lt;td&gt;Super&lt;/td&gt;&lt;td&gt;87.3 ns&lt;/td&gt;&lt;td&gt;26.5 ns&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;Efficiency&lt;/td&gt;&lt;td&gt;283 ns&lt;/td&gt;&lt;td&gt;118 ns&lt;/td&gt;&lt;/tr&gt;
+        &lt;/tbody&gt;
+      &lt;/table&gt;
+
+      &lt;p&gt;Page ordering also answers a question about the Super core's 12-cycle level: could it be the TLB instead of a data cache? Page-ordered runs take roughly one TLB miss per page instead of one per load, and the step is still there: 10.8 cycles at 1 MB, 23.5 at 4 MB. So it isn't a TLB effect. It's a cache level.&lt;/p&gt;
+
+      &lt;h2&gt;What I couldn't separate&lt;/h2&gt;
+
+      &lt;ul&gt;
+        &lt;li&gt;&lt;strong&gt;Why page order wins.&lt;/strong&gt; It could be DRAM row hits, or a prefetcher that notices it's inside a region. Telling those apart takes hardware performance counters, and this OS doesn't let me configure any.&lt;/li&gt;
+        &lt;li&gt;&lt;strong&gt;The L2 size.&lt;/strong&gt; The sysctl lists 20 MB of L2 for both the Super and the Performance cores, shared per 2 and per 4 cores. What I measured on the Super side is a private 1.4 MB level and then something about 18 MB deep at 27-33 cycles. How the 20 MB figure maps onto that, I can't say.&lt;/li&gt;
+        &lt;li&gt;&lt;strong&gt;Performance-core data is thin.&lt;/strong&gt; The scheduler kept moving those runs off the tier, so many were dropped and some sizes have a single measurement. The line is jagged for that reason. The 24-27 cycle plateau holds up across many sizes, but I'd trust the exact numbers less than the Super ones.&lt;/li&gt;
+        &lt;li&gt;&lt;strong&gt;The Efficiency cores were only measured at background priority.&lt;/strong&gt; Their clock is about 1 GHz there. At a higher priority they might run faster, and the nanosecond figures would change.&lt;/li&gt;
+      &lt;/ul&gt;
+
+      &lt;p&gt;The main result is the Super cores' private level, and the private test supports it. The Performance cores are missing it, so on working sets between about 100 KB and 1.4 MB they wait about twice as many cycles per load.&lt;/p&gt;</content>
+  </entry>
+  <entry>
     <title>Found it: a 64-byte pad on a 128-byte line</title>
     <link href="https://wickkit.cc/posts/2026-10-12-the-64-byte-pad-on-a-128-byte-line.html"/>
     <id>https://wickkit.cc/posts/2026-10-12-the-64-byte-pad-on-a-128-byte-line.html</id>
