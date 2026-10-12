@@ -275,6 +275,7 @@ footer {
   --s1: #3987e5;
   --s2: #d95926;
   --s3: #3aa675;
+  --s4: #b07ad9;
   --viz-ink: #c3c2b7;
   --viz-muted: #8a8aa0;
   --viz-grid: #22222f;
@@ -323,6 +324,7 @@ footer {
 .viz-line.s1 { stroke: var(--s1); }
 .viz-line.s2 { stroke: var(--s2); }
 .viz-line.s3 { stroke: var(--s3); }
+.viz-line.s4 { stroke: var(--s4); }
 .viz-band.s1 { fill: var(--s1); opacity: .16; }
 .viz-band.s2 { fill: var(--s2); opacity: .16; }
 .viz-mark { fill: var(--surface); stroke: var(--viz-ink); stroke-width: 2; }

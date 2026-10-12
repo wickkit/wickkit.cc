@@ -8,6 +8,62 @@
   <updated>2026-10-12T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
   <entry>
+    <title>How fast does the M6 fetch code?</title>
+    <link href="https://wickkit.cc/posts/2026-10-12-how-fast-does-the-m6-fetch-code.html"/>
+    <id>https://wickkit.cc/posts/2026-10-12-how-fast-does-the-m6-fetch-code.html</id>
+    <updated>2026-10-12T00:00:00Z</updated>
+    <summary>Straight-line code runs at 10, 7 and 6 instructions per cycle on the three core tiers, until the loop outgrows a 192, 128 or roughly 160 KB instruction cache. A Super core follows two taken jumps per cycle, but only for a few hundred of them.</summary>
+    <content type="html">&lt;p&gt;The last few posts were all about the back of the core: &lt;a href="https://wickkit.cc/posts/2026-10-12-how-many-cache-misses-can-an-m6-core-wait-on.html"&gt;how many misses it can overlap&lt;/a&gt;, &lt;a href="https://wickkit.cc/posts/2026-10-12-how-many-instructions-can-the-m6-keep-in-flight.html"&gt;how many instructions it can hold in flight&lt;/a&gt;. This one looks at the front, how fast the core can pull instructions in to begin with. Straight-line code runs at 10 instructions per cycle on a Super core, 7 on a Performance core and 6 on an Efficiency core, but only while the loop fits in the instruction cache: 192 KB on Super, 128 KB on Performance, roughly 160 KB on Efficiency. Code made only of jumps is a different story. A Super core retires two taken branches per cycle for about 500 of them, one per cycle for a few thousand, and then slows to about three cycles each.&lt;/p&gt;
+
+      &lt;h2&gt;The test&lt;/h2&gt;
+
+      &lt;p&gt;Two kinds of loop, generated at run time. The first is N &lt;code&gt;nop&lt;/code&gt; instructions in a row, then a return to the top. A nop does no work, so instructions per cycle is how fast the front end can deliver them, and the loop's size in bytes (4 per instruction) is its code footprint. The second is N unconditional &lt;code&gt;b&lt;/code&gt; instructions, each jumping S bytes ahead to the next one, with the last jumping back to the start. Every instruction is a taken branch. I use S of 4, 16, 64 and 128 bytes, and time cycles per taken branch against N.&lt;/p&gt;
+
+      &lt;p&gt;Each row is sorted into a tier by the same core fingerprint as the earlier posts, checked before and after. The Efficiency cores ran at about 1 GHz and about 2.9 GHz; the chart uses the 1 GHz rows because there are more of them and they are cleaner. All of these are medians over repeated runs.&lt;/p&gt;
+
+      &lt;h2&gt;Full speed until the instruction cache runs out&lt;/h2&gt;
+
+      &lt;div class="viz" id="fe"&gt;
+        &lt;div class="viz-presets"&gt;
+          &lt;button type="button" data-mode="nop" aria-pressed="true"&gt;straight-line nops&lt;/button&gt;
+          &lt;button type="button" data-mode="br4" aria-pressed="false"&gt;taken branches&lt;/button&gt;
+          &lt;button type="button" data-mode="sp" aria-pressed="false"&gt;branch spacing (Super)&lt;/button&gt;
+        &lt;/div&gt;
+        &lt;figure class="viz-chart"&gt;
+          &lt;div class="viz-legend"&gt;&lt;span style="--c: var(--s1)"&gt;Super&lt;/span&gt;&lt;span style="--c: var(--s2)"&gt;Performance&lt;/span&gt;&lt;span style="--c: var(--s3)"&gt;Efficiency (1 GHz)&lt;/span&gt;&lt;/div&gt;
+          &lt;svg role="img" aria-label="Three views of front-end speed. Straight-line nops: instructions per cycle against loop size on a log axis. Super holds 10 until 192 KB, Performance holds 7 until 128 KB and Efficiency holds 6 until about 155 KB, then each drops to between 1.4 and 2.9 and falls further past 8 MB. Taken branches: cycles per taken branch against the number of branches, where Super takes 0.5 cycles up to about 512 branches, about 1 up to about 7 thousand with a bump to 1.7 near 3 thousand and about 3 beyond 32 thousand, Performance takes about 1 and then 2 to 3.5, and Efficiency takes 1 up to 4096 and about 3 beyond. Branch spacing on Super: the half-cycle zone ends near 512 branches at 4 bytes apart, 200 at 16 bytes, 55 at 64 bytes and 26 at 128 bytes, and the slow end rises from 3 cycles at 4 bytes to 14 cycles at 128 bytes."&gt;&lt;/svg&gt;
+          &lt;div class="viz-tip" hidden&gt;&lt;/div&gt;
+          &lt;figcaption&gt;Median per size over runs whose fingerprint matched the tier, log x axis. Nops: instructions per cycle against loop size. Branches: cycles per taken branch against the number of branches in the loop, log y axis. Hover for values.&lt;/figcaption&gt;
+        &lt;/figure&gt;
+      &lt;/div&gt;
+
+      &lt;p&gt;Start with the first view. A loop of nops runs at a flat ceiling: 10.0 instructions per cycle on a Super core, 7.0 on a Performance core, 6.0 on an Efficiency core. Then the loop outgrows the L1 instruction cache and the line falls. On Super it holds 10 up to 192 KB and is down to 8.9 at 193 KB, then 5.6 at 201 KB. On Performance it holds 7 to 128 KB and is already at 5.4 at 130 KB. The Efficiency edge is softer. It holds 6 to about 155 KB, is at 4.3 by 169 KB and gone (3.1) by 185 KB. That isn't a clean power of two, so I'd say roughly 160 KB and leave it there. Apple hasn't stated these sizes and I'm only reporting where the loops slow down.&lt;/p&gt;
+
+      &lt;p&gt;Past the edge, code is being fed from L2. Super settles at 2.6 to 2.8 instructions per cycle, about 11 bytes per cycle. Performance gets 1.5, about 6 bytes per cycle. Efficiency at 1 GHz gets about 2.7. All three fall again beyond roughly 6 to 12 MB, where the loop no longer fits in L2 either; at 16 MB Super is at 1.8 instructions per cycle and Performance at 0.8. So a loop that spills out of the instruction cache loses about 73 percent of its speed on Super (10 to 2.7) and about 79 percent on Performance (7 to 1.5).&lt;/p&gt;
+
+      &lt;h2&gt;Taken branches&lt;/h2&gt;
+
+      &lt;p&gt;Switch to the second view. With every instruction a jump four bytes ahead, a Super core runs two taken branches per cycle: 0.50 to 0.53 cycles each, up to about 512 branches. That's more than one per cycle, so the front end can follow two jumps in a single cycle. Beyond 512 it slows to about 1 cycle each by 1K branches. Between about 2K and 3.5K there is a bump to roughly 1.7 cycles that I can't explain; by 5K to 7K it is back near 1. Then it climbs to 2.1 cycles at 16K and about 3 by 32K and beyond (3.4 at 64K).&lt;/p&gt;
+
+      &lt;p&gt;The Performance core manages one per cycle (0.95 to 1.05) up to about 512 branches, then 2 to 3.5, and its rows are noisier. The Efficiency core does one taken branch per cycle all the way to 4096 branches, then passes through 1.8 at 5.8K and 2.3 at 8K to about 3 cycles each. That is about the same reach as Super's one-per-cycle level, which, apart from the bump, lasts to roughly 7K; Super simply adds a faster two-per-cycle level in front of it for the first few hundred.&lt;/p&gt;
+
+      &lt;h2&gt;Spacing changes the answer&lt;/h2&gt;
+
+      &lt;p&gt;The third view keeps only the Super core and moves the branches further apart. The two-per-cycle zone shrinks as they spread out: about 512 branches at 4 bytes apart, about 200 at 16 bytes, about 55 at 64 bytes and about 26 at 128 bytes. The slow end gets worse too, from about 3 cycles per branch at 4 bytes to 4 at 16 bytes, 8.5 at 64 and 13.7 at 128. At 128 bytes apart each branch sits in its own cache line, so that last number looks like one line fetched from L2 per branch, with nothing to overlap it.&lt;/p&gt;
+
+      &lt;p&gt;Here is an inference, not a measurement. At 16 bytes and wider, the half-cycle zone covers roughly 25 to 30 lines of 128 bytes of code (200 branches at 16 bytes is 3.2 KB, 55 at 64 bytes is 3.5 KB, 26 at 128 bytes is 3.3 KB). That is close to constant, so the fastest level looks limited by how many distinct code lines it can track, not just how many branches. At 4 bytes apart the 512 branches fit in only 16 lines, so some other limit, perhaps on branch count, applies there. I haven't separated the two.&lt;/p&gt;
+
+      &lt;h2&gt;What I didn't show&lt;/h2&gt;
+
+      &lt;ul&gt;
+        &lt;li&gt;&lt;strong&gt;What structures these are.&lt;/strong&gt; The zones suggest a small, fast branch-target structure and bigger, slower ones behind it, but I measured speed against size, not the structures themselves. The sizes where it slows down are results; the explanations above are guesses.&lt;/li&gt;
+        &lt;li&gt;&lt;strong&gt;Precise edges for the Performance core's branches, or the 2.9 GHz Efficiency rows.&lt;/strong&gt; They have fewer clean rows, and I left the wider-spacing Performance and Efficiency series off the chart. The 2.9 GHz rows look like the 1 GHz ones, but I wouldn't quote precise edges from either.&lt;/li&gt;
+        &lt;li&gt;&lt;strong&gt;Real code.&lt;/strong&gt; Nops and unconditional jumps are the easiest thing for a front end. They say what the hardware can do at its best, not what typical code gets, since conditional branches, calls and indirect jumps add their own limits. The Performance rows are also the noisiest of the three.&lt;/li&gt;
+      &lt;/ul&gt;
+
+      &lt;p&gt;The takeaway: a Super core can deliver 10 instructions a cycle, and it can do two taken branches in a cycle, but only for code that fits: 192 KB for straight-line code, and a few hundred branches for jumps. Past that, Super and Efficiency both hold one jump per cycle for a few thousand branches; the Performance core drops off after about 512. For what happens after instructions arrive, see &lt;a href="https://wickkit.cc/posts/2026-10-12-how-many-instructions-can-the-m6-keep-in-flight.html"&gt;the instruction window post&lt;/a&gt;, and for why the fast cores' caches differ from the others, &lt;a href="https://wickkit.cc/posts/2026-10-12-the-fast-cores-have-a-cache-the-others-dont.html"&gt;the cache post&lt;/a&gt;.&lt;/p&gt;</content>
+  </entry>
+  <entry>
     <title>How many cache misses can an M6 core wait on?</title>
     <link href="https://wickkit.cc/posts/2026-10-12-how-many-cache-misses-can-an-m6-core-wait-on.html"/>
     <id>https://wickkit.cc/posts/2026-10-12-how-many-cache-misses-can-an-m6-core-wait-on.html</id>
