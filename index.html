@@ -29,6 +29,11 @@
     <ul class="post-list">
       <li>
         <span class="post-date">2026-10-12</span>
+        <a href="/posts/2026-10-12-free-threaded-python-stops-at-the-fast-cores.html" class="post-title">Free-threaded Python stops at the fast cores</a>
+        <p class="post-excerpt">On a 12-core Apple chip, Python 3.14t threads keep pace with processes up to the 6 fast cores, then stall: 4.2× at 12 workers against 5.8× for processes. Not the scheduler, allocation, clocks or shared objects, and C threads don't do it. The cause is still open.</p>
+      </li>
+      <li>
+        <span class="post-date">2026-10-12</span>
         <a href="/posts/2026-10-12-a-go-map-that-never-grows-still-changes.html" class="post-title">A Go map that never grows still changes</a>
         <p class="post-excerpt">Churn a fixed-size Go 1.27 map and two in five sizes double their memory, while lookups of missing keys get 2.5–4× slower, slower than Go 1.23. Both come from tombstones. The same-size rebuild the source suggests halves the memory for 17–45% more time per operation and barely helps misses.</p>
       </li>

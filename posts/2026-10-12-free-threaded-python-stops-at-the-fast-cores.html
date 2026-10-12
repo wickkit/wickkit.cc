@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Free-threaded Python stops at the fast cores — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/tools.html">tools</a>
+      <a href="/den.html">den</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+
+    <article>
+      <h1>Free-threaded Python stops at the fast cores</h1>
+      <div class="meta">2026-10-12 · Kit Wickham</div>
+
+      <p>Python 3.14 has an official build without the GIL, <code>python3.14t</code>, so plain Python threads can run on several cores at once. I ran a CPU-bound loop on an Apple chip with 12 cores in three speed tiers. Threads kept pace with separate processes up to 6 workers, which is the number of fast cores. Past that, processes kept speeding up and threads didn't: at 12 workers, processes reached 5.8× and threads 4.2×. I ruled out a long list of causes, including the OS scheduler, but I haven't found the real one.</p>
+
+      <h2>The chip and the test</h2>
+
+      <p>macOS reports the 12 cores as three tiers: 2 "Super", 4 "Performance" and 6 "Efficiency". The test loop is <code>s += i * i % 7</code> over a <code>range</code>, 600 million iterations in total, split evenly across the workers. Each setup ran three times and I kept the fastest. "Threads" means one free-threaded process with N threads. "Processes" means N forked copies of the same free-threaded interpreter, one thread each. With one worker both took 13.2 seconds.</p>
+
+      <div class="viz" id="ft" data-speedup='{"threads":[1.0,1.78,2.42,3.03,3.59,3.95,3.8,3.78,3.83,3.86,4.14,4.15],"procs":[1.0,1.77,2.43,3.04,3.51,4.01,4.23,4.52,4.88,5.18,5.58,5.79]}'>
+        <figure class="viz-chart">
+          <div class="viz-legend"><span style="--c: var(--s1)">processes</span><span style="--c: var(--s2)">threads</span></div>
+          <svg role="img" aria-label="Speedup against number of workers. Processes and threads track each other up to 6 workers, about 4 times. After that processes climb to 5.8 times at 12 workers while threads stay near 4."></svg>
+          <div class="viz-tip" hidden></div>
+          <figcaption>Speedup over one worker, best of three runs. The dashed line marks where the 6 fast cores run out.</figcaption>
+        </figure>
+        <details>
+          <summary>Table</summary>
+          <table class="compact">
+            <thead><tr><th>workers</th><th>processes</th><th>threads</th></tr></thead>
+            <tbody>
+              <tr><td>1</td><td>1.00×</td><td>1.00×</td></tr>
+              <tr><td>2</td><td>1.77×</td><td>1.78×</td></tr>
+              <tr><td>4</td><td>3.04×</td><td>3.03×</td></tr>
+              <tr><td>6</td><td>4.01×</td><td>3.95×</td></tr>
+              <tr><td>8</td><td>4.52×</td><td>3.78×</td></tr>
+              <tr><td>10</td><td>5.18×</td><td>3.86×</td></tr>
+              <tr><td>12</td><td>5.79×</td><td>4.15×</td></tr>
+            </tbody>
+          </table>
+        </details>
+      </div>
+
+      <p>Up to 6 workers the two lines are on top of each other. That part is good news for free-threading: on fast cores, a thread is as good as a process. At 12 workers, threads took 3.17 seconds and processes 2.27, so processes did 40% more work in the same time. Threads at 7 to 10 workers were slightly <em>slower</em> than at 6.</p>
+
+      <p>The ceiling itself is hardware, not Python. A C loop scales to 4.5× on 6 threads and 5.6× on 12, because the fast cores slow down when they're all busy and the efficiency cores are slower to begin with. Python processes get the same kind of help from the efficiency cores. Python threads in one process don't.</p>
+
+      <h2>What it isn't</h2>
+
+      <p>The obvious suspects each got their own test:</p>
+
+      <ul>
+        <li><strong>The OS scheduler.</strong> The same C loop as 12 threads or as 12 processes takes the same time (5.87 vs 5.79 seconds). So do a C loop shaped like an interpreter (indirect calls through a table, reads and writes to private memory) and one with 1.9 MB of distinct functions to fill the instruction caches. Threads and processes stay within 7% of each other for both.</li>
+        <li><strong>Idle cores or low clocks.</strong> During a 12-worker run, macOS's <code>powermetrics</code> showed all 12 cores close to 100% busy in both setups, at the same efficiency-cluster clock, with the fast cluster a little <em>higher</em> for threads. The threads are running; they get less done per cycle. Measured with <code>time</code>, they used about a third more CPU time for the same work, almost none of it in the kernel.</li>
+        <li><strong>C code in threads.</strong> Hashing with SHA-256 from 12 threads runs as fast as 12 processes (0.135 vs 0.134 seconds). The slowdown showed up in every bytecode loop I tried and in none of the C code.</li>
+        <li><strong>Memory allocation.</strong> The test loop allocates a new integer every step. A loop that only touches cached small integers has the same gap, and so does an empty <code>for _ in repeat(None, n): pass</code>: 0.67 seconds as 12 threads, 0.46 as 12 processes, and 0.60 for just 6 threads.</li>
+        <li><strong>Shared objects.</strong> Giving each thread its own freshly compiled copy of the function changed nothing. Neither did switching off 3.14's per-thread copies of the bytecode (<code>PYTHON_TLBC=0</code>), or making the loop yield a thread-owned object or a small integer instead of <code>None</code>.</li>
+        <li><strong>A 3.14 regression.</strong> Python 3.13t has the same shape: 0.26 seconds on 6 threads, 0.28 on 12, 0.19 on 12 processes.</li>
+      </ul>
+
+      <h2>What it needs</h2>
+
+      <p>The gap needs both kinds of core. When I pushed a 6-thread run onto the efficiency cores only (macOS's <code>taskpolicy -b</code>), threads and processes tied (0.94 vs 0.97 seconds). On the 6 fast cores they tie as well, as the chart shows. It's when one process's threads run on fast and slow cores at the same time that each thread does less. Splitting the 12 workers into more processes helps step by step: 1 process of 12 threads took 2.13 seconds, 2 of 6 took 2.04, 3 of 4 took 1.81, and 12 of 1 took 1.49 (a smaller run of the same loop).</p>
+
+      <p>That pattern looks like something the interpreter writes from every thread into memory that the other threads read: cheap to share between the fast cores, expensive once the efficiency cores are involved. CPython does pad some per-thread state to 64 bytes against false sharing, and this chip's cache lines are 128, but the structures I could check don't explain it. The per-thread interpreter states, for example, sit 16 KB apart. A profile of the empty loop shows the same few bytecode handlers in both setups, just slower in threads. Finding the shared line would take hardware counters, which I couldn't read here. So: measured effect, unknown cause.</p>
+
+      <h2>What to do about it</h2>
+
+      <p>On a Mac with efficiency cores, a free-threaded pool for CPU-bound Python should stop at the number of fast cores. <code>sysctl hw.perflevel0.physicalcpu hw.perflevel1.physicalcpu</code> gives the counts per tier; here that's 2 + 4. If you need more than that, use processes. Processes on the free-threaded build cost nothing extra: 12 of them finished in 1.49 seconds, against 1.54 on the regular GIL build.</p>
+
+      <p>Free-threading still does what it promises up to that point: 4× on 6 threads, where the GIL build gets 1×. The cores past that point are where a process pool still wins.</p>
+    </article>
+  </main>
+  <script src="/js/ft-ui.js"></script>
+</body>
+</html>
