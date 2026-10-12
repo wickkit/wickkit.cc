@@ -8,6 +8,107 @@
   <updated>2026-10-12T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
   <entry>
+    <title>How many instructions can the M6 keep in flight?</title>
+    <link href="https://wickkit.cc/posts/2026-10-12-how-many-instructions-can-the-m6-keep-in-flight.html"/>
+    <id>https://wickkit.cc/posts/2026-10-12-how-many-instructions-can-the-m6-keep-in-flight.html</id>
+    <updated>2026-10-12T00:00:00Z</updated>
+    <summary>Two DRAM misses with N fillers between them: a Super core holds about 1,050 instructions in flight, but runs out at about 400 integer results or 880 floating-point ones first. An Efficiency core's window is about 185.</summary>
+    <content type="html">&lt;p&gt;A core doesn't run instructions strictly in order. It looks ahead through a window of instructions that have been fetched but not finished, and runs whatever is ready. How big that window is decides how much a slow load can hide. I measured it on the same chip as the &lt;a href="https://wickkit.cc/posts/2026-10-12-the-fast-cores-have-a-cache-the-others-dont.html"&gt;cache&lt;/a&gt; and &lt;a href="https://wickkit.cc/posts/2026-10-12-how-long-a-pattern-can-the-m6-remember.html"&gt;branch predictor&lt;/a&gt; posts. The short version: a Super core can have about 1,050 instructions in flight at once. Inside that, it runs out of integer results at about 400 and floating-point results at about 880, whichever the code hits first, and nops don't seem to count. An Efficiency core's window is about 185, so the Super window is roughly 5.7 times bigger.&lt;/p&gt;
+
+      &lt;h2&gt;The measurement&lt;/h2&gt;
+
+      &lt;p&gt;The idea is &lt;a href="https://blog.stuffedcow.net/2013/05/measuring-rob-capacity/"&gt;Henry Wong's&lt;/a&gt;; the setup here is mine. The program generates a loop at run time with two independent random pointer chases over 256 MB each, so every load misses to DRAM, about 90 ns. Each iteration is: load A, N filler instructions, load B, N more filler instructions. If load B fits in the window behind load A's fillers, the two misses overlap and an iteration costs about one DRAM latency. Once B no longer fits, the core can't see it until A retires, the misses run one after the other, and the iteration costs about two. The N where the time jumps is the size of whatever resource the filler uses up.&lt;/p&gt;
+
+      &lt;p&gt;The fillers:&lt;/p&gt;
+
+      &lt;ul&gt;
+        &lt;li&gt;&lt;code&gt;add x7, x8, #1&lt;/code&gt; needs an integer rename register for its result.&lt;/li&gt;
+        &lt;li&gt;&lt;code&gt;fadd d3, d4, d5&lt;/code&gt; needs a floating-point one.&lt;/li&gt;
+        &lt;li&gt;&lt;code&gt;nop&lt;/code&gt; needs no result register.&lt;/li&gt;
+        &lt;li&gt;Mixes in a repeating pattern: &lt;code&gt;mix31&lt;/code&gt; is 3 adds to 1 fadd, &lt;code&gt;mix13&lt;/code&gt; is 1 add to 3 fadds, &lt;code&gt;mix12&lt;/code&gt; is add, fadd, fadd, &lt;code&gt;mix11&lt;/code&gt; alternates add and fadd, and &lt;code&gt;addnop&lt;/code&gt; alternates add and nop.&lt;/li&gt;
+      &lt;/ul&gt;
+
+      &lt;p&gt;macOS can't pin a thread to a core, so I used the same check as the other posts. Every measurement is bracketed by an 80 KB pointer chase and a dependent-add clock reading, which together identify the tier. Rows whose before and after fingerprints disagreed were dropped, the rest were binned by the tier they actually ran on, and I took the median per N. The Super rows ran at about 4.4 GHz and the Efficiency rows at about 2.7-2.8 GHz.&lt;/p&gt;
+
+      &lt;h2&gt;Super cores&lt;/h2&gt;
+
+      &lt;div class="viz" id="rob"&gt;
+        &lt;figure class="viz-chart"&gt;
+          &lt;div class="viz-legend"&gt;&lt;span style="--c: var(--s1)"&gt;add&lt;/span&gt;&lt;span style="--c: var(--s1)"&gt;mix31&lt;/span&gt;&lt;span style="--c: var(--s2)"&gt;fadd&lt;/span&gt;&lt;span style="--c: var(--s2)"&gt;mix13&lt;/span&gt;&lt;span style="--c: var(--s3)"&gt;nop&lt;/span&gt;&lt;/div&gt;
+          &lt;svg role="img" aria-label="Nanoseconds per iteration against filler count N on the Super cores. All lines start near 90 to 95 nanoseconds, one DRAM latency. The add line jumps to about 190 between N of 384 and 416. The mix31 line jumps to about 195 between 512 and 544. The fadd line jumps to about 190 between 880 and 912. The mix13 line jumps to about 210 between 1024 and 1056. The nop line stays at about 90 until N of about 1650, then rises in a straight line to 110 at 2000."&gt;&lt;/svg&gt;
+          &lt;div class="viz-tip" hidden&gt;&lt;/div&gt;
+          &lt;figcaption&gt;Nanoseconds per loop iteration on the Super cores, median per N, against the number of fillers after each load. About 90 is two overlapped DRAM misses, about 190 is two serialized ones. Dashed lines are the mixes. Points with fewer than two usable runs are left out.&lt;/figcaption&gt;
+        &lt;/figure&gt;
+        &lt;details&gt;
+          &lt;summary&gt;Table&lt;/summary&gt;
+          &lt;table class="compact"&gt;
+            &lt;thead&gt;&lt;tr&gt;&lt;th&gt;filler&lt;/th&gt;&lt;th&gt;before step&lt;/th&gt;&lt;th&gt;after step&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;
+            &lt;tbody&gt;
+              &lt;tr&gt;&lt;td&gt;add&lt;/td&gt;&lt;td&gt;N=384: 107.6 ns&lt;/td&gt;&lt;td&gt;N=416: 189.5 ns&lt;/td&gt;&lt;/tr&gt;
+              &lt;tr&gt;&lt;td&gt;mix31&lt;/td&gt;&lt;td&gt;N=512: 116.3 ns&lt;/td&gt;&lt;td&gt;N=544: 194.4 ns&lt;/td&gt;&lt;/tr&gt;
+              &lt;tr&gt;&lt;td&gt;mix11&lt;/td&gt;&lt;td&gt;N=784: 125.6 ns&lt;/td&gt;&lt;td&gt;N=816: 197.6 ns&lt;/td&gt;&lt;/tr&gt;
+              &lt;tr&gt;&lt;td&gt;addnop&lt;/td&gt;&lt;td&gt;N=784: 130.0 ns&lt;/td&gt;&lt;td&gt;N=816: 197.9 ns&lt;/td&gt;&lt;/tr&gt;
+              &lt;tr&gt;&lt;td&gt;fadd&lt;/td&gt;&lt;td&gt;N=880: 135.4 ns&lt;/td&gt;&lt;td&gt;N=912: 192.6 ns&lt;/td&gt;&lt;/tr&gt;
+              &lt;tr&gt;&lt;td&gt;mix12&lt;/td&gt;&lt;td&gt;N=1024: 124.1 ns&lt;/td&gt;&lt;td&gt;N=1056: 191.3 ns&lt;/td&gt;&lt;/tr&gt;
+              &lt;tr&gt;&lt;td&gt;mix13&lt;/td&gt;&lt;td&gt;N=1024: 140.2 ns&lt;/td&gt;&lt;td&gt;N=1056: 210.5 ns&lt;/td&gt;&lt;/tr&gt;
+              &lt;tr&gt;&lt;td&gt;nop&lt;/td&gt;&lt;td&gt;N=1650: 93.2 ns&lt;/td&gt;&lt;td&gt;N=2000: 110.3 ns (no step)&lt;/td&gt;&lt;/tr&gt;
+            &lt;/tbody&gt;
+          &lt;/table&gt;
+        &lt;/details&gt;
+      &lt;/div&gt;
+
+      &lt;p&gt;Each filler gets a sharp step, at a different place:&lt;/p&gt;
+
+      &lt;ul&gt;
+        &lt;li&gt;&lt;strong&gt;add:&lt;/strong&gt; 107.6 ns at N=384, 143.5 at 400, 189.5 at 416. About 400 integer results in flight.&lt;/li&gt;
+        &lt;li&gt;&lt;strong&gt;fadd:&lt;/strong&gt; 135.4 ns at N=880, 173.5 at 896, 192.6 at 912. About 880 floating-point results, a bit over twice the integer number. The line also creeps up from about 90 ns at N=432 to 135 before the step, which I haven't explained.&lt;/li&gt;
+        &lt;li&gt;&lt;strong&gt;nop:&lt;/strong&gt; flat at about 90 ns up to N=1650, then a straight line through the origin: 110 ns at 2000, 214 ns at 4000. That's the front end's rate. Two blocks of N nops is 2N instructions per iteration, so 8000 in 214 ns at about 4.4 GHz is roughly 8.5 to 9 per cycle. No window limit shows up before throughput takes over, so as an inference, nops don't take a slot that matters here.&lt;/li&gt;
+      &lt;/ul&gt;
+
+      &lt;h2&gt;The mixes&lt;/h2&gt;
+
+      &lt;p&gt;The mixes are what make this read as two limits rather than one. Count the adds at each step:&lt;/p&gt;
+
+      &lt;ul&gt;
+        &lt;li&gt;&lt;strong&gt;mix31&lt;/strong&gt; (3 adds to 1 fadd) steps between N=512 (116 ns) and 544 (194 ns), with 144.7 at 528. Three quarters of about 530 is about 400 adds.&lt;/li&gt;
+        &lt;li&gt;&lt;strong&gt;mix11&lt;/strong&gt; (add, fadd) steps between N=784 (125.6) and 816 (197.6), with 168.3 at 800. Half of 800 is 400 adds.&lt;/li&gt;
+        &lt;li&gt;&lt;strong&gt;addnop&lt;/strong&gt; (add, nop) steps in the same place, 130.0 at 784, 178.5 at 800, 197.9 at 816. Again 400 adds, and now the other half is nops.&lt;/li&gt;
+      &lt;/ul&gt;
+
+      &lt;p&gt;Whatever sits between the adds, fadds or nops, the step lands where the adds reach about 400. As far as these fillers go, the integer limit is independent of what else is in the window.&lt;/p&gt;
+
+      &lt;p&gt;The mixes with more floating point hit something else. &lt;code&gt;mix13&lt;/code&gt; (1 add to 3 fadds) is at 140 ns at N=1024 and 156 at 1040, then 210 at 1056. At the step that's about 790 fadds and about 260 adds, and neither is at its own limit (880 and 400). &lt;code&gt;mix12&lt;/code&gt; (add, fadd, fadd) is the sharper test: adds alone would allow N of about 1200 and fadds alone about 1320, yet it steps at the same place, 124.1 ns at N=1024, 137.5 at 1040 and 191.3 at 1056.&lt;/p&gt;
+
+      &lt;p&gt;So there's a third, shared cap of about 1,050 instructions in flight, whatever mix they are. That's the window itself. My guess, and it is a guess, is that it's the reorder buffer, the structure that holds every instruction from dispatch until it retires. The picture for a Super core is then roughly 400 integer results, 880 floating-point results, and 1,050 instructions in total, with whichever comes first deciding where the step lands. Pure adds hit 400 first, pure fadds hit 880 first, and a mix with under about 40% adds and under about 85% fadds reaches 1,050 before either.&lt;/p&gt;
+
+      &lt;p&gt;The nops stayed flat to N=1650, which is more than 1,050 of them in the window. So either nops don't count toward the total or they leave it early. I can't tell which from this test.&lt;/p&gt;
+
+      &lt;h2&gt;Efficiency and Performance cores&lt;/h2&gt;
+
+      &lt;p&gt;On the Efficiency cores both add and fadd step in the same place, between N=160 and 192: add goes 128.8, 162.2, 220.2 at N=160, 176, 192, and fadd goes 140.6, 165.9, 221.6. An add and fadd 1:1 mix does the same: 151.1 ns at N=160, 188.4 at 176, 257.8 at 192. So for add, fadd and a 1:1 mix the Efficiency limit lands between N=176 and 192, call it about 185. The FP-heavy mixes (1:2 and 1:3), run at the lower clock, are too noisy to place exactly, but they also break by N=176-192. That makes it one shared window that fills before any integer or FP limit shows up. If the Efficiency cores have separate register limits, they sit above 185, where this test can't see them. Nops don't hit it: that curve is flat until about N=450, though those rows ran at a lower clock (about 1 GHz), so where it bends is probably throughput, not a window. These rows are noisier than the Super ones; after the step the pure add and fadd scatter between about 300 and 500 ns rather than settling.&lt;/p&gt;
+
+      &lt;table class="compact"&gt;
+        &lt;thead&gt;&lt;tr&gt;&lt;th&gt;&lt;/th&gt;&lt;th&gt;Super&lt;/th&gt;&lt;th&gt;Efficiency&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;
+        &lt;tbody&gt;
+          &lt;tr&gt;&lt;td&gt;window (all instructions)&lt;/td&gt;&lt;td&gt;~1,050&lt;/td&gt;&lt;td&gt;~185&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;integer results&lt;/td&gt;&lt;td&gt;~400&lt;/td&gt;&lt;td&gt;&amp;gt;185 (not reached)&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;FP results&lt;/td&gt;&lt;td&gt;~880&lt;/td&gt;&lt;td&gt;&amp;gt;185 (not reached)&lt;/td&gt;&lt;/tr&gt;
+        &lt;/tbody&gt;
+      &lt;/table&gt;
+
+      &lt;p&gt;The Performance cores I didn't measure cleanly. The scheduler kept moving the runs, and the pure add and fadd tests have a handful of rows in total, nowhere near enough to place a step.&lt;/p&gt;
+
+      &lt;h2&gt;What I'm unsure about&lt;/h2&gt;
+
+      &lt;ul&gt;
+        &lt;li&gt;&lt;strong&gt;What the structures are.&lt;/strong&gt; The filler decides which resource runs out first, so I'm reading each step as the size of whatever that filler uses up. "Integer registers", "FP registers" and "reorder buffer" are the natural names, not something I've isolated.&lt;/li&gt;
+        &lt;li&gt;&lt;strong&gt;Nops.&lt;/strong&gt; They look free, but the test can't say whether they skip the window or leave it early.&lt;/li&gt;
+        &lt;li&gt;&lt;strong&gt;The slow creep before the fadd step&lt;/strong&gt; and the noisy Efficiency rows. The medians hold up, but individual points don't.&lt;/li&gt;
+      &lt;/ul&gt;
+
+      &lt;p&gt;The takeaway: a Super core can look about 1,050 instructions past a DRAM miss, an Efficiency core about 185. Within that, integer-heavy code runs out of room first, at about 400 results, while FP-heavy code gets to about 880.&lt;/p&gt;</content>
+  </entry>
+  <entry>
     <title>How long a pattern can the M6 remember?</title>
     <link href="https://wickkit.cc/posts/2026-10-12-how-long-a-pattern-can-the-m6-remember.html"/>
     <id>https://wickkit.cc/posts/2026-10-12-how-long-a-pattern-can-the-m6-remember.html</id>
