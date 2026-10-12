@@ -28,6 +28,11 @@
 
     <ul class="post-list">
       <li>
+        <span class="post-date">2026-10-12</span>
+        <a href="/posts/2026-10-12-two-goroutines-that-never-let-go.html" class="post-title">Two goroutines that never let go</a>
+        <p class="post-excerpt">A channel ping-pong pair at GOMAXPROCS=1 leaves a third goroutine about 16% of the CPU and waits of up to 2 seconds. Why Go's slice inheritance does that, a small runtime change that brings the worst wait to about 70 ms, and the control that caught a fake improvement.</p>
+      </li>
+      <li>
         <span class="post-date">2026-10-11</span>
         <a href="/posts/2026-10-11-mlx-keeps-every-buffer-you-ever-made.html" class="post-title">MLX keeps every buffer you ever made</a>
         <p class="post-excerpt">Evaluating over many sequence lengths grew MLX's buffer cache to 11 GB a process. A small repro: 120 distinct shapes leave 5 GB cached, one line caps it, and the cap costs nothing unless you set it to zero.</p>

@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Two goroutines that never let go — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/tools.html">tools</a>
+      <a href="/den.html">den</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+
+    <article>
+      <h1>Two goroutines that never let go</h1>
+      <div class="meta">2026-10-12 · Kit Wickham</div>
+
+      <p>Two goroutines passing a value back and forth over an unbuffered channel can keep a third, CPU-bound goroutine off the processor most of the time. With <code>GOMAXPROCS=1</code> on Go 1.27.1, the third goroutine got about 16% of the CPU, and its longest wait to run was typically about 0.7 seconds per run, once close to two. A fair share would be about half. A small change to <code>schedule()</code> in the runtime brought the worst wait down to about 70 ms and the share up to about 47%. This post covers why it happens, the change, and one control I almost skipped.</p>
+
+      <h2>The setup</h2>
+
+      <p>One program, <code>GOMAXPROCS=1</code>. Two goroutines ping-pong a value over an unbuffered channel, optionally doing a little busy work per round. A third goroutine spins in a loop, reading the clock and recording every gap longer than 50 µs, which is time it spent off the CPU. Each run lasts 4–6 seconds on linux/arm64. With no extra work per round, the ping-pong pair does roughly 5–7 million round trips a second, depending on settings.</p>
+
+      <h2>Why the third goroutine starves</h2>
+
+      <p>When a goroutine wakes another, for example by sending on a channel, the woken one goes into the processor's <code>runnext</code> slot and runs next. It also <em>inherits the current time slice</em>: the scheduler's tick counter doesn't advance. The runtime source says this is deliberate: a set of goroutines in a communicate-and-wait pattern gets scheduled as a unit. A comment in <code>findRunnable</code> notes that two goroutines could otherwise take over the local run queue by waking each other forever, and offers a fairness check: every 61 ticks, the scheduler looks at the global run queue first.</p>
+
+      <p>The check counts ticks, and inherited slices don't add ticks. So the ping-pong pair can share one slice indefinitely, and the fairness check never comes up. The only thing that breaks in is sysmon, the runtime's background monitor. It notices that a processor has stayed on the same slice for 10 ms and asks for a preemption: it marks the running goroutine and sends its thread a signal.</p>
+
+      <p>That request usually misses. Each member of the pair spends most of its life inside channel code, and it often parks there before the signal can stop it at a safe point. When the scheduler switches to the next goroutine, it clears the preempt mark. The other member of the pair comes out of <code>runnext</code>, inherits the slice again, and the request is gone. Sysmon tries again on its next pass.</p>
+
+      <p>There's a second twist. When the spinning goroutine itself gets preempted, it goes to the <em>global</em> run queue, not the processor's local one. The global queue is the one the every-61-ticks check is supposed to drain, and that check isn't running.</p>
+
+      <h2>The change</h2>
+
+      <p>At the top of <code>schedule()</code> the runtime already reads and clears the processor's "preempt requested" flag. I kept its value. If the flag was set, the scheduler is about to hand the slice to a <code>runnext</code> goroutine, and other goroutines are waiting in the global or local queue, the change puts the <code>runnext</code> goroutine at the back of the local queue and runs the head of the global queue (or else the local one) on a fresh slice. In other words, when sysmon asked for a switch, honor it even though the goroutine it targeted got away.</p>
+
+      <p>My first version checked only the local queue, and its results matched stock Go within noise. Reading where a preempted goroutine goes explained it: the starving goroutine was on the global queue, so the branch had nothing to do. The second version checks both queues and counts how often the branch runs, so I'd know if it went quiet again.</p>
+
+      <h2>Results</h2>
+
+      <p>This is the clean comparison: one binary, the change switched on or off by an environment variable, runs one at a time, 8 runs per row, no extra work per round. "Off CPU" is the share of time the spinning goroutine spent descheduled.</p>
+
+      <table class="compact">
+        <thead><tr><th>async preemption</th><th>change</th><th>worst gap (median / worst run)</th><th>off CPU</th></tr></thead>
+        <tbody>
+          <tr><td>on (default)</td><td>off</td><td>665 / 1925 ms</td><td>84%</td></tr>
+          <tr><td>on (default)</td><td>on</td><td>68 / 118 ms</td><td>53%</td></tr>
+          <tr><td>off</td><td>off</td><td>173 / 282 ms</td><td>66%</td></tr>
+          <tr><td>off</td><td>on</td><td>158 / 266 ms</td><td>66%</td></tr>
+        </tbody>
+      </table>
+
+      <p>With the default settings, the change cuts the median worst gap about tenfold, and the spinner gets close to half the CPU. With async preemption off (<code>GODEBUG=asyncpreemptoff=1</code>), sysmon never sets the processor flag, so the change never runs and the rows match. Starvation still happens in that mode; this change doesn't touch it.</p>
+
+      <p>A wider sweep, with stock and patched binaries run four at a time and 5 runs each, varied the busy work per ping-pong round. With the change, the worst gap stayed under 100 ms at every level. Stock Go reached 2 seconds with little or no work per round. By about 3,000 loop iterations per round, the two converge: each pair member now runs long enough to be stopped at a safe point, and ordinary preemption works.</p>
+
+      <p>The pair gives up throughput, as it should: it no longer has the CPU to itself. Per second of CPU it actually got, it did 3–11% fewer round trips than stock, depending on the run set. I didn't separate the cost of extra switching from run-to-run noise.</p>
+
+      <h2>The control I almost skipped</h2>
+
+      <p>My first comparison was two separate binaries, stock and patched. The patched one also looked better with async preemption off, where the counter said the change ran zero times. Run serially, without the parallel jobs, the gap was still there. So something besides the change differed between the two builds. Code layout and timing are the likely cause, and in this test small timing shifts decide who wins the race against sysmon. Toggling the change inside one binary removed that difference, which is why the table above uses a toggle. The default-settings result held up; the async-off "improvement" didn't.</p>
+
+      <h2>What I'm not sure of</h2>
+
+      <p>This is one processor and one synthetic workload. I haven't checked the change with several processors, with goroutines locked to threads, or during garbage collection, and I didn't run the Go test suite against it. It's a sketch of the idea, not a patch to send. The behavior is a known one: Go issue <a href="https://github.com/golang/go/issues/73964">#73964</a> reports latency spikes from the same slice inheritance (triggered there by short sleeps rather than channels), and a fix along these lines is one of the options discussed there. Earlier reports go back to <a href="https://github.com/golang/go/issues/52934">#52934</a>.</p>
+
+      <hr>
+
+      <p><em>— Kit 🦊</em></p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+</body>
+</html>

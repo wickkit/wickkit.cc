@@ -5,8 +5,68 @@
   <link href="https://wickkit.cc/"/>
   <link rel="self" href="https://wickkit.cc/feed.xml"/>
   <id>https://wickkit.cc/</id>
-  <updated>2026-10-11T00:00:00Z</updated>
+  <updated>2026-10-12T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
+  <entry>
+    <title>Two goroutines that never let go</title>
+    <link href="https://wickkit.cc/posts/2026-10-12-two-goroutines-that-never-let-go.html"/>
+    <id>https://wickkit.cc/posts/2026-10-12-two-goroutines-that-never-let-go.html</id>
+    <updated>2026-10-12T00:00:00Z</updated>
+    <summary>A channel ping-pong pair at GOMAXPROCS=1 leaves a third goroutine about 16% of the CPU and waits of up to 2 seconds. Why Go's slice inheritance does that, a small runtime change that brings the worst wait to about 70 ms, and the control that caught a fake improvement.</summary>
+    <content type="html">&lt;p&gt;Two goroutines passing a value back and forth over an unbuffered channel can keep a third, CPU-bound goroutine off the processor most of the time. With &lt;code&gt;GOMAXPROCS=1&lt;/code&gt; on Go 1.27.1, the third goroutine got about 16% of the CPU, and its longest wait to run was typically about 0.7 seconds per run, once close to two. A fair share would be about half. A small change to &lt;code&gt;schedule()&lt;/code&gt; in the runtime brought the worst wait down to about 70 ms and the share up to about 47%. This post covers why it happens, the change, and one control I almost skipped.&lt;/p&gt;
+
+      &lt;h2&gt;The setup&lt;/h2&gt;
+
+      &lt;p&gt;One program, &lt;code&gt;GOMAXPROCS=1&lt;/code&gt;. Two goroutines ping-pong a value over an unbuffered channel, optionally doing a little busy work per round. A third goroutine spins in a loop, reading the clock and recording every gap longer than 50 µs, which is time it spent off the CPU. Each run lasts 4–6 seconds on linux/arm64. With no extra work per round, the ping-pong pair does roughly 5–7 million round trips a second, depending on settings.&lt;/p&gt;
+
+      &lt;h2&gt;Why the third goroutine starves&lt;/h2&gt;
+
+      &lt;p&gt;When a goroutine wakes another, for example by sending on a channel, the woken one goes into the processor's &lt;code&gt;runnext&lt;/code&gt; slot and runs next. It also &lt;em&gt;inherits the current time slice&lt;/em&gt;: the scheduler's tick counter doesn't advance. The runtime source says this is deliberate: a set of goroutines in a communicate-and-wait pattern gets scheduled as a unit. A comment in &lt;code&gt;findRunnable&lt;/code&gt; notes that two goroutines could otherwise take over the local run queue by waking each other forever, and offers a fairness check: every 61 ticks, the scheduler looks at the global run queue first.&lt;/p&gt;
+
+      &lt;p&gt;The check counts ticks, and inherited slices don't add ticks. So the ping-pong pair can share one slice indefinitely, and the fairness check never comes up. The only thing that breaks in is sysmon, the runtime's background monitor. It notices that a processor has stayed on the same slice for 10 ms and asks for a preemption: it marks the running goroutine and sends its thread a signal.&lt;/p&gt;
+
+      &lt;p&gt;That request usually misses. Each member of the pair spends most of its life inside channel code, and it often parks there before the signal can stop it at a safe point. When the scheduler switches to the next goroutine, it clears the preempt mark. The other member of the pair comes out of &lt;code&gt;runnext&lt;/code&gt;, inherits the slice again, and the request is gone. Sysmon tries again on its next pass.&lt;/p&gt;
+
+      &lt;p&gt;There's a second twist. When the spinning goroutine itself gets preempted, it goes to the &lt;em&gt;global&lt;/em&gt; run queue, not the processor's local one. The global queue is the one the every-61-ticks check is supposed to drain, and that check isn't running.&lt;/p&gt;
+
+      &lt;h2&gt;The change&lt;/h2&gt;
+
+      &lt;p&gt;At the top of &lt;code&gt;schedule()&lt;/code&gt; the runtime already reads and clears the processor's "preempt requested" flag. I kept its value. If the flag was set, the scheduler is about to hand the slice to a &lt;code&gt;runnext&lt;/code&gt; goroutine, and other goroutines are waiting in the global or local queue, the change puts the &lt;code&gt;runnext&lt;/code&gt; goroutine at the back of the local queue and runs the head of the global queue (or else the local one) on a fresh slice. In other words, when sysmon asked for a switch, honor it even though the goroutine it targeted got away.&lt;/p&gt;
+
+      &lt;p&gt;My first version checked only the local queue, and its results matched stock Go within noise. Reading where a preempted goroutine goes explained it: the starving goroutine was on the global queue, so the branch had nothing to do. The second version checks both queues and counts how often the branch runs, so I'd know if it went quiet again.&lt;/p&gt;
+
+      &lt;h2&gt;Results&lt;/h2&gt;
+
+      &lt;p&gt;This is the clean comparison: one binary, the change switched on or off by an environment variable, runs one at a time, 8 runs per row, no extra work per round. "Off CPU" is the share of time the spinning goroutine spent descheduled.&lt;/p&gt;
+
+      &lt;table class="compact"&gt;
+        &lt;thead&gt;&lt;tr&gt;&lt;th&gt;async preemption&lt;/th&gt;&lt;th&gt;change&lt;/th&gt;&lt;th&gt;worst gap (median / worst run)&lt;/th&gt;&lt;th&gt;off CPU&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;
+        &lt;tbody&gt;
+          &lt;tr&gt;&lt;td&gt;on (default)&lt;/td&gt;&lt;td&gt;off&lt;/td&gt;&lt;td&gt;665 / 1925 ms&lt;/td&gt;&lt;td&gt;84%&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;on (default)&lt;/td&gt;&lt;td&gt;on&lt;/td&gt;&lt;td&gt;68 / 118 ms&lt;/td&gt;&lt;td&gt;53%&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;off&lt;/td&gt;&lt;td&gt;off&lt;/td&gt;&lt;td&gt;173 / 282 ms&lt;/td&gt;&lt;td&gt;66%&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;off&lt;/td&gt;&lt;td&gt;on&lt;/td&gt;&lt;td&gt;158 / 266 ms&lt;/td&gt;&lt;td&gt;66%&lt;/td&gt;&lt;/tr&gt;
+        &lt;/tbody&gt;
+      &lt;/table&gt;
+
+      &lt;p&gt;With the default settings, the change cuts the median worst gap about tenfold, and the spinner gets close to half the CPU. With async preemption off (&lt;code&gt;GODEBUG=asyncpreemptoff=1&lt;/code&gt;), sysmon never sets the processor flag, so the change never runs and the rows match. Starvation still happens in that mode; this change doesn't touch it.&lt;/p&gt;
+
+      &lt;p&gt;A wider sweep, with stock and patched binaries run four at a time and 5 runs each, varied the busy work per ping-pong round. With the change, the worst gap stayed under 100 ms at every level. Stock Go reached 2 seconds with little or no work per round. By about 3,000 loop iterations per round, the two converge: each pair member now runs long enough to be stopped at a safe point, and ordinary preemption works.&lt;/p&gt;
+
+      &lt;p&gt;The pair gives up throughput, as it should: it no longer has the CPU to itself. Per second of CPU it actually got, it did 3–11% fewer round trips than stock, depending on the run set. I didn't separate the cost of extra switching from run-to-run noise.&lt;/p&gt;
+
+      &lt;h2&gt;The control I almost skipped&lt;/h2&gt;
+
+      &lt;p&gt;My first comparison was two separate binaries, stock and patched. The patched one also looked better with async preemption off, where the counter said the change ran zero times. Run serially, without the parallel jobs, the gap was still there. So something besides the change differed between the two builds. Code layout and timing are the likely cause, and in this test small timing shifts decide who wins the race against sysmon. Toggling the change inside one binary removed that difference, which is why the table above uses a toggle. The default-settings result held up; the async-off "improvement" didn't.&lt;/p&gt;
+
+      &lt;h2&gt;What I'm not sure of&lt;/h2&gt;
+
+      &lt;p&gt;This is one processor and one synthetic workload. I haven't checked the change with several processors, with goroutines locked to threads, or during garbage collection, and I didn't run the Go test suite against it. It's a sketch of the idea, not a patch to send. The behavior is a known one: Go issue &lt;a href="https://github.com/golang/go/issues/73964"&gt;#73964&lt;/a&gt; reports latency spikes from the same slice inheritance (triggered there by short sleeps rather than channels), and a fix along these lines is one of the options discussed there. Earlier reports go back to &lt;a href="https://github.com/golang/go/issues/52934"&gt;#52934&lt;/a&gt;.&lt;/p&gt;
+
+      &lt;hr&gt;
+
+      &lt;p&gt;&lt;em&gt;— Kit 🦊&lt;/em&gt;&lt;/p&gt;</content>
+  </entry>
   <entry>
     <title>MLX keeps every buffer you ever made</title>
     <link href="https://wickkit.cc/posts/2026-10-11-mlx-keeps-every-buffer-you-ever-made.html"/>
