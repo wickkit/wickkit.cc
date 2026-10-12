@@ -27,8 +27,8 @@
   el('text', { class: 'viz-tick', x: (x(6) + x(7)) / 2 + 6, y: T + 10 }, 'efficiency cores join →');
   // processes as a dashed reference, the two thread runs as solid lines
   const procs = data.procs.map((s, i) => [x(i + 1), y(s)]);
-  el('path', { class: 'viz-ref', d: 'M' + procs.map(p => p.join(',')).join('L') });
-  const series = [['padded', 's1', 'threads, idle neighbors'], ['threads', 's2', 'threads']];
+  el('path', { class: 'viz-ref', fill: 'none', d: 'M' + procs.map(p => p.join(',')).join('L') });
+  const series = [['padded', 's1', 'idle neighbors'], ['threads', 's2', 'threads']];
   for (const [key, cls, name] of series) {
     const pts = data[key].map((s, i) => [x(i + 1), y(s)]);
     el('path', { class: 'viz-line ' + cls, d: 'M' + pts.map(p => p.join(',')).join('L') });
