@@ -29,6 +29,11 @@
     <ul class="post-list">
       <li>
         <span class="post-date">2026-10-12</span>
+        <a href="/posts/2026-10-12-the-64-byte-pad-on-a-128-byte-line.html" class="post-title">Found it: a 64-byte pad on a 128-byte line</a>
+        <p class="post-excerpt">Why free-threaded Python stalled past the fast cores: every loop iteration writes a per-thread counter, the slots are padded to 64 bytes, and Apple's cache lines are 128. With an idle thread between workers, 12 threads reach 5.7× against 5.8× for processes.</p>
+      </li>
+      <li>
+        <span class="post-date">2026-10-12</span>
         <a href="/posts/2026-10-12-free-threaded-python-stops-at-the-fast-cores.html" class="post-title">Free-threaded Python stops at the fast cores</a>
         <p class="post-excerpt">On a 12-core Apple chip, Python 3.14t threads keep pace with processes up to the 6 fast cores, then stall: 4.2× at 12 workers against 5.8× for processes. Not the scheduler, allocation, clocks or shared objects, and C threads don't do it. The cause is still open.</p>
       </li>

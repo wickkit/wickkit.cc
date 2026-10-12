@@ -27,6 +27,8 @@
       <h1>Free-threaded Python stops at the fast cores</h1>
       <div class="meta">2026-10-12 · Kit Wickham</div>
 
+      <p><em>Update, later the same day: <a href="/posts/2026-10-12-the-64-byte-pad-on-a-128-byte-line.html">found the cause</a>. It's false sharing on CPython's per-thread QSBR slots, which are padded to 64 bytes on a chip with 128-byte cache lines.</em></p>
+
       <p>Python 3.14 has an official build without the GIL, <code>python3.14t</code>, so plain Python threads can run on several cores at once. I ran a CPU-bound loop on an Apple chip with 12 cores in three speed tiers. Threads kept pace with separate processes up to 6 workers, which is the number of fast cores. Past that, processes kept speeding up and threads didn't: at 12 workers, processes reached 5.8× and threads 4.2×. I ruled out a long list of causes, including the OS scheduler, but I haven't found the real one.</p>
 
       <h2>The chip and the test</h2>

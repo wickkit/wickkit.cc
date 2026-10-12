@@ -8,12 +8,94 @@
   <updated>2026-10-12T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
   <entry>
+    <title>Found it: a 64-byte pad on a 128-byte line</title>
+    <link href="https://wickkit.cc/posts/2026-10-12-the-64-byte-pad-on-a-128-byte-line.html"/>
+    <id>https://wickkit.cc/posts/2026-10-12-the-64-byte-pad-on-a-128-byte-line.html</id>
+    <updated>2026-10-12T00:00:00Z</updated>
+    <summary>Why free-threaded Python stalled past the fast cores: every loop iteration writes a per-thread counter, the slots are padded to 64 bytes, and Apple's cache lines are 128. With an idle thread between workers, 12 threads reach 5.7× against 5.8× for processes.</summary>
+    <content type="html">&lt;p&gt;This morning I wrote that &lt;a href="https://wickkit.cc/posts/2026-10-12-free-threaded-python-stops-at-the-fast-cores.html"&gt;free-threaded Python stops at the fast cores&lt;/a&gt;: on a 12-core Apple chip, 12 threads in one &lt;code&gt;python3.14t&lt;/code&gt; process got 4.2× over one thread while 12 processes got 5.8×, and I couldn't say why. Now I can. Every thread writes a small counter on every loop iteration, CPython pads each thread's counter to 64 bytes, and this chip's cache lines are 128 bytes. So pairs of threads share a line and fight over it. Keep the neighbor slot idle and threads match processes: 5.7× against 5.8×.&lt;/p&gt;
+
+      &lt;h2&gt;Same instructions, more cycles&lt;/h2&gt;
+
+      &lt;p&gt;The first post ended with "finding the shared line would take hardware counters". The kernel on this macOS version refuses to program the chip's configurable counters, even for root, so the events I wanted (loads served from another cluster) were out of reach. The two fixed counters still work: cycles and instructions retired, per core, across the whole machine.&lt;/p&gt;
+
+      &lt;p&gt;On the empty loop (&lt;code&gt;for _ in repeat(None, n): pass&lt;/code&gt;, 1.2 billion iterations), they settled what kind of problem it is. Twelve threads and twelve processes retired the same work, 101 to 105 billion instructions in each of two runs. The threads needed 26 to 29 billion cycles to do it, the processes 18. That's 3.7 to 3.9 instructions per cycle against 5.7. With 6 workers on the fast cores, both setups ran at 6.0 to 6.5. So the threads weren't doing extra work, retrying or spinning. They were waiting on memory.&lt;/p&gt;
+
+      &lt;h2&gt;The instruction that waits&lt;/h2&gt;
+
+      &lt;p&gt;Next, sampling: dtrace's profile provider records which instruction each core is on, about 5,000 times a second. Mapped back to the interpreter binary, two neighboring addresses stood out. In the 12-thread run they got about 14,000 samples between them. In the 12-process run, one got 1,640 and the other didn't make the top 60. Both are in the handler for &lt;code&gt;JUMP_BACKWARD&lt;/code&gt;, the bytecode at the bottom of every loop:&lt;/p&gt;
+
+&lt;pre&gt;&lt;code&gt;ldr   x8, [x22, #0x380]   ; this thread's QSBR state
+ldr   x9, [x8, #0x8]      ; → pointer to the shared state   ← hot
+ldapr x9, [x9]            ; load the global write sequence
+stlr  x9, [x8]            ; store it as this thread's seq
+ldr   x8, [x22, #0x18]    ; then check for signals etc.     ← hot&lt;/code&gt;&lt;/pre&gt;
+
+      &lt;p&gt;That's &lt;code&gt;_Py_qsbr_quiescent_state&lt;/code&gt;. Free-threaded CPython frees some shared memory lazily, with a scheme called &lt;a href="https://github.com/python/cpython/blob/main/Include/internal/pycore_qsbr.h"&gt;quiescent-state-based reclamation&lt;/a&gt;: each thread periodically announces "I'm not holding any pointers right now" by copying a global sequence number into its own slot. A loop's back edge is a safe point: the &lt;a href="https://github.com/python/cpython/blob/v3.14.0/Python/bytecodes.c#L155-L162"&gt;periodic check&lt;/a&gt; that &lt;code&gt;JUMP_BACKWARD&lt;/code&gt; runs calls &lt;code&gt;QSBR_QUIESCENT_STATE&lt;/code&gt; before it looks for pending signals, so the interpreter announces on every iteration. The two hot instructions sit right after the loads and the store-release on that slot. That's where a core waits when the line it needs is held by another core.&lt;/p&gt;
+
+      &lt;p&gt;The slots live in one array, and each is padded against exactly this problem:&lt;/p&gt;
+
+&lt;pre&gt;&lt;code&gt;// Padding to avoid false sharing
+struct _qsbr_pad {
+    struct _qsbr_thread_state qsbr;
+    char __padding[64 - sizeof(struct _qsbr_thread_state)];
+};&lt;/code&gt;&lt;/pre&gt;
+
+      &lt;p&gt;64 bytes is the cache line on most x86 chips. On this one, &lt;code&gt;sysctl hw.cachelinesize&lt;/code&gt; says 128. Two threads' slots land on each line, and both threads write their halves on every loop iteration. That's classic false sharing, the thing the padding was meant to prevent. The header on CPython's main branch still pads to 64.&lt;/p&gt;
+
+      &lt;h2&gt;Testing it without rebuilding Python&lt;/h2&gt;
+
+      &lt;p&gt;In a fresh process, threads appear to take slots in the order they start (the result below depends on that, and bears it out), so the start order decides who shares a line. A thread blocked on a lock doesn't run bytecode, so it doesn't write its slot while it waits. So I started an idle thread between each pair of workers: worker, idle, worker, idle. If false sharing is the cause, every worker now shares its line with a thread that never writes, and the gap should close. As controls, I started the same idle threads all before or all after the workers, which changes nothing about which workers sit side by side.&lt;/p&gt;
+
+      &lt;p&gt;On the empty loop with 12 workers (four runs each): workers alone took 0.66 to 0.73 seconds, idle threads before or after 0.66 to 0.76, and interleaved 0.44 to 0.46. Twelve processes took 0.41 to 0.46 across today's runs.&lt;/p&gt;
+
+      &lt;p&gt;Then the first post's loop (&lt;code&gt;s += i * i % 7&lt;/code&gt;, 600 million iterations), 1 to 12 workers, best of three:&lt;/p&gt;
+
+      &lt;div class="viz" id="ft2" data-speedup='{"threads":[1.0,1.89,2.44,3.08,3.61,4.0,3.86,3.82,3.83,3.83,3.76,3.91],"padded":[0.97,1.87,2.41,2.99,3.58,4.02,4.25,4.6,4.83,5.12,5.4,5.72],"procs":[1.0,1.77,2.43,3.04,3.51,4.01,4.23,4.52,4.88,5.18,5.58,5.79]}'&gt;
+        &lt;figure class="viz-chart"&gt;
+          &lt;div class="viz-legend"&gt;&lt;span style="--c: var(--s2)"&gt;threads&lt;/span&gt;&lt;span style="--c: var(--s1)"&gt;threads with idle neighbors&lt;/span&gt;&lt;span&gt;processes (dashed)&lt;/span&gt;&lt;/div&gt;
+          &lt;svg role="img" aria-label="Speedup against workers. Plain threads flatten near 4 times after 6 workers. Threads with an idle thread between each pair keep climbing to 5.7 times at 12, on top of the processes line at 5.8 times."&gt;&lt;/svg&gt;
+          &lt;div class="viz-tip" hidden&gt;&lt;/div&gt;
+          &lt;figcaption&gt;Speedup over one plain thread (13.16 s), best of three runs. Processes are from the first post's run of the same loop.&lt;/figcaption&gt;
+        &lt;/figure&gt;
+        &lt;details&gt;
+          &lt;summary&gt;Table&lt;/summary&gt;
+          &lt;table class="compact"&gt;
+            &lt;thead&gt;&lt;tr&gt;&lt;th&gt;workers&lt;/th&gt;&lt;th&gt;threads&lt;/th&gt;&lt;th&gt;idle neighbors&lt;/th&gt;&lt;th&gt;processes&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;
+            &lt;tbody&gt;
+              &lt;tr&gt;&lt;td&gt;1&lt;/td&gt;&lt;td&gt;1.00×&lt;/td&gt;&lt;td&gt;0.97×&lt;/td&gt;&lt;td&gt;1.00×&lt;/td&gt;&lt;/tr&gt;
+              &lt;tr&gt;&lt;td&gt;2&lt;/td&gt;&lt;td&gt;1.89×&lt;/td&gt;&lt;td&gt;1.87×&lt;/td&gt;&lt;td&gt;1.77×&lt;/td&gt;&lt;/tr&gt;
+              &lt;tr&gt;&lt;td&gt;4&lt;/td&gt;&lt;td&gt;3.08×&lt;/td&gt;&lt;td&gt;2.99×&lt;/td&gt;&lt;td&gt;3.04×&lt;/td&gt;&lt;/tr&gt;
+              &lt;tr&gt;&lt;td&gt;6&lt;/td&gt;&lt;td&gt;4.00×&lt;/td&gt;&lt;td&gt;4.02×&lt;/td&gt;&lt;td&gt;4.01×&lt;/td&gt;&lt;/tr&gt;
+              &lt;tr&gt;&lt;td&gt;8&lt;/td&gt;&lt;td&gt;3.82×&lt;/td&gt;&lt;td&gt;4.60×&lt;/td&gt;&lt;td&gt;4.52×&lt;/td&gt;&lt;/tr&gt;
+              &lt;tr&gt;&lt;td&gt;10&lt;/td&gt;&lt;td&gt;3.83×&lt;/td&gt;&lt;td&gt;5.12×&lt;/td&gt;&lt;td&gt;5.18×&lt;/td&gt;&lt;/tr&gt;
+              &lt;tr&gt;&lt;td&gt;12&lt;/td&gt;&lt;td&gt;3.91×&lt;/td&gt;&lt;td&gt;5.72×&lt;/td&gt;&lt;td&gt;5.79×&lt;/td&gt;&lt;/tr&gt;
+            &lt;/tbody&gt;
+          &lt;/table&gt;
+        &lt;/details&gt;
+      &lt;/div&gt;
+
+      &lt;p&gt;With idle neighbors, 12 threads took 2.30 seconds; plain threads took 3.36. The interleaved line tracks the processes line within 0.2× the whole way, and the processes come from a separate run. That's nearly all of the gap from the first post, from one source. (Plain threads reached 3.9× here and 4.2× in the first post's run; the spread between runs is about that size.)&lt;/p&gt;
+
+      &lt;h2&gt;Why only past 6 cores&lt;/h2&gt;
+
+      &lt;p&gt;This part I can only partly explain. Up to 6 workers, the shared lines cost nothing measurable, and the first post found the same on the efficiency cores alone. The cost appears when the workers span the fast clusters and the efficiency cluster. My reading is that passing a line back and forth inside a cluster is cheap and across clusters is not, but checking that takes the configurable counters I couldn't use. The 128-byte line and the per-iteration write are measured. The cluster explanation is a guess that fits.&lt;/p&gt;
+
+      &lt;h2&gt;What to do about it&lt;/h2&gt;
+
+      &lt;p&gt;The fix in CPython is one constant: pad the slots to 128 bytes on Apple silicon, or to whatever the platform's line size is. Until then, a free-threaded program can work around it the way the test did: start an idle thread between workers so no two busy threads share a line. That's a hack that depends on slot order, which is an internal detail. The safer advice from the first post still holds: on a Mac with efficiency cores, stop a CPU-bound thread pool at the fast-core count, or use processes past that.&lt;/p&gt;
+
+      &lt;p&gt;I also take back a sentence from the first post. I'd noticed the 64-byte padding and this chip's 128-byte lines, then dismissed them because the structures I could check didn't explain the slowdown. I'd checked the wrong structure.&lt;/p&gt;</content>
+  </entry>
+  <entry>
     <title>Free-threaded Python stops at the fast cores</title>
     <link href="https://wickkit.cc/posts/2026-10-12-free-threaded-python-stops-at-the-fast-cores.html"/>
     <id>https://wickkit.cc/posts/2026-10-12-free-threaded-python-stops-at-the-fast-cores.html</id>
     <updated>2026-10-12T00:00:00Z</updated>
     <summary>On a 12-core Apple chip, Python 3.14t threads keep pace with processes up to the 6 fast cores, then stall: 4.2× at 12 workers against 5.8× for processes. Not the scheduler, allocation, clocks or shared objects, and C threads don't do it. The cause is still open.</summary>
-    <content type="html">&lt;p&gt;Python 3.14 has an official build without the GIL, &lt;code&gt;python3.14t&lt;/code&gt;, so plain Python threads can run on several cores at once. I ran a CPU-bound loop on an Apple chip with 12 cores in three speed tiers. Threads kept pace with separate processes up to 6 workers, which is the number of fast cores. Past that, processes kept speeding up and threads didn't: at 12 workers, processes reached 5.8× and threads 4.2×. I ruled out a long list of causes, including the OS scheduler, but I haven't found the real one.&lt;/p&gt;
+    <content type="html">&lt;p&gt;&lt;em&gt;Update, later the same day: &lt;a href="https://wickkit.cc/posts/2026-10-12-the-64-byte-pad-on-a-128-byte-line.html"&gt;found the cause&lt;/a&gt;. It's false sharing on CPython's per-thread QSBR slots, which are padded to 64 bytes on a chip with 128-byte cache lines.&lt;/em&gt;&lt;/p&gt;
+
+      &lt;p&gt;Python 3.14 has an official build without the GIL, &lt;code&gt;python3.14t&lt;/code&gt;, so plain Python threads can run on several cores at once. I ran a CPU-bound loop on an Apple chip with 12 cores in three speed tiers. Threads kept pace with separate processes up to 6 workers, which is the number of fast cores. Past that, processes kept speeding up and threads didn't: at 12 workers, processes reached 5.8× and threads 4.2×. I ruled out a long list of causes, including the OS scheduler, but I haven't found the real one.&lt;/p&gt;
 
       &lt;h2&gt;The chip and the test&lt;/h2&gt;
 
