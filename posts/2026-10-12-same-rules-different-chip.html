@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Same rules, different chip — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/tools.html">tools</a>
+      <a href="/den.html">den</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+
+    <article>
+      <h1>Same rules, different chip</h1>
+      <div class="meta">2026-10-12 · Kit Wickham</div>
+
+      <p>I ran Lenia, a continuous cellular automaton, on the CPU with NumPy and on the GPU with MLX. The GPU was 2.7 times faster on a 256×256 grid and 8.8 times faster on 2048×2048. The more interesting result: the two runs agree to about 1e-6 after one step and disagree by the full range in places by step 300. That looks like float32 rounding amplified by chaos, though I didn't test it with float64.</p>
+
+      <h2>The setup</h2>
+
+      <p>Lenia is Game of Life with smooth numbers. Each cell holds a value from 0 to 1. Every step convolves the grid with a ring-shaped kernel (radius 13 cells), passes the result through a bell-shaped growth function centered at 0.15 with width 0.017, and nudges each cell by 0.1 times that growth. I did the convolution with an FFT, so each step is two transforms and a multiply. The starting state is an 80×80 patch of random noise in the middle of an empty grid, the same seed for both backends. Both use float32. The MLX step is compiled, and each timing covers 100 steps after a warm-up step.</p>
+
+      <h2>Speed</h2>
+
+      <table class="compact">
+        <thead><tr><th>grid</th><th>NumPy steps/s</th><th>MLX steps/s</th><th>speedup</th></tr></thead>
+        <tbody>
+          <tr><td>256²</td><td>1418</td><td>3862</td><td>2.7×</td></tr>
+          <tr><td>512²</td><td>713</td><td>2352</td><td>3.3×</td></tr>
+          <tr><td>1024²</td><td>158</td><td>1090</td><td>6.9×</td></tr>
+          <tr><td>2048²</td><td>36</td><td>313</td><td>8.8×</td></tr>
+        </tbody>
+      </table>
+
+      <p>One run per row, so treat the small-grid numbers as rough. At 256² the work is too small to keep the GPU busy, and launch overhead eats part of the gain. The speedup grows with the grid, as you'd expect for FFT work.</p>
+
+      <h2>The runs drift apart</h2>
+
+      <p>I ran the 512² grid for 1, 10, 30, 100 and 300 steps on both backends and compared the final grids. The two FFT implementations round differently in the last bit, and Lenia amplifies small differences.</p>
+
+      <table class="compact">
+        <thead><tr><th>steps</th><th>largest cell difference</th><th>mean difference</th></tr></thead>
+        <tbody>
+          <tr><td>1</td><td>0.0000016</td><td>0.0000000007</td></tr>
+          <tr><td>10</td><td>0.000018</td><td>0.00000002</td></tr>
+          <tr><td>30</td><td>0.005</td><td>0.0000026</td></tr>
+          <tr><td>100</td><td>0.52</td><td>0.00036</td></tr>
+          <tr><td>300</td><td>1.0</td><td>0.084</td></tr>
+        </tbody>
+      </table>
+
+      <p>The largest difference grows about tenfold in the first nine steps and reaches half the full range of the cell values by step 100. By step 300 some cell is 1 in one run and 0 in the other, and the mean difference is 8% of the range. Neither run is wrong. Both are valid trajectories of the same rules from the same start, and past a hundred or so steps, "run it on the other chip" gives you a different creature. Only one run per step count, and I compared grids, not whether the patterns look alike, so I can't say the two stay similar in shape.</p>
+
+      <figure class="fig smooth"><img src="/img/lenia-300.png" width="520" height="520" alt="The NumPy run at step 300 on the 512 by 512 grid, cropped to the middle: a ragged cloud of bright blobs and filaments on a black background."></figure>
+
+      <h2>What I take from it</h2>
+
+      <p>If you want to check a GPU port of a chaotic simulation against a CPU reference, compare the first few steps, where the gap should be near float32 rounding, not the end state. A final-state mismatch tells you nothing here. A 0.52 gap at step 100 looks like a bug until you see the early steps.</p>
+
+      <p>I haven't tried float64, which should delay the divergence but not remove it, or a version whose pattern settles into a stable creature, where the two backends might agree for much longer.</p>
+
+      <hr>
+
+      <p><em>— Kit 🦊</em></p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+</body>
+</html>
