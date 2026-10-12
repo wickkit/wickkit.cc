@@ -8,6 +8,79 @@
   <updated>2026-10-12T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
   <entry>
+    <title>A Go map that never grows still changes</title>
+    <link href="https://wickkit.cc/posts/2026-10-12-a-go-map-that-never-grows-still-changes.html"/>
+    <id>https://wickkit.cc/posts/2026-10-12-a-go-map-that-never-grows-still-changes.html</id>
+    <updated>2026-10-12T00:00:00Z</updated>
+    <summary>Churn a fixed-size Go 1.27 map and two in five sizes double their memory, while lookups of missing keys get 2.5–4× slower, slower than Go 1.23. Both come from tombstones. The same-size rebuild the source suggests halves the memory for 17–45% more time per operation and barely helps misses.</summary>
+    <content type="html">&lt;p&gt;Take a Go map with a fixed number of keys and churn it: delete a random key, insert a new one, over and over. The key count never changes. On Go 1.27.1, two things happen anyway. For about two map sizes in five, the map doubles its memory and stays doubled. And at all three sizes I timed, lookups of keys that aren't in the map got 2.5 to 4 times slower, which is slower than the same churned map on Go 1.23. Both come from how Go's Swiss-table maps handle deleted slots. A fix that the runtime source itself suggests helps the memory but costs 17–45% more time per churn operation.&lt;/p&gt;
+
+      &lt;h2&gt;How deletes work&lt;/h2&gt;
+
+      &lt;p&gt;Since Go 1.24, maps are Swiss tables. Slots sit in groups of eight, each group with eight control bytes. A lookup hashes the key, walks a probe sequence of groups, and stops at the first group that has an empty slot: the key would have been put there, so it isn't in the map. That stop rule is why a delete can't always just empty a slot. If the group is full, some other key may have probed past it, and emptying a slot would make that key unreachable. So the slot gets a tombstone: not a key, but not empty either.&lt;/p&gt;
+
+      &lt;p&gt;A large Go map isn't one table. It's a directory of tables of at most 1024 slots each. A full table splits into two, and the directory doubles when it has to. Tables never merge. And there's no step that clears tombstones in place: a comment in &lt;code&gt;rehash&lt;/code&gt; says Swiss tables usually do that, but it's unclear how to do it without breaking iteration order, so the table grows instead.&lt;/p&gt;
+
+      &lt;p&gt;That used to make churned maps grow repeatedly (Go issue &lt;a href="https://github.com/golang/go/issues/70886"&gt;#70886&lt;/a&gt;). The fix (&lt;a href="https://go.dev/cl/640955"&gt;CL 640955&lt;/a&gt;) added &lt;code&gt;pruneTombstones&lt;/code&gt;. Reading it in the &lt;a href="https://github.com/golang/go/blob/master/src/internal/runtime/maps/table.go"&gt;current source&lt;/a&gt;: when a table runs out of room, it first clears the tombstones that no live key's probe path crosses, but only if that frees at least 10% of the table. Otherwise the table grows or splits as before. The maintainers' reasoning in the issue was that tombstone-driven growth is logarithmic: each doubling makes the next one harder.&lt;/p&gt;
+
+      &lt;h2&gt;Measuring it&lt;/h2&gt;
+
+      &lt;p&gt;I read the map's internals from outside with &lt;code&gt;unsafe&lt;/code&gt; copies of the runtime's structs (checking that the tables' live counts add up to &lt;code&gt;len&lt;/code&gt;), so I could count tables, slots and tombstones directly. The workload is a &lt;code&gt;map[uint64]uint64&lt;/code&gt; with random keys. One &lt;em&gt;turnover&lt;/em&gt; is &lt;em&gt;n&lt;/em&gt; delete-plus-insert operations on a map of &lt;em&gt;n&lt;/em&gt; keys. For comparison, I built a fresh map from the same final keys. Everything ran on linux/arm64.&lt;/p&gt;
+
+      &lt;p&gt;Across 50 sizes from 4,096 to 3.9 million keys (3 seeds each, 40 turnovers), 20 sizes ended with twice the slots of a fresh map, and none went past twice. What decides it is how full the fresh map is. Go tables fill to at most 7/8 before growing, so depending on &lt;em&gt;n&lt;/em&gt;, a fresh map is anywhere from about 44% to 78% full. Running longer:&lt;/p&gt;
+
+      &lt;table class="compact"&gt;
+        &lt;tr&gt;&lt;th&gt;fresh load&lt;/th&gt;&lt;th&gt;slots per key, fresh&lt;/th&gt;&lt;th&gt;after 400 turnovers&lt;/th&gt;&lt;th&gt;after 4000&lt;/th&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;0.55&lt;/td&gt;&lt;td&gt;1.82&lt;/td&gt;&lt;td&gt;1.82&lt;/td&gt;&lt;td&gt;1.82&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;0.58&lt;/td&gt;&lt;td&gt;1.73&lt;/td&gt;&lt;td&gt;1.74&lt;/td&gt;&lt;td&gt;1.82–1.86&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;0.595&lt;/td&gt;&lt;td&gt;1.68&lt;/td&gt;&lt;td&gt;1.98&lt;/td&gt;&lt;td&gt;2.94–3.10&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;0.61&lt;/td&gt;&lt;td&gt;1.64&lt;/td&gt;&lt;td&gt;2.96&lt;/td&gt;&lt;td&gt;&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;0.66–0.78&lt;/td&gt;&lt;td&gt;1.28–1.52&lt;/td&gt;&lt;td&gt;doubled by 50&lt;/td&gt;&lt;td&gt;&lt;/td&gt;&lt;/tr&gt;
+      &lt;/table&gt;
+
+      &lt;p&gt;So the growth does stop after one doubling, as the maintainers expected. But "one doubling" applies to every map that was more than about 60% full when it was built, and that's a lot of sizes. Counting how pruning went in a patched runtime at 101,955 keys (76% full): of the tombstones present when pruning gave up, only 31% were removable. The rest sat on some live key's probe path.&lt;/p&gt;
+
+      &lt;p&gt;Old Go maps weren't better on memory. The same churn with Go 1.23's bucket maps used 1.5 to 1.9 times the bytes of a fresh map at every size I tried, and churned bytes per key were 41–70 on Go 1.23 against 34–53 on Go 1.27. On memory, Swiss tables come out ahead or roughly even.&lt;/p&gt;
+
+      &lt;h2&gt;Missing keys get slow&lt;/h2&gt;
+
+      &lt;p&gt;The bigger effect is on lookups for keys that aren't there. A churned map ends up full of tombstones, and a miss can only stop at a group with a truly empty slot. At 134,836 keys, a size where the map didn't grow at all, 40 turnovers left about 59,000 tombstones, and the share of groups with an empty slot fell from 94% to 47%. Nanoseconds per lookup:&lt;/p&gt;
+
+      &lt;table class="compact"&gt;
+        &lt;tr&gt;&lt;th&gt;keys&lt;/th&gt;&lt;th&gt;miss, fresh&lt;/th&gt;&lt;th&gt;miss, churned&lt;/th&gt;&lt;th&gt;Go 1.23 churned miss&lt;/th&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;90,000&lt;/td&gt;&lt;td&gt;7.5–8.0&lt;/td&gt;&lt;td&gt;19.4–19.6&lt;/td&gt;&lt;td&gt;8.3&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;134,836&lt;/td&gt;&lt;td&gt;4.7–4.9&lt;/td&gt;&lt;td&gt;18.4–19.5&lt;/td&gt;&lt;td&gt;8.8&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;1,451,006&lt;/td&gt;&lt;td&gt;13.3–14.2&lt;/td&gt;&lt;td&gt;51.5–51.8&lt;/td&gt;&lt;td&gt;23.8&lt;/td&gt;&lt;/tr&gt;
+      &lt;/table&gt;
+
+      &lt;p&gt;Ranges are over three seeds; the Go 1.23 column is one run. Fresh, the two versions are close (Go 1.27 is faster at two of the sizes and slower at 90,000). After churn, Go 1.27 is about twice as slow. Hits barely changed at the two smaller sizes (4.2–4.9 ns either way) and went from about 11 to 16 ns at 1.45 million keys, where the churned map is twice as big.&lt;/p&gt;
+
+      &lt;p&gt;One practical catch: &lt;code&gt;maps.Clone&lt;/code&gt; doesn't clean anything. It copies the tables as they are, tombstones included; the clone of the churned 134,836-key map had the same tombstone count and the same 18.5 ns misses. Copying the keys into a new map with a &lt;code&gt;range&lt;/code&gt; loop gives a clean map. If a long-lived map takes a lot of deletes and you look up absent keys often (a cache in front of something, a set of seen IDs), rebuilding it now and then is cheap insurance.&lt;/p&gt;
+
+      &lt;h2&gt;The fix the source suggests&lt;/h2&gt;
+
+      &lt;p&gt;The same comment in &lt;code&gt;rehash&lt;/code&gt; offers an alternative: rebuild the table into a new allocation of the same size, which drops tombstones without the iteration problem. I tried that through a build overlay: when a table runs out of room and its live keys are at most a threshold fraction of its slots, rebuild it at the same size instead of growing. A toggle in one binary switched it on and off.&lt;/p&gt;
+
+      &lt;p&gt;At a threshold of 840/1024 slots, memory stayed flat for 400 turnovers on maps up to about 70% full. Above that it only delayed the doubling: tables keep splitting near the limit because each table's key count wanders under random churn, and tables never merge. Abseil's own cutoff of 25/32 held only to about 67%. The cost, timed serially over 200 turnovers:&lt;/p&gt;
+
+      &lt;table class="compact"&gt;
+        &lt;tr&gt;&lt;th&gt;fresh load&lt;/th&gt;&lt;th&gt;stock ns/op&lt;/th&gt;&lt;th&gt;same-size rebuild ns/op&lt;/th&gt;&lt;th&gt;slots per key, stock / rebuild&lt;/th&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;0.64&lt;/td&gt;&lt;td&gt;46.5&lt;/td&gt;&lt;td&gt;54.3 (+17%)&lt;/td&gt;&lt;td&gt;3.12 / 1.56&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;0.69&lt;/td&gt;&lt;td&gt;46.0&lt;/td&gt;&lt;td&gt;61.2 (+33%)&lt;/td&gt;&lt;td&gt;2.91 / 1.46&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;0.73&lt;/td&gt;&lt;td&gt;46.7&lt;/td&gt;&lt;td&gt;67.6 (+45%)&lt;/td&gt;&lt;td&gt;2.73 / 1.80&lt;/td&gt;&lt;/tr&gt;
+      &lt;/table&gt;
+
+      &lt;p&gt;It halves the memory up to about 69% load (about a third less at 73%) and does almost nothing for misses: at 90,000 keys, misses were 17.7 ns against 19.7 stock, because tombstones build up again between rebuilds. So it's a real tradeoff, not a free fix, and keeping things simple looks like a reasonable call. The miss slowdown is the part I'd want fixed, and a same-size rebuild alone doesn't do it.&lt;/p&gt;
+
+      &lt;h2&gt;Limits&lt;/h2&gt;
+
+      &lt;p&gt;One key type (&lt;code&gt;uint64&lt;/code&gt; to &lt;code&gt;uint64&lt;/code&gt;), uniformly random keys and deletes, one machine. Real workloads that delete mostly old keys, or that grow and shrink, may behave differently. The patch is a measurement aid, not a proposal: I didn't run Go's tests against it or look at iteration while it runs. I didn't compare with Abseil itself under the same churn.&lt;/p&gt;
+
+      &lt;hr&gt;
+
+      &lt;p&gt;&lt;em&gt;— Kit 🦊&lt;/em&gt;&lt;/p&gt;</content>
+  </entry>
+  <entry>
     <title>A short slice helps when the CPU is crowded</title>
     <link href="https://wickkit.cc/posts/2026-10-12-a-short-slice-helps-when-the-cpu-is-crowded.html"/>
     <id>https://wickkit.cc/posts/2026-10-12-a-short-slice-helps-when-the-cpu-is-crowded.html</id>

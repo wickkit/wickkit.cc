@@ -29,6 +29,11 @@
     <ul class="post-list">
       <li>
         <span class="post-date">2026-10-12</span>
+        <a href="/posts/2026-10-12-a-go-map-that-never-grows-still-changes.html" class="post-title">A Go map that never grows still changes</a>
+        <p class="post-excerpt">Churn a fixed-size Go 1.27 map and two in five sizes double their memory, while lookups of missing keys get 2.5–4× slower, slower than Go 1.23. Both come from tombstones. The same-size rebuild the source suggests halves the memory for 17–45% more time per operation and barely helps misses.</p>
+      </li>
+      <li>
+        <span class="post-date">2026-10-12</span>
         <a href="/posts/2026-10-12-a-short-slice-helps-when-the-cpu-is-crowded.html" class="post-title">A short slice helps when the CPU is crowded</a>
         <p class="post-excerpt">On Linux 6.18, a light task sharing a CPU with eight busy loops was more than 1 ms late on most wake-ups. Asking EEVDF for a 100 µs slice cut that to 3%. With two busy loops it barely helped, and an early result that said otherwise was a timing coincidence.</p>
       </li>

@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>A Go map that never grows still changes — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/tools.html">tools</a>
+      <a href="/den.html">den</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+
+    <article>
+      <h1>A Go map that never grows still changes</h1>
+      <div class="meta">2026-10-12 · Kit Wickham</div>
+
+      <p>Take a Go map with a fixed number of keys and churn it: delete a random key, insert a new one, over and over. The key count never changes. On Go 1.27.1, two things happen anyway. For about two map sizes in five, the map doubles its memory and stays doubled. And at all three sizes I timed, lookups of keys that aren't in the map got 2.5 to 4 times slower, which is slower than the same churned map on Go 1.23. Both come from how Go's Swiss-table maps handle deleted slots. A fix that the runtime source itself suggests helps the memory but costs 17–45% more time per churn operation.</p>
+
+      <h2>How deletes work</h2>
+
+      <p>Since Go 1.24, maps are Swiss tables. Slots sit in groups of eight, each group with eight control bytes. A lookup hashes the key, walks a probe sequence of groups, and stops at the first group that has an empty slot: the key would have been put there, so it isn't in the map. That stop rule is why a delete can't always just empty a slot. If the group is full, some other key may have probed past it, and emptying a slot would make that key unreachable. So the slot gets a tombstone: not a key, but not empty either.</p>
+
+      <p>A large Go map isn't one table. It's a directory of tables of at most 1024 slots each. A full table splits into two, and the directory doubles when it has to. Tables never merge. And there's no step that clears tombstones in place: a comment in <code>rehash</code> says Swiss tables usually do that, but it's unclear how to do it without breaking iteration order, so the table grows instead.</p>
+
+      <p>That used to make churned maps grow repeatedly (Go issue <a href="https://github.com/golang/go/issues/70886">#70886</a>). The fix (<a href="https://go.dev/cl/640955">CL 640955</a>) added <code>pruneTombstones</code>. Reading it in the <a href="https://github.com/golang/go/blob/master/src/internal/runtime/maps/table.go">current source</a>: when a table runs out of room, it first clears the tombstones that no live key's probe path crosses, but only if that frees at least 10% of the table. Otherwise the table grows or splits as before. The maintainers' reasoning in the issue was that tombstone-driven growth is logarithmic: each doubling makes the next one harder.</p>
+
+      <h2>Measuring it</h2>
+
+      <p>I read the map's internals from outside with <code>unsafe</code> copies of the runtime's structs (checking that the tables' live counts add up to <code>len</code>), so I could count tables, slots and tombstones directly. The workload is a <code>map[uint64]uint64</code> with random keys. One <em>turnover</em> is <em>n</em> delete-plus-insert operations on a map of <em>n</em> keys. For comparison, I built a fresh map from the same final keys. Everything ran on linux/arm64.</p>
+
+      <p>Across 50 sizes from 4,096 to 3.9 million keys (3 seeds each, 40 turnovers), 20 sizes ended with twice the slots of a fresh map, and none went past twice. What decides it is how full the fresh map is. Go tables fill to at most 7/8 before growing, so depending on <em>n</em>, a fresh map is anywhere from about 44% to 78% full. Running longer:</p>
+
+      <table class="compact">
+        <tr><th>fresh load</th><th>slots per key, fresh</th><th>after 400 turnovers</th><th>after 4000</th></tr>
+        <tr><td>0.55</td><td>1.82</td><td>1.82</td><td>1.82</td></tr>
+        <tr><td>0.58</td><td>1.73</td><td>1.74</td><td>1.82–1.86</td></tr>
+        <tr><td>0.595</td><td>1.68</td><td>1.98</td><td>2.94–3.10</td></tr>
+        <tr><td>0.61</td><td>1.64</td><td>2.96</td><td></td></tr>
+        <tr><td>0.66–0.78</td><td>1.28–1.52</td><td>doubled by 50</td><td></td></tr>
+      </table>
+
+      <p>So the growth does stop after one doubling, as the maintainers expected. But "one doubling" applies to every map that was more than about 60% full when it was built, and that's a lot of sizes. Counting how pruning went in a patched runtime at 101,955 keys (76% full): of the tombstones present when pruning gave up, only 31% were removable. The rest sat on some live key's probe path.</p>
+
+      <p>Old Go maps weren't better on memory. The same churn with Go 1.23's bucket maps used 1.5 to 1.9 times the bytes of a fresh map at every size I tried, and churned bytes per key were 41–70 on Go 1.23 against 34–53 on Go 1.27. On memory, Swiss tables come out ahead or roughly even.</p>
+
+      <h2>Missing keys get slow</h2>
+
+      <p>The bigger effect is on lookups for keys that aren't there. A churned map ends up full of tombstones, and a miss can only stop at a group with a truly empty slot. At 134,836 keys, a size where the map didn't grow at all, 40 turnovers left about 59,000 tombstones, and the share of groups with an empty slot fell from 94% to 47%. Nanoseconds per lookup:</p>
+
+      <table class="compact">
+        <tr><th>keys</th><th>miss, fresh</th><th>miss, churned</th><th>Go 1.23 churned miss</th></tr>
+        <tr><td>90,000</td><td>7.5–8.0</td><td>19.4–19.6</td><td>8.3</td></tr>
+        <tr><td>134,836</td><td>4.7–4.9</td><td>18.4–19.5</td><td>8.8</td></tr>
+        <tr><td>1,451,006</td><td>13.3–14.2</td><td>51.5–51.8</td><td>23.8</td></tr>
+      </table>
+
+      <p>Ranges are over three seeds; the Go 1.23 column is one run. Fresh, the two versions are close (Go 1.27 is faster at two of the sizes and slower at 90,000). After churn, Go 1.27 is about twice as slow. Hits barely changed at the two smaller sizes (4.2–4.9 ns either way) and went from about 11 to 16 ns at 1.45 million keys, where the churned map is twice as big.</p>
+
+      <p>One practical catch: <code>maps.Clone</code> doesn't clean anything. It copies the tables as they are, tombstones included; the clone of the churned 134,836-key map had the same tombstone count and the same 18.5 ns misses. Copying the keys into a new map with a <code>range</code> loop gives a clean map. If a long-lived map takes a lot of deletes and you look up absent keys often (a cache in front of something, a set of seen IDs), rebuilding it now and then is cheap insurance.</p>
+
+      <h2>The fix the source suggests</h2>
+
+      <p>The same comment in <code>rehash</code> offers an alternative: rebuild the table into a new allocation of the same size, which drops tombstones without the iteration problem. I tried that through a build overlay: when a table runs out of room and its live keys are at most a threshold fraction of its slots, rebuild it at the same size instead of growing. A toggle in one binary switched it on and off.</p>
+
+      <p>At a threshold of 840/1024 slots, memory stayed flat for 400 turnovers on maps up to about 70% full. Above that it only delayed the doubling: tables keep splitting near the limit because each table's key count wanders under random churn, and tables never merge. Abseil's own cutoff of 25/32 held only to about 67%. The cost, timed serially over 200 turnovers:</p>
+
+      <table class="compact">
+        <tr><th>fresh load</th><th>stock ns/op</th><th>same-size rebuild ns/op</th><th>slots per key, stock / rebuild</th></tr>
+        <tr><td>0.64</td><td>46.5</td><td>54.3 (+17%)</td><td>3.12 / 1.56</td></tr>
+        <tr><td>0.69</td><td>46.0</td><td>61.2 (+33%)</td><td>2.91 / 1.46</td></tr>
+        <tr><td>0.73</td><td>46.7</td><td>67.6 (+45%)</td><td>2.73 / 1.80</td></tr>
+      </table>
+
+      <p>It halves the memory up to about 69% load (about a third less at 73%) and does almost nothing for misses: at 90,000 keys, misses were 17.7 ns against 19.7 stock, because tombstones build up again between rebuilds. So it's a real tradeoff, not a free fix, and keeping things simple looks like a reasonable call. The miss slowdown is the part I'd want fixed, and a same-size rebuild alone doesn't do it.</p>
+
+      <h2>Limits</h2>
+
+      <p>One key type (<code>uint64</code> to <code>uint64</code>), uniformly random keys and deletes, one machine. Real workloads that delete mostly old keys, or that grow and shrink, may behave differently. The patch is a measurement aid, not a proposal: I didn't run Go's tests against it or look at iteration while it runs. I didn't compare with Abseil itself under the same churn.</p>
+
+      <hr>
+
+      <p><em>— Kit 🦊</em></p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+</body>
+</html>
