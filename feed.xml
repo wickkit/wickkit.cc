@@ -13,7 +13,7 @@
     <id>https://wickkit.cc/posts/2026-10-12-how-many-instructions-can-the-m6-keep-in-flight.html</id>
     <updated>2026-10-12T00:00:00Z</updated>
     <summary>Two DRAM misses with N fillers between them: a Super core holds about 1,050 instructions in flight, but runs out at about 400 integer results or 880 floating-point ones first. An Efficiency core's window is about 185.</summary>
-    <content type="html">&lt;p&gt;A core doesn't run instructions strictly in order. It looks ahead through a window of instructions that have been fetched but not finished, and runs whatever is ready. How big that window is decides how much a slow load can hide. I measured it on the same chip as the &lt;a href="https://wickkit.cc/posts/2026-10-12-the-fast-cores-have-a-cache-the-others-dont.html"&gt;cache&lt;/a&gt; and &lt;a href="https://wickkit.cc/posts/2026-10-12-how-long-a-pattern-can-the-m6-remember.html"&gt;branch predictor&lt;/a&gt; posts. The short version: a Super core can have about 1,050 instructions in flight at once. Inside that, it runs out of integer results at about 400 and floating-point results at about 880, whichever the code hits first, and nops don't seem to count. An Efficiency core's window is about 185, so the Super window is roughly 5.7 times bigger.&lt;/p&gt;
+    <content type="html">&lt;p&gt;A core doesn't run instructions strictly in order. It looks ahead through a window of instructions that have been fetched but not finished, and runs whatever is ready. How big that window is decides how much a slow load can hide. I measured it on the same chip as the &lt;a href="https://wickkit.cc/posts/2026-10-12-the-fast-cores-have-a-cache-the-others-dont.html"&gt;cache&lt;/a&gt; and &lt;a href="https://wickkit.cc/posts/2026-10-12-how-long-a-pattern-can-the-m6-remember.html"&gt;branch predictor&lt;/a&gt; posts. The short version: a Super core can have about 1,050 instructions in flight at once. Inside that, it runs out of integer results at about 400 and floating-point results at about 880, whichever the code hits first, and nops don't seem to count. An Efficiency core's window is about 185, so the Super window is roughly 5.7 times bigger. A Performance core sits in between, with about 210 integer and 330 floating-point results.&lt;/p&gt;
 
       &lt;h2&gt;The measurement&lt;/h2&gt;
 
@@ -62,7 +62,7 @@
       &lt;ul&gt;
         &lt;li&gt;&lt;strong&gt;add:&lt;/strong&gt; 107.6 ns at N=384, 143.5 at 400, 189.5 at 416. About 400 integer results in flight.&lt;/li&gt;
         &lt;li&gt;&lt;strong&gt;fadd:&lt;/strong&gt; 135.4 ns at N=880, 173.5 at 896, 192.6 at 912. About 880 floating-point results, a bit over twice the integer number. The line also creeps up from about 90 ns at N=432 to 135 before the step, which I haven't explained.&lt;/li&gt;
-        &lt;li&gt;&lt;strong&gt;nop:&lt;/strong&gt; flat at about 90 ns up to N=1650, then a straight line through the origin: 110 ns at 2000, 214 ns at 4000. That's the front end's rate. Two blocks of N nops is 2N instructions per iteration, so 8000 in 214 ns at about 4.4 GHz is roughly 8.5 to 9 per cycle. No window limit shows up before throughput takes over, so as an inference, nops don't take a slot that matters here.&lt;/li&gt;
+        &lt;li&gt;&lt;strong&gt;nop:&lt;/strong&gt; flat at about 90 ns up to N=1650, then a straight line through the origin: 110 ns at 2000, 214 ns at 4000. That's the front end's rate. Two blocks of N nops is 2N instructions per iteration, so 8000 in 214 ns at about 4.4 GHz is roughly 8.5 per cycle. No window limit shows up before throughput takes over, so as an inference, nops don't take a slot that matters here.&lt;/li&gt;
       &lt;/ul&gt;
 
       &lt;h2&gt;The mixes&lt;/h2&gt;
@@ -87,16 +87,25 @@
 
       &lt;p&gt;On the Efficiency cores both add and fadd step in the same place, between N=160 and 192: add goes 128.8, 162.2, 220.2 at N=160, 176, 192, and fadd goes 140.6, 165.9, 221.6. An add and fadd 1:1 mix does the same: 151.1 ns at N=160, 188.4 at 176, 257.8 at 192. So for add, fadd and a 1:1 mix the Efficiency limit lands between N=176 and 192, call it about 185. The FP-heavy mixes (1:2 and 1:3), run at the lower clock, are too noisy to place exactly, but they also break by N=176-192. That makes it one shared window that fills before any integer or FP limit shows up. If the Efficiency cores have separate register limits, they sit above 185, where this test can't see them. Nops don't hit it: that curve is flat until about N=450, though those rows ran at a lower clock (about 1 GHz), so where it bends is probably throughput, not a window. These rows are noisier than the Super ones; after the step the pure add and fadd scatter between about 300 and 500 ns rather than settling.&lt;/p&gt;
 
+      &lt;p&gt;&lt;em&gt;Update, same day:&lt;/em&gt; the Performance cores took a second try. Leaving the thread's QoS unset put a share of the runs on them (anywhere from a few percent to about half, depending on what else was running), with two busy-loop hogs added to fill the Super cores when it was low, and the fingerprint kept only rows that started and ended there (about 4.3-4.4 GHz). The 80 KB fingerprint misses their smaller L1, which is what tells them apart from a Super core at the same clock. They look like a scaled-down Super core: separate integer and FP limits, both much smaller.&lt;/p&gt;
+
+      &lt;ul&gt;
+        &lt;li&gt;add: 115.5 ns at N=200, 120.5 at 208, 169.5 at 216, 204.0 at 224. About 210 integer results.&lt;/li&gt;
+        &lt;li&gt;fadd: 133.0 at N=320, 132 at 328, 174 at 336, 202 at 344. About 330 floating-point results.&lt;/li&gt;
+        &lt;li&gt;mix11 (add, fadd): 127 at N=416, 143 at 424, 188 at 432. Half of about 425 is about 212 adds, the integer limit again.&lt;/li&gt;
+        &lt;li&gt;mix13 (1 add to 3 fadds): 135.5 at N=432, 147 at 440, 188.5 at 448. Three quarters of about 444 is about 333 fadds, the FP limit again.&lt;/li&gt;
+      &lt;/ul&gt;
+
+      &lt;p&gt;Every step lands where one register type runs out, so the shared window on a Performance core is at least about 445 and this test never reaches it. Filling it would need a filler that uses neither register type and still counts, which the nops don't seem to.&lt;/p&gt;
+
       &lt;table class="compact"&gt;
-        &lt;thead&gt;&lt;tr&gt;&lt;th&gt;&lt;/th&gt;&lt;th&gt;Super&lt;/th&gt;&lt;th&gt;Efficiency&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;
+        &lt;thead&gt;&lt;tr&gt;&lt;th&gt;&lt;/th&gt;&lt;th&gt;Super&lt;/th&gt;&lt;th&gt;Performance&lt;/th&gt;&lt;th&gt;Efficiency&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;
         &lt;tbody&gt;
-          &lt;tr&gt;&lt;td&gt;window (all instructions)&lt;/td&gt;&lt;td&gt;~1,050&lt;/td&gt;&lt;td&gt;~185&lt;/td&gt;&lt;/tr&gt;
-          &lt;tr&gt;&lt;td&gt;integer results&lt;/td&gt;&lt;td&gt;~400&lt;/td&gt;&lt;td&gt;&amp;gt;185 (not reached)&lt;/td&gt;&lt;/tr&gt;
-          &lt;tr&gt;&lt;td&gt;FP results&lt;/td&gt;&lt;td&gt;~880&lt;/td&gt;&lt;td&gt;&amp;gt;185 (not reached)&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;window (all instructions)&lt;/td&gt;&lt;td&gt;~1,050&lt;/td&gt;&lt;td&gt;&amp;gt;445 (not reached)&lt;/td&gt;&lt;td&gt;~185&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;integer results&lt;/td&gt;&lt;td&gt;~400&lt;/td&gt;&lt;td&gt;~210&lt;/td&gt;&lt;td&gt;&amp;gt;185 (not reached)&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;FP results&lt;/td&gt;&lt;td&gt;~880&lt;/td&gt;&lt;td&gt;~330&lt;/td&gt;&lt;td&gt;&amp;gt;185 (not reached)&lt;/td&gt;&lt;/tr&gt;
         &lt;/tbody&gt;
       &lt;/table&gt;
-
-      &lt;p&gt;The Performance cores I didn't measure cleanly. The scheduler kept moving the runs, and the pure add and fadd tests have a handful of rows in total, nowhere near enough to place a step.&lt;/p&gt;
 
       &lt;h2&gt;What I'm unsure about&lt;/h2&gt;
 
@@ -106,7 +115,7 @@
         &lt;li&gt;&lt;strong&gt;The slow creep before the fadd step&lt;/strong&gt; and the noisy Efficiency rows. The medians hold up, but individual points don't.&lt;/li&gt;
       &lt;/ul&gt;
 
-      &lt;p&gt;The takeaway: a Super core can look about 1,050 instructions past a DRAM miss, an Efficiency core about 185. Within that, integer-heavy code runs out of room first, at about 400 results, while FP-heavy code gets to about 880.&lt;/p&gt;</content>
+      &lt;p&gt;The takeaway: a Super core can look about 1,050 instructions past a DRAM miss, an Efficiency core about 185, and a Performance core runs out of registers at about 210 integer or 330 FP results before its window fills. Within the Super window, integer-heavy code runs out of room first, at about 400 results, while FP-heavy code gets to about 880.&lt;/p&gt;</content>
   </entry>
   <entry>
     <title>How long a pattern can the M6 remember?</title>
