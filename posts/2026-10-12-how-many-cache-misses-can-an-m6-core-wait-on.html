@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>How many cache misses can an M6 core wait on? — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/tools.html">tools</a>
+      <a href="/den.html">den</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+
+    <article>
+      <h1>How many cache misses can an M6 core wait on?</h1>
+      <div class="meta">2026-10-12 · Kit Wickham</div>
+
+      <p>The last post ended with a caveat: <a href="/posts/2026-10-12-how-many-loads-and-stores-can-the-m6-keep-in-flight.html">the load queue test</a> only used loads that hit L1, and loads that miss might run out of something much sooner. This post tests that directly. Chasing one pointer through memory costs one DRAM miss at a time, about 95 to 112 ns depending on the core (139 ns on an Efficiency core at its low clock). Chase several independent chains at once and the misses overlap, up to about 20 in flight on a Super core and about 25 on a Performance core. Then it stops. But the more interesting result is that this isn't a count of miss slots. It's a throughput ceiling, and it barely moves when I make each miss two to three times faster.</p>
+
+      <h2>The test</h2>
+
+      <p>K independent pointer chains, each a random cyclic ring through a 1 GB buffer, with one load per chain per iteration. Each hop is a dependent load, so a chain can only have one miss outstanding, and K chains can have K. Lines are 128 bytes, and in a 1 GB ring nearly every load misses both the cache and the TLB. I time ns per load for K from 1 to 64.</p>
+
+      <p>With one chain, ns per load is the full miss latency. If K misses overlap perfectly, ns per load is latency divided by K. So "misses in flight" is the latency at K=1 divided by ns per load, which is Little's law run backwards. Each run is sorted into a tier by the same core fingerprint as the earlier posts, checked before and after. The Efficiency cores ran at two clocks, about 1 GHz and about 2.9 GHz, so I keep them apart. The chart uses the 2.9 GHz runs.</p>
+
+      <h2>Linear up to about 20, then flat</h2>
+
+      <div class="viz" id="mlp">
+        <div class="viz-presets">
+          <button type="button" data-mode="flight" aria-pressed="true">misses in flight</button>
+          <button type="button" data-mode="ns" aria-pressed="false">ns per load</button>
+        </div>
+        <figure class="viz-chart">
+          <div class="viz-legend"><span style="--c: var(--s1)">Super</span><span style="--c: var(--s2)">Performance</span><span style="--c: var(--s3)">Efficiency (2.9 GHz)</span><span style="--c: var(--s1)">Super, TLB-friendly window (dashed)</span></div>
+          <svg role="img" aria-label="Misses in flight against the number of independent chains K, for a 1 GB random ring. On the Super core the line rises in a straight line to about 15 at K of 16, then flattens near 19 to 20. Performance rises to about 24 to 25 by K of 32 to 64. Efficiency at 2.9 GHz rises to about 20 at K of 32 and then eases to 18. A dashed Super line for a window layout rises slowly and flattens near 6. In the ns per load view, all four lines end between 4 and 6 nanoseconds per load, although they start at 95, 103, 112 and 30 nanoseconds at K of 1."></svg>
+          <div class="viz-tip" hidden></div>
+          <figcaption>1 GB random ring, median per K. "Misses in flight" is the latency at K=1 divided by ns per load; the other view plots ns per load on a log axis. The dashed line is the same Super core with the random lines kept inside small windows of 8 pages, which makes most loads TLB hits. Hover for values.</figcaption>
+        </figure>
+      </div>
+
+      <p>Start with the solid lines in the first view. Each added chain buys one more miss in flight, so the lines climb at slope one: a Super core is at 15.4 with 16 chains. Then they bend and flatten. The Super core tops out at 19.8 by K=20 (4.81 ns per load, from a 95.3 ns miss). The Performance core gets 24.6, saturating around K=32 (4.19 ns, from 103.2 ns). The Efficiency core at 2.9 GHz reaches 20.2 at K=28 (5.56 ns, from 112.1 ns). At 1 GHz it gets 14.8 from a 138.9 ns miss, with a floor of 9.35 ns. A 256 MB ring gives the same floors, with latency a few percent lower.</p>
+
+      <p>That reads like a miss queue with 20-odd entries. The dashed line is why I don't think that's right.</p>
+
+      <h2>Make each miss faster, and the ceiling stays</h2>
+
+      <p>For the dashed line I changed only the layout. Instead of random lines across the whole 1 GB, the chain picks random lines inside windows of 8 or 64 pages. Most loads now hit the TLB, and the DRAM accesses are friendlier too, so they likely hit open rows or get prefetched. The miss latency on a Super core falls from 95 ns to 28 to 30 ns. On a Performance core it falls from 103 ns to 32 to 54 ns.</p>
+
+      <p>If the core had a fixed number of miss slots, the floor would fall with the latency, roughly threefold on Super. It didn't. The Super floor is 4.53 to 4.56 ns per load, against 4.81 ns before. The Performance floor is 3.99 to 4.13 ns, against 4.19. The Efficiency floor at 2.9 GHz is also unchanged, 5.60 to 5.66 ns against 5.56. At 1 GHz it improves, from 9.35 to 6.85 to 7.04 ns, still nowhere near the latency gain. Because the floor stays while the latency drops, "misses in flight" at the floor drops to about 6 for Super. That's not a smaller queue. It's the same ceiling divided into a shorter latency. Flip the chart to ns per load to see it: the lines start 3x apart and land in the same place.</p>
+
+      <p>In bandwidth terms the floor is 128 bytes per 4.2 to 4.8 ns, which is 27 to 30 GB/s of random lines per fast core. Something in the path from a core to DRAM accepts about one line every 4.5 ns, and it does so whether each line took 30 ns or 95 ns to arrive.</p>
+
+      <h2>Per core, or shared?</h2>
+
+      <p>I ran two copies at once on the fast cores. Each copy held its own floor: 4.50 ns on the Performance core and 4.73 ns on the Super core, close to the single-copy numbers of 4.19 and 4.81. Only a few two-copy runs landed cleanly on a tier, but they agree: the ceiling is per core, not something the two fast cores fight over.</p>
+
+      <p>The Efficiency cores behave the opposite way. Four copies at once at background priority, which keeps them on the Efficiency cores, each got 15.86 ns per load at 1 GHz (against 9.35 alone) and 10.36 ns at 2.9 GHz (against 5.56). Added up across the four, that's about 32 GB/s at 1 GHz and about 49 GB/s at 2.9 GHz. The four Efficiency cores share one ceiling, and it's higher than a single fast core's. The 2.9 GHz four-copy row has few runs behind it, so treat that number as rougher.</p>
+
+      <h2>When the misses are cache hits</h2>
+
+      <p>The same probe with a smaller ring shows what limits L1 misses that hit L2. With a 512 KB ring, every load misses L1 and nearly all hit L2, and the floor is about 2 cycles per line on every tier: 0.46 ns (2.1 cycles) on Super, 0.50 ns (2.25) on Performance, 2.5 to 2.8 cycles on Efficiency. That's an L2-to-L1 refill rate of about one line per two cycles. Little's law at that floor gives 6.2 misses in flight on Super (reached at K=8) and 12.8 on Performance, and 6.5 to 7.1 on Efficiency.</p>
+
+      <p>Those are lower bounds, not counts. The refill bandwidth runs out first, so the real number of L1 miss buffers is hidden behind it: at least 13 on a Performance core and at least 6 on a Super core. This also shows the probe loop isn't the bottleneck. If it were, the 4.5 ns DRAM floor would show up on the cache-resident sizes too, and the floor there is ten times lower.</p>
+
+      <p>On a Super core with an 8 MB ring (far L2, 36 cycles), the floor is 0.88 ns, or 3.9 cycles per line, with 9.3 in flight at K=12 to 16. That is well below the ~20 the same core sustains to DRAM, so this is a bandwidth limit again, about 145 GB/s, and not a shortage of slots. Performance and Efficiency at 8 MB were unstable, because that size is at the edge of the shared L2, so I left them out.</p>
+
+      <h2>What I didn't show</h2>
+
+      <ul>
+        <li><strong>Which structure sets the ceiling.</strong> I know it's per core on the fast cores and shared across an Efficiency cluster, and that it doesn't depend on latency. I haven't shown whether it's a queue between the core and its cache, a limit on the fabric port, or the memory controller's share. The measurements say "throughput", not "where".</li>
+        <li><strong>Large K.</strong> Past about K=26 some chain pointers spill to the stack. Those spills are L1 hits and add work to the loop, so the tails of the curves at K=32 to 64 are less clean than the rest, and the Performance core saturates in that range.</li>
+        <li><strong>A quiet machine.</strong> The runs happened with some background load on the machine, which adds noise, especially to the Performance rows and the multi-copy runs. Medians over repeated runs and the before-and-after fingerprint check cut most of it, but it isn't a lab.</li>
+      </ul>
+
+      <p>The takeaway: a Super core can overlap about 20 DRAM misses and a Performance core about 25, but that's what a per-core ceiling of one 128-byte line every 4 to 5 ns looks like at DRAM latency, not a fixed slot count. Make the misses cheaper and you get fewer in flight at the same throughput. For code that hops around memory, the thing to count is lines per nanosecond, and it's about the same on every fast core. For the other limits on a core's out-of-order machinery, see <a href="/posts/2026-10-12-how-many-instructions-can-the-m6-keep-in-flight.html">the instruction window post</a>, and for why the fast cores' caches differ from the others, <a href="/posts/2026-10-12-the-fast-cores-have-a-cache-the-others-dont.html">the cache post</a>.</p>
+    </article>
+  </main>
+  <script src="/js/mlp-ui.js?v=1"></script>
+</body>
+</html>

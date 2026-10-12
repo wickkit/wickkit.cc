@@ -455,6 +455,7 @@ article table.compact { min-width: 0; }
 #cz .cz-leg-h { --c: repeating-linear-gradient(90deg, var(--viz-muted) 0 5px, transparent 5px 8px); }
 #cz .viz-controls { grid-template-columns: 1fr; }
 #cz .viz-legend { flex-wrap: wrap; gap: .3rem 1rem; } #cz .viz-legend > span { white-space: nowrap; }
+#mlp .viz-legend { flex-wrap: wrap; gap: .3rem 1rem; } #mlp .viz-legend > span { white-space: nowrap; }
 #ct .viz-line.ct-orc { stroke: var(--viz-muted); stroke-dasharray: 5 4; }
 #ct .viz-dot.ct-orc { fill: var(--viz-muted); }
 #ct .ct-leg-o { --c: repeating-linear-gradient(90deg, var(--viz-muted) 0 5px, transparent 5px 8px); }

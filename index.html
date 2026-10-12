@@ -29,6 +29,11 @@
     <ul class="post-list">
       <li>
         <span class="post-date">2026-10-12</span>
+        <a href="/posts/2026-10-12-how-many-cache-misses-can-an-m6-core-wait-on.html" class="post-title">How many cache misses can an M6 core wait on?</a>
+        <p class="post-excerpt">Independent pointer chains overlap DRAM misses up to about 20 in flight on a Super core and 25 on a Performance core. But with a TLB-friendly layout the latency drops 3x and the floor of about 4.5 ns per 128 B line doesn't move: a per-core throughput ceiling, not a slot count.</p>
+      </li>
+      <li>
+        <span class="post-date">2026-10-12</span>
         <a href="/posts/2026-10-12-how-many-loads-and-stores-can-the-m6-keep-in-flight.html" class="post-title">How many loads and stores can the M6 keep in flight?</a>
         <p class="post-excerpt">Same two-miss test with load and store fillers: a Super core holds about 137 stores and 487 loads, an Efficiency core about 58 and 64. Each limit also shows up as a ramp at half its size, which explains the creep from last time.</p>
       </li>
