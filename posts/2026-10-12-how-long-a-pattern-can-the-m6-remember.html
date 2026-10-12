@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>How long a pattern can the M6 remember? — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/tools.html">tools</a>
+      <a href="/den.html">den</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+
+    <article>
+      <h1>How long a pattern can the M6 remember?</h1>
+      <div class="meta">2026-10-12 · Kit Wickham</div>
+
+      <p>Same chip, same three kinds of core as the cache post, different question: how much can the branch predictor remember? I fed one branch a random taken/not-taken pattern that repeats every P times and watched where the predictor gives up. The short version: a Super core learns a random pattern about 93,000 branches long, a Performance core about 39,000, an Efficiency core about 23,000. A wrong guess costs about 20 cycles on the fast cores and about 15-16 on the Efficiency cores. And on every core there's a small, steady extra cost that I think is a second predictor getting involved, though I can't prove that.</p>
+
+      <h2>The measurement</h2>
+
+      <p>The program has one conditional branch in a tight loop. Before each branch it loads a byte from a 4 MB buffer of random 0s and 1s, read in order, and the branch goes one way or the other depending on that byte. The buffer is built so the pattern repeats every P branches. If P is 8, the predictor sees the same 8 outcomes over and over and learns them almost at once. If P is a million, the pattern is long enough that the predictor effectively sees noise. At the far end I also ran P = 0, a true coin flip with no repeat, as the worst case: half the branches mispredict.</p>
+
+      <p>The branch is inline assembly so the compiler can't turn it into something else:</p>
+
+      <pre><code>#define SITE \
+  __asm__ volatile("ldrb w9, [%1, %2]\n" CHAIN \
+                   "cbz w9, 1f\n add %0, %0, #1\n 1:\n" \
+                   : "+r"(x) : "r"(pat), "r"(i), "r"(one) : "w9", "memory"); \
+  i = (i + 1) &amp; (M - 1);</code></pre>
+
+      <p>The load reads the next pattern byte, <code>cbz</code> is the branch, and the <code>add</code> is there so the taken and not-taken paths differ. <code>CHAIN</code> is empty in the plain build. I come back to it below. After a warm-up of one to sixteen million branches, I time 8 million more, then repeat for P from 1 up to about a million.</p>
+
+      <p>Two things turn time into something readable. I convert to cycles using each core's measured clock, because the Efficiency cores run at a very different speed. And I convert the cycles into a mispredict rate: take the time per branch when everything is learned (small P) and when everything is random (P = 0), and scale linearly between them, with the random end counting as 50%. Core tier is identified the same way as in the cache post, by a before-and-after fingerprint, and the data pools the runs that matched. One caveat is that the scheduler is flaky about putting the process where I ask, so I pool every run and sort each one by the tier it actually landed on. The Efficiency numbers have the fewest clean runs behind them.</p>
+
+      <h2>What a miss costs</h2>
+
+      <p>The gap between learned and random, times two (since random is only half misses), gives the cost of one mispredict:</p>
+
+      <ul>
+        <li><strong>Super:</strong> 18.9 to 20.8 cycles</li>
+        <li><strong>Performance:</strong> 19.1 to 20.6 cycles</li>
+        <li><strong>Efficiency:</strong> 15.3 to 16.3 cycles</li>
+      </ul>
+
+      <p>The range is across the three site counts I ran (1, 4 and 16 branches taking turns). A predicted branch loop runs at about 2.0 cycles per branch with one site, and 0.7 to 1.0 with 4 or 16.</p>
+
+      <p>The penalty should be the time the branch takes to resolve plus the time to refill the pipeline with the right instructions. To check, I made a second build where <code>CHAIN</code> is four dependent <code>madd</code> instructions between the load and the branch, about 12 cycles of arithmetic the branch has to wait for. If the idea is right, the penalty should rise by about 12 and the refill part should stay put. It did: Super 31.3 cycles, Performance 31.4, Efficiency 28.5. That's 12 to 13 more than before on each tier. So every cycle the core spends not knowing it was wrong adds straight to the bill, on top of a refill cost that stays the same.</p>
+
+      <h2>How long a pattern it learns</h2>
+
+      <div class="viz" id="bpred">
+        <figure class="viz-chart">
+          <div class="viz-legend"><span style="--c: var(--s1)">Super</span><span style="--c: var(--s2)">Performance</span><span style="--c: var(--s3)">Efficiency</span></div>
+          <svg role="img" aria-label="Mispredict rate against pattern length P, log scale from 1 to 1 million, one branch. All three tiers sit near 0 percent up to P of about 100, then creep up to 5 to 8 percent by P of 10 thousand. Super stays under 7 percent until P of about 78 thousand, then reaches 28 percent at 131 thousand and 48 percent at 1 million. Performance jumps after 39 thousand, reaching 28 percent at 65 thousand. Efficiency jumps after 28 thousand, reaching 30 percent at 65 thousand. All approach 48 to 49 percent."></svg>
+          <div class="viz-tip" hidden></div>
+          <figcaption>Mispredict rate for one branch against how long its random pattern is before repeating. 50% is a coin flip. The Efficiency line is noisy at small P and sits a few percent above the others before its cliff.</figcaption>
+        </figure>
+        <details>
+          <summary>Table</summary>
+          <table class="compact">
+            <thead><tr><th>P</th><th>Super</th><th>Performance</th><th>Efficiency</th></tr></thead>
+            <tbody>
+              <tr><td>64</td><td>0.0%</td><td>0.0%</td><td>2.3%</td></tr>
+              <tr><td>256</td><td>1.0%</td><td>0.9%</td><td>5.5%</td></tr>
+              <tr><td>1,024</td><td>3.3%</td><td>2.6%</td><td>6.3%</td></tr>
+              <tr><td>4,096</td><td>5.2%</td><td>4.3%</td><td>7.2%</td></tr>
+              <tr><td>16,384</td><td>5.7%</td><td>5.5%</td><td>8.1%</td></tr>
+              <tr><td>32,768</td><td>6.1%</td><td>6.0%</td><td>17.2%</td></tr>
+              <tr><td>65,536</td><td>6.9%</td><td>28.2%</td><td>30.1%</td></tr>
+              <tr><td>131,072</td><td>28.5%</td><td>38.3%</td><td>40.9%</td></tr>
+              <tr><td>262,144</td><td>39.7%</td><td>45.6%</td><td>46.6%</td></tr>
+            </tbody>
+          </table>
+        </details>
+      </div>
+
+      <p>Each line is flat near zero, creeps upward, then hits a cliff and heads for 50%. I define capacity as the longest P where the miss rate is still under 10%. For one branch:</p>
+
+      <ul>
+        <li><strong>Super:</strong> about 93,000 (9.8% at P = 92,682, 14.5% at 110,218)</li>
+        <li><strong>Performance:</strong> about 39,000 (7.0% at 38,968, 12.0% at 46,341)</li>
+        <li><strong>Efficiency:</strong> about 23,000 (8.6% at 23,170, 10.2% at 27,554)</li>
+      </ul>
+
+      <p>That's a Super core remembering about four times what an Efficiency core does, with the Performance core in between. It mirrors the cache result: the <a href="/posts/2026-10-12-the-fast-cores-have-a-cache-the-others-dont.html">Super tier has more of everything</a>.</p>
+
+      <p>Then I ran the same thing with 4 and 16 separate branches taking turns, each with its own random pattern. The total number of pattern bits is sites times P:</p>
+
+      <table class="compact">
+        <thead><tr><th>tier</th><th>1 branch</th><th>4 branches</th><th>16 branches</th></tr></thead>
+        <tbody>
+          <tr><td>Super, longest P</td><td>92.7k</td><td>23.2k</td><td>4.9k</td></tr>
+          <tr><td>Super, total bits</td><td>~93k</td><td>~93k</td><td>~78k</td></tr>
+          <tr><td>Performance, longest P</td><td>39k</td><td>16.4k</td><td>3.4k</td></tr>
+          <tr><td>Performance, total bits</td><td>39k</td><td>66k</td><td>55k</td></tr>
+          <tr><td>Efficiency, longest P</td><td>23.2k</td><td>8.2k</td><td>3.4k</td></tr>
+          <tr><td>Efficiency, total bits</td><td>23k</td><td>33k</td><td>55k</td></tr>
+        </tbody>
+      </table>
+
+      <p>The Super total is close to constant at about 93k bits whether it's spread over 1 or 4 branches. The others don't line up as neatly. The Performance total goes from 39k to 66k, and Efficiency from 23k to 55k, so spreading the pattern over more branches seems to help them, or something about how the tables are indexed changes. I don't know which. Be a bit skeptical of the 16-branch Super number: only 37 of the 76 pattern lengths made it through the tier check for that case, so the 4.9k and 78k have few samples behind them. Overall, the totals across site counts agree only roughly, and I wouldn't read "the predictor holds X bits" off them.</p>
+
+      <h2>The extra cost before the cliff</h2>
+
+      <p>Look at the left half of the chart again. The lines don't jump from zero to the cliff. From P of about 512 up to the cliff, every tier sits at a steady 2 to 8% apparent "miss rate" on one branch. In cycles that's about 0.9 to 1.4 extra cycles per branch over the learned baseline, and it shows up on all three tiers.</p>
+
+      <p>Is that real mispredicts? The delayed-resolution build can tell. If those were mispredicts, adding 12 cycles to resolution would make each one cost about 1.6 times as much (about 31 cycles instead of about 19), and the extra per branch would grow by that factor. It doesn't. With the delay, the plateau is 0.3 to 1.05 extra cycles per branch, no bigger than before. So it's not extra mispredicts. It's a fixed cost per branch that doesn't depend on how long the branch takes to resolve.</p>
+
+      <p>My guess, and this is an inference rather than something I measured: the core has a small, fast first-level predictor and a larger, slower one behind it. Once the pattern is too long for the fast one, the front end has to wait for the bigger predictor to override the fast guess, and that costs about a cycle even when the final answer is right. That fits a cost that appears once the pattern outgrows the small table, doesn't depend on resolve time, and is the same size on every tier. But I have no performance counters on this OS, so I can't see mispredicts or overrides directly. Another explanation could fit the same chart.</p>
+
+      <h2>Takeaway</h2>
+
+      <p>Branch history capacity follows the same ordering as the caches: Super about 93k for a single branch, Performance about 39k, Efficiency about 23k. A mispredict costs about 20 cycles on the fast tiers and 15 to 16 on Efficiency, and anything that delays the branch's answer adds to that cycle for cycle. If your branches follow a pattern shorter than a few thousand, any of these cores will get it right more than nine times in ten, though not for free. If they follow a long random one, the Super cores will hold out about four times longer than the Efficiency cores.</p>
+    </article>
+  </main>
+  <script src="/js/bpred-ui.js?v=1"></script>
+</body>
+</html>
