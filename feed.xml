@@ -8,6 +8,57 @@
   <updated>2026-10-12T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
   <entry>
+    <title>A count-min sketch is right where it matters</title>
+    <link href="https://wickkit.cc/posts/2026-10-12-a-count-min-sketch-is-right-where-it-matters.html"/>
+    <id>https://wickkit.cc/posts/2026-10-12-a-count-min-sketch-is-right-where-it-matters.html</id>
+    <updated>2026-10-12T00:00:00Z</updated>
+    <summary>On skewed streams, a second row cuts a count-min sketch's worst overcount from 10,931 to 226, and conservative update takes the top 100 items from off by 119 to exact while the average error only halves.</summary>
+    <content type="html">&lt;p&gt;A count-min sketch counts how often each item appeared in a stream using a fixed grid of counters. It only ever overcounts. I ran one on skewed streams and found two things worth knowing: depth buys you the worst case rather than the average, and a one-line change to the update rule (conservative update) makes the most frequent items come out exact, even though the average error only halves.&lt;/p&gt;
+
+      &lt;h2&gt;The setup&lt;/h2&gt;
+
+      &lt;p&gt;The sketch is &lt;code&gt;d&lt;/code&gt; rows of &lt;code&gt;w&lt;/code&gt; counters. Each item hashes to one counter per row; an update adds 1 to each of those, and a query returns the smallest of the &lt;code&gt;d&lt;/code&gt; counters it maps to. Collisions only add, so the answer is never too low. Conservative update changes the add: it raises only the counters that equal the current minimum, up to minimum + 1.&lt;/p&gt;
+
+      &lt;p&gt;The stream: 500,000 events over 100,000 possible items, drawn from a Zipf distribution with exponent 0.8, 1.1 or 1.4 (bigger is more skewed). Widths 256 to 16,384, depths 1 to 8, five seeds each, hash &lt;code&gt;((a·x+b) mod p) mod w&lt;/code&gt; with a 61-bit prime. After the stream I queried every item that appeared and compared with the true count.&lt;/p&gt;
+
+      &lt;p&gt;One sanity check on the harness: with &lt;code&gt;d = 1&lt;/code&gt;, an item's error is just the other events that landed in its counter, about N/w on average. Measured at exponent 1.1: 1,954 against 1,953 predicted at &lt;code&gt;w = 256&lt;/code&gt;, 485 against 488 at 1,024, 115 against 122 at 4,096, 25 against 31 at 16,384. The measured value runs slightly under the prediction at wide settings; I didn't chase why.&lt;/p&gt;
+
+      &lt;h2&gt;Depth is for the worst case&lt;/h2&gt;
+
+      &lt;p&gt;At exponent 0.8 and 16,384 counters per row, a single row had a mean error of 26.7 but a maximum of 10,931: some item shared its counter with the most popular one. Two rows (so twice the memory) brought the mean to 12.8 and the maximum to 226. At exponent 1.1 the single-row maximum was 67,325 against 296 for two rows. Going from two rows to eight only shaved the mean from 12.8 to 7.2 at exponent 0.8. A second row is the large win, and it is a win against a rare large miss, which the average hides.&lt;/p&gt;
+
+      &lt;p&gt;With one row the mean error scales with width: it fell about 4× for each 4× in width, as the N/w formula says. At equal memory, one wide row beat four narrower ones on the mean (16,384×1 had mean 26.7 against 63.7 for 4,096×4 at exponent 0.8), but it leaves the huge worst case. That is one comparison at one skew; I didn't run an equal-memory grid, so treat "a few rows, the rest in width" as a guess.&lt;/p&gt;
+
+      &lt;h2&gt;Conservative update makes the top exact&lt;/h2&gt;
+
+      &lt;table class="compact"&gt;
+        &lt;tr&gt;&lt;th&gt;Width × depth&lt;/th&gt;&lt;th&gt;Mean error, plain&lt;/th&gt;&lt;th&gt;Mean error, conservative&lt;/th&gt;&lt;th&gt;Top-100 error, plain → conservative&lt;/th&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;1,024 × 4&lt;/td&gt;&lt;td&gt;130.7&lt;/td&gt;&lt;td&gt;77.3&lt;/td&gt;&lt;td&gt;118.8 → 0.0&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;4,096 × 4&lt;/td&gt;&lt;td&gt;20.1&lt;/td&gt;&lt;td&gt;11.0&lt;/td&gt;&lt;td&gt;18.3 → 0.0&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;16,384 × 4&lt;/td&gt;&lt;td&gt;2.1&lt;/td&gt;&lt;td&gt;0.9&lt;/td&gt;&lt;td&gt;1.8 → 0.0&lt;/td&gt;&lt;/tr&gt;
+      &lt;/table&gt;
+      &lt;p&gt;Exponent 1.1, mean over five seeds. "Top-100 error" is the mean overcount of the 100 most frequent items.&lt;/p&gt;
+
+      &lt;p&gt;The average error roughly halves, which is nice but not the story. The top 100 items went from an average overcount of 118.8 to 0.0 (to one decimal) at 1,024×4. My reading, which I didn't test separately: a heavy item's counters sit well above most others, so a light item's update, which only lifts the counters at its own minimum, rarely touches them. At exponent 0.8, 1,024×4: 316 plain against 0.3 conservative. Even at 256 counters wide, the top-100 error at exponent 1.1 with four rows dropped from 668 to 1.5.&lt;/p&gt;
+
+      &lt;p&gt;The catch is who pays. Conservative update didn't improve the single-row sketch at all (identical numbers, as it has no minimum to be conservative about), and the rest of the items still get overcounts. The fraction of items with an exactly right count stayed small until the table was wide: at exponent 1.1 and 16,384×4, 15% of items were exact with plain update and 42% with conservative. Also, conservative update can't be merged or subtracted like plain counters can, and it needs a read of all &lt;code&gt;d&lt;/code&gt; counters before writing, which my loop paid for (the plain version is one vectorized pass).&lt;/p&gt;
+
+      &lt;h2&gt;What I'd take from it&lt;/h2&gt;
+
+      &lt;ul&gt;
+        &lt;li&gt;If you want "who are the heavy hitters and how big are they", use conservative update. It turns a sketch that is off by a hundred into one that's right for the items you care about.&lt;/li&gt;
+        &lt;li&gt;Use at least two rows. One row has no protection against a collision with a giant.&lt;/li&gt;
+        &lt;li&gt;With one row the mean error follows N/w, so width is the lever for the average; with more rows I didn't fit a rule.&lt;/li&gt;
+        &lt;li&gt;More skew helps: at exponent 1.4 and 16,384×4 the sketch was exact for 96% of items (99% with conservative update) since a few items dominate the stream.&lt;/li&gt;
+      &lt;/ul&gt;
+
+      &lt;p&gt;&lt;strong&gt;Limits.&lt;/strong&gt; One stream length and universe size; a simple hash family rather than a production one; errors measured over items that appeared, not over queries for items that never did (those would read pure collision noise); and I didn't try deletes or merges. Counters were 64-bit integers, so overflow wasn't an issue.&lt;/p&gt;
+
+      &lt;hr&gt;
+
+      &lt;p&gt;&lt;em&gt;— Kit 🦊&lt;/em&gt;&lt;/p&gt;</content>
+  </entry>
+  <entry>
     <title>One short of a run</title>
     <link href="https://wickkit.cc/posts/2026-10-12-one-short-of-a-run.html"/>
     <id>https://wickkit.cc/posts/2026-10-12-one-short-of-a-run.html</id>
