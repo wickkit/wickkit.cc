@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>.NET's timeouts let go of finished requests; an undisposed linked token never does — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/tools.html">tools</a>
+      <a href="/den.html">den</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+
+    <article>
+      <h1>.NET's timeouts let go of finished requests; an undisposed linked token never does</h1>
+      <div class="meta">2026-10-13 · Kit Wickham</div>
+
+      <p>Fifth runtime, same question: when a request finishes before its timeout, does the timeout still keep the request's data alive? <a href="/posts/2026-10-13-a-cancelled-asyncio-timeout-keeps-your-request.html">asyncio</a> and <a href="/posts/2026-10-13-go-cancelled-timeouts-keep-requests-too.html">Go</a> do. <a href="/posts/2026-10-13-node-timeouts-promise-race-keeps-results.html">Node</a> and <a href="/posts/2026-10-13-java-timeouts-let-go-except-java-util-timer.html">Java</a> don't, apart from a few patterns. On .NET 8, 9 and 10 the runtime's own timeouts keep nothing: <code>Task.WaitAsync</code>, <code>HttpClient.Timeout</code>, and even <code>Task.WhenAny(work, Task.Delay(timeout))</code> with the delay never cancelled. The new failure is worse than anything in the earlier runtimes, though. A linked <code>CancellationTokenSource</code> that you don't dispose stays attached to its parent token after its timeout has fired, for as long as the parent lives. Everything the earlier runtimes kept was let go eventually, at the latest a while after the timeout. This one isn't let go at all.</p>
+
+      <h2>The test</h2>
+
+      <p>Each request gets a 32 KiB byte array, does a trivial async step, and finishes, 50 at a time. Each one has a 30-second timeout, set up one of the ways below. I keep a <code>WeakReference</code> to every array. After 2,000 requests have finished, with their timeouts still pending, I run three full blocking collections and count the arrays still reachable. I ran .NET 8.0.31, 9.0.20 and 10.0.12 on Linux arm64, three runs of each. All three versions gave the same counts, apart from a single stray array in four of the 153 runs.</p>
+
+      <table class="compact">
+        <thead><tr><th>Pattern</th><th>Kept of 2,000</th></tr></thead>
+        <tbody>
+          <tr><td>No timeout (control)</td><td>0</td></tr>
+          <tr><td><code>await work.WaitAsync(timeout)</code></td><td>0</td></tr>
+          <tr><td><code>Task.WhenAny(work, Task.Delay(timeout))</code>, delay never cancelled</td><td>0</td></tr>
+          <tr><td>Same with three tasks, or a <code>List&lt;Task&gt;</code></td><td>0</td></tr>
+          <tr><td><code>Task.Delay(timeout, token)</code>, token cancelled when done</td><td>0</td></tr>
+          <tr><td><code>new CancellationTokenSource(timeout)</code> + <code>Token.Register(…)</code>, disposed</td><td>0</td></tr>
+          <tr><td>Same, only the registration disposed</td><td>0</td></tr>
+          <tr><td><code>System.Threading.Timer</code>, disposed when done</td><td>0</td></tr>
+          <tr><td><code>System.Threading.Timer</code>, never stored anywhere</td><td>0</td></tr>
+          <tr><td><code>new CancellationTokenSource(timeout)</code> + <code>Token.Register(…)</code>, nothing disposed</td><td>2,000</td></tr>
+          <tr><td>Linked to a long-lived token + <code>CancelAfter</code> + <code>Register</code>, nothing disposed</td><td>2,000</td></tr>
+          <tr><td><code>Task.Delay(timeout).ContinueWith(…)</code></td><td>2,000</td></tr>
+          <tr><td><code>HttpClient.SendAsync</code>, with or without <code>Timeout</code></td><td>50</td></tr>
+        </tbody>
+      </table>
+
+      <p>The rows that kept 2,000 held about 66 MB of heap after collection, against 0.1–0.2 MB for the clean ones. With a 3-second timeout, recounted 5 seconds later, all three were back to 0 arrays. So far, the same shape as Java: you only keep request data if you hold it yourself until the timeout runs.</p>
+
+      <h2>Why the runtime's own timeouts are clean</h2>
+
+      <p><code>WaitAsync</code> completes through a small promise that, as soon as either side finishes, disposes its timer and token registration and removes itself from the task it was watching (<code>CancellationPromise.Cleanup</code> in <a href="https://github.com/dotnet/runtime/blob/release/10.0/src/libraries/System.Private.CoreLib/src/System/Threading/Tasks/Task.cs"><code>Task.cs</code></a>). <code>HttpClient</code> makes a linked token source per request, calls <code>CancelAfter</code> on it, and disposes it when the request is done (<a href="https://github.com/dotnet/runtime/blob/release/10.0/src/libraries/System.Net.Http/src/System/Net/Http/HttpClient.cs"><code>HttpClient.cs</code></a>).</p>
+
+      <p>The <code>WhenAny</code> result is the one that differs from Node. In Node, an uncancelled <code>Promise.race</code> timer kept every result for the full timeout, because the pending timeout promise still linked to the race. Here the uncancelled <code>Task.Delay</code> also sits in the timer queue for 30 seconds, but when the work finishes first, <code>WhenAny</code> drops its references to both tasks and removes its continuation from the delay (<code>TwoTaskWhenAnyPromise</code>, same file). The pending delay is left holding nothing but itself.</p>
+
+      <h2>The one that never lets go</h2>
+
+      <p>The pattern is common in background services: per operation, link a token source to a long-lived token (the app's stopping token, a worker's <code>stoppingToken</code>), set a timeout with <code>CancelAfter</code>, and pass the linked token down. If you write <code>var cts = …</code> instead of <code>using var cts = …</code>, here's what happens.</p>
+
+      <p>The linked source registers itself on the parent token when it's created. That registration is undone in exactly one place, the linked source's <code>Dispose</code> (<a href="https://github.com/dotnet/runtime/blob/release/10.0/src/libraries/System.Private.CoreLib/src/System/Threading/CancellationTokenSource.cs"><code>CancellationTokenSource.cs</code></a>). Timing out doesn't undo it. When the timeout fires, the linked source cancels and runs its own callbacks, which drops the request data. But the source itself stays in the parent's registration list.</p>
+
+      <p>To size it, I ran 200,000 requests with a 1-second timeout and recounted 4 seconds after they'd all fired:</p>
+
+      <table class="compact">
+        <thead><tr><th>Pattern</th><th>Request arrays kept</th><th>Token sources kept</th><th>Heap after</th></tr></thead>
+        <tbody>
+          <tr><td>Linked, disposed</td><td>0</td><td>0</td><td>16.0 MB</td></tr>
+          <tr><td>Linked, not disposed</td><td>0</td><td>200,000</td><td>45.0–45.3 MB</td></tr>
+          <tr><td>Not linked, not disposed</td><td>0</td><td>0</td><td>16.2–16.5 MB</td></tr>
+        </tbody>
+      </table>
+
+      <p>That's about 145 bytes per request, the same on 8, 9 and 10, and it's never returned while the parent token lives. An unlinked source that isn't disposed is only held by its own timer, so it's gone once the timeout fires. Small per request, but unbounded: at 440 requests a second, the load from the Node post, it's about 64 KB a second or 5.5 GB a day. That's arithmetic from the counts above, not a load test, and the request data doesn't come into it. Disposing the linked source is the only thing that takes it off the parent.</p>
+
+      <h2>Two smaller notes</h2>
+
+      <p>A <code>System.Threading.Timer</code> you don't keep a reference to keeps nothing, but only because the timer itself gets collected. Its finalizer disposes the underlying timer, so the callback never runs: in the 3-second runs, none of the 2,000 fired. If the callback was your timeout, it silently never happens.</p>
+
+      <p><code>HttpClient</code> kept exactly one request body per concurrent request: 5 at concurrency 5, 20 at 20, 50 at 50. That was the same with no timeout set and with <code>Connection: close</code>, and it was still there seconds later. It's bounded and it isn't the timeout. I didn't track down what holds them.</p>
+
+      <h2>What to take from it</h2>
+
+      <p>.NET is with Java and Node: the runtime's timeout machinery lets go of finished work, including the <code>WhenAny</code>-plus-<code>Delay</code> idiom that leaks in Node. You keep request data only by leaving your own registration on an undisposed token source, and then only for the length of the timeout. The exception is linking. A linked token source you don't dispose is the only thing in five runtimes that grew without bound in these tests. If you link, use <code>using</code>.</p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+</body>
+</html>

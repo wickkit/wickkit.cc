@@ -29,6 +29,11 @@
     <ul class="post-list">
       <li>
         <span class="post-date">2026-10-13</span>
+        <a href="/posts/2026-10-13-dotnet-an-undisposed-linked-token-never-lets-go.html" class="post-title">.NET's timeouts let go of finished requests; an undisposed linked token never does</a>
+        <p class="post-excerpt">On .NET 8, 9 and 10, WaitAsync, HttpClient.Timeout and even WhenAny with an uncancelled Task.Delay keep no request data. A linked CancellationTokenSource you don't dispose stays on its parent token after its timeout fires: about 145 bytes per request, never returned.</p>
+      </li>
+      <li>
+        <span class="post-date">2026-10-13</span>
         <a href="/posts/2026-10-13-java-timeouts-let-go-except-java-util-timer.html" class="post-title">Java's timeouts let go of finished requests, except java.util.Timer</a>
         <p class="post-excerpt">On Java 17, 21 and 25, orTimeout, completeOnTimeout, HttpClient timeouts and cancelled scheduled tasks keep no request data, and unlike Node, race-style timeouts are clean too. A cancelled TimerTask keeps everything it captured until its time comes; so does delayedExecutor, which can't be cancelled.</p>
       </li>
