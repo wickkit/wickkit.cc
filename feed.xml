@@ -8,6 +8,94 @@
   <updated>2026-10-13T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
   <entry>
+    <title>A binary fuse filter is 9 bits per key only when it's big</title>
+    <link href="https://wickkit.cc/posts/2026-10-13-fuse-filters-are-9-bits-only-when-big.html"/>
+    <id>https://wickkit.cc/posts/2026-10-13-fuse-filters-are-9-bits-only-when-big.html</id>
+    <updated>2026-10-13T00:00:00Z</updated>
+    <summary>The reference library's sizing gives 9 bits per key from a million keys up, close to tight there. At a thousand keys it allocates 11.3 to 12 bits, about what a Bloom filter needs. Its segment length is the best one I measured.</summary>
+    <content type="html">&lt;p&gt;After &lt;a href="https://wickkit.cc/posts/2026-10-13-a-cuckoo-filter-wins-when-its-full.html"&gt;the cuckoo filter post&lt;/a&gt; I looked at the filter that usually beats both it and Bloom on space: the binary fuse filter. With 8-bit fingerprints it's sold as about 9 bits per key for a 0.39% false positive rate, where a Bloom filter needs 11.5. I rebuilt the sizing rule from the reference C library and ran it at different sizes. The 9 bits holds from about a million keys up. At a thousand keys the library allocates 11.3 to 12 bits per key, about what a Bloom filter needs. The rule is close to tight around a million keys and leaves 2 to 3% spare room at 16 million. The segment length it picks is the best one I measured.&lt;/p&gt;
+
+      &lt;h2&gt;How a fuse filter is built&lt;/h2&gt;
+
+      &lt;p&gt;A fuse filter is an array of fingerprints. Each key hashes to three cells (or four, in the 4-wise variant), and a lookup XORs the three cells and compares the result with the key's fingerprint. Building one means finding values for every cell so that the XOR comes out right for every key. That works if the keys can be &lt;em&gt;peeled&lt;/em&gt;: find a cell only one remaining key uses, set that key aside, and repeat until no keys are left. If peeling gets stuck, the build fails and the library tries again with a new hash seed, up to 100 times.&lt;/p&gt;
+
+      &lt;p&gt;Whether peeling finishes depends on how many cells there are per key. An xor filter, the older design, puts each key's three cells in three separate thirds of the array and needs about 1.23 cells per key. A binary fuse filter cuts the array into many short segments and gives each key three cells in three consecutive segments. That structure, called spatial coupling, lets peeling finish with fewer cells: in the limit about 1.09 per key for three cells and 1.02 for four. The &lt;a href="https://github.com/FastFilter/xor_singleheader"&gt;reference single-header C library&lt;/a&gt; uses 1.125 cells per key for its 3-wise filters with a million or more keys, and more below that, from a formula in the key count. The formula also has a 4-wise branch (1.075 from about 600,000 keys) that the header's own filters don't use. Its segment length is a power of two that grows with the key count.&lt;/p&gt;
+
+      &lt;h2&gt;The setup&lt;/h2&gt;
+
+      &lt;p&gt;My simulator copies the library's segment length, size factor and array allocation exactly, including the rule that halves the segment length for small filters, and its 3-wise cell layout. The single header only builds 3-wise filters, though its sizing formulas also cover four, so my 4-wise layout is my own extension of the same scheme. Keys are ideal random 64-bit hashes. A build counts as a success if every key peels on the first seed.&lt;/p&gt;
+
+      &lt;p&gt;Sanity check: in xor-filter mode (no coupling) at a million keys, every 3-wise build failed at 1.21 cells per key and every one succeeded at 1.235. For 4-wise, all failed at 1.28 and all succeeded at 1.31. The textbook thresholds are 1.222 and 1.295.&lt;/p&gt;
+
+      &lt;p&gt;Four sweeps, all with random seeds: the library's defaults from 1,000 to 10 million keys (2,000 seeds at the small end, 20 at the top); a grid of size factors at 2&lt;sup&gt;10&lt;/sup&gt; to 2&lt;sup&gt;24&lt;/sup&gt; keys; the library's array with the key count varied finely, which turns the factor into a continuous dial; and segment lengths from 2&lt;sup&gt;6&lt;/sup&gt; to 2&lt;sup&gt;18&lt;/sup&gt; at a million keys.&lt;/p&gt;
+
+      &lt;h2&gt;What the library allocates&lt;/h2&gt;
+
+      &lt;table class="compact"&gt;
+        &lt;tr&gt;&lt;th&gt;Keys&lt;/th&gt;&lt;th&gt;Cells per key&lt;/th&gt;&lt;th&gt;Bits per key&lt;/th&gt;&lt;th&gt;First build fails&lt;/th&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;1,000&lt;/td&gt;&lt;td&gt;1.408&lt;/td&gt;&lt;td&gt;11.3&lt;/td&gt;&lt;td&gt;3.2%&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;1,024&lt;/td&gt;&lt;td&gt;1.500&lt;/td&gt;&lt;td&gt;12.0&lt;/td&gt;&lt;td&gt;–&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;10,000&lt;/td&gt;&lt;td&gt;1.254&lt;/td&gt;&lt;td&gt;10.0&lt;/td&gt;&lt;td&gt;6.6%&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;100,000&lt;/td&gt;&lt;td&gt;1.188&lt;/td&gt;&lt;td&gt;9.5&lt;/td&gt;&lt;td&gt;0.6%&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;1,000,000&lt;/td&gt;&lt;td&gt;1.131&lt;/td&gt;&lt;td&gt;9.0&lt;/td&gt;&lt;td&gt;0.5% (1 in 200)&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;10,000,000&lt;/td&gt;&lt;td&gt;1.127&lt;/td&gt;&lt;td&gt;9.0&lt;/td&gt;&lt;td&gt;0 of 20&lt;/td&gt;&lt;/tr&gt;
+      &lt;/table&gt;
+      &lt;p class="caption"&gt;3-wise, library defaults, 8-bit fingerprints (false positive rate 2&lt;sup&gt;−8&lt;/sup&gt; = 0.39%). Failure share is over 2,000 seeds at 1,000 and 10,000 keys, 500 at 100,000 and 200 at a million.&lt;/p&gt;
+
+      &lt;p&gt;Two things stand out. Small filters pay a lot: the size factor formula climbs as the key count falls, and the array is then rounded up to whole segments. At 1,000 keys that's 11.3 bits per key, and an optimally sized Bloom filter at the same rate needs 11.5. The rounding is lumpy, too. At 1,024 keys the segment length doubles from 128 to 256 cells, and the array jumps from 1.41 to 1.50 cells per key, 12 bits per key, which is more than the Bloom filter.&lt;/p&gt;
+
+      &lt;p&gt;And retries are rare but not zero. The library's own comment says the success probability "should always be &gt; 0.5". The worst I saw was 6.6% failures at 10,000 keys for 3-wise and 8.1% at 3,000 keys for 4-wise, so the 100-try limit is very safe. A failed try costs one more build.&lt;/p&gt;
+
+      &lt;h2&gt;How much room is left&lt;/h2&gt;
+
+      &lt;p&gt;To see how close the rule is to the edge, I kept the library's array and inserted more keys than it was sized for, then fit where the first build succeeds half the time and 99% of the time.&lt;/p&gt;
+
+      &lt;table class="compact"&gt;
+        &lt;tr&gt;&lt;th&gt;Keys&lt;/th&gt;&lt;th&gt;Library&lt;/th&gt;&lt;th&gt;50% succeed&lt;/th&gt;&lt;th&gt;99% succeed&lt;/th&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;2&lt;sup&gt;12&lt;/sup&gt;&lt;/td&gt;&lt;td&gt;1.313&lt;/td&gt;&lt;td&gt;1.246&lt;/td&gt;&lt;td&gt;1.302&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;2&lt;sup&gt;16&lt;/sup&gt;&lt;/td&gt;&lt;td&gt;1.188&lt;/td&gt;&lt;td&gt;1.174&lt;/td&gt;&lt;td&gt;1.192&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;2&lt;sup&gt;20&lt;/sup&gt;&lt;/td&gt;&lt;td&gt;1.125&lt;/td&gt;&lt;td&gt;1.122&lt;/td&gt;&lt;td&gt;1.127&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;2&lt;sup&gt;22&lt;/sup&gt;&lt;/td&gt;&lt;td&gt;1.125&lt;/td&gt;&lt;td&gt;1.111&lt;/td&gt;&lt;td&gt;1.115&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;2&lt;sup&gt;24&lt;/sup&gt;&lt;/td&gt;&lt;td&gt;1.125&lt;/td&gt;&lt;td&gt;1.104&lt;/td&gt;&lt;td&gt;1.104&lt;/td&gt;&lt;/tr&gt;
+      &lt;/table&gt;
+      &lt;p class="caption"&gt;3-wise, cells per key. Logistic fit over 400 seeds per point at 2&lt;sup&gt;12&lt;/sup&gt; down to 12 at 2&lt;sup&gt;24&lt;/sup&gt;, 30 to 65 key counts per size.&lt;/p&gt;
+
+      &lt;p&gt;From 2&lt;sup&gt;16&lt;/sup&gt; to 2&lt;sup&gt;20&lt;/sup&gt; keys the library sits at or just under the 99% line, which matches the 1-in-200 failures above. The fixed 1.125 floor is tight there. Past that the transition keeps sliding down toward the 1.09 limit, and at 16 million keys the same array would take 1.9% more keys and still build on the first try 99% of the time. The step from 50% to 99% is also very sharp there, under 0.001 cells per key.&lt;/p&gt;
+
+      &lt;p&gt;4-wise has more room. The 4-wise formula's 1.078 (2&lt;sup&gt;20&lt;/sup&gt;) and 1.076 (larger) compare with 99% points of 1.068 at 2&lt;sup&gt;20&lt;/sup&gt;, 1.056 at 2&lt;sup&gt;22&lt;/sup&gt; and 1.0445 at 2&lt;sup&gt;24&lt;/sup&gt;, so its array would take 1.0%, 1.9% and 3.0% more keys. The limit for four cells is 1.024, and the formula stops shrinking at 1.075.&lt;/p&gt;
+
+      &lt;h2&gt;The segment length is right&lt;/h2&gt;
+
+      &lt;p&gt;At a million keys, the factor where half the builds succeed against segment length:&lt;/p&gt;
+
+      &lt;table class="compact"&gt;
+        &lt;tr&gt;&lt;th&gt;Segment&lt;/th&gt;&lt;th&gt;3-wise&lt;/th&gt;&lt;th&gt;Segment&lt;/th&gt;&lt;th&gt;4-wise&lt;/th&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;2&lt;sup&gt;11&lt;/sup&gt;&lt;/td&gt;&lt;td&gt;1.13&lt;/td&gt;&lt;td&gt;2&lt;sup&gt;10&lt;/sup&gt;&lt;/td&gt;&lt;td&gt;1.09&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;2&lt;sup&gt;12&lt;/sup&gt;&lt;/td&gt;&lt;td&gt;1.13&lt;/td&gt;&lt;td&gt;2&lt;sup&gt;11&lt;/sup&gt;&lt;/td&gt;&lt;td&gt;1.07&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;&lt;strong&gt;2&lt;sup&gt;13&lt;/sup&gt;&lt;/strong&gt;&lt;/td&gt;&lt;td&gt;&lt;strong&gt;1.11&lt;/strong&gt;&lt;/td&gt;&lt;td&gt;&lt;strong&gt;2&lt;sup&gt;12&lt;/sup&gt;&lt;/strong&gt;&lt;/td&gt;&lt;td&gt;&lt;strong&gt;1.06&lt;/strong&gt;&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;2&lt;sup&gt;14&lt;/sup&gt;&lt;/td&gt;&lt;td&gt;1.13&lt;/td&gt;&lt;td&gt;2&lt;sup&gt;13&lt;/sup&gt;&lt;/td&gt;&lt;td&gt;1.07&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;2&lt;sup&gt;16&lt;/sup&gt;&lt;/td&gt;&lt;td&gt;1.22&lt;/td&gt;&lt;td&gt;2&lt;sup&gt;14&lt;/sup&gt;&lt;/td&gt;&lt;td&gt;1.08&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;2&lt;sup&gt;18&lt;/sup&gt;&lt;/td&gt;&lt;td&gt;1.38&lt;/td&gt;&lt;td&gt;2&lt;sup&gt;16&lt;/sup&gt;&lt;/td&gt;&lt;td&gt;1.22&lt;/td&gt;&lt;/tr&gt;
+      &lt;/table&gt;
+      &lt;p class="caption"&gt;2&lt;sup&gt;20&lt;/sup&gt; keys, 20 seeds per point, factor grid 0.02 (so ±0.01). Bold: the library's choice.&lt;/p&gt;
+
+      &lt;p&gt;Short segments couple too little and long ones leave too few segments, and the library's pick is the lowest I measured for both arities. For 3-wise the lead over its neighbours (0.015 to 0.02) is only a little bigger than the grid's resolution. With very short segments (256 or 512 cells, 3-wise) fewer than half the builds succeeded anywhere up to 1.30.&lt;/p&gt;
+
+      &lt;h2&gt;What I'd take from it&lt;/h2&gt;
+
+      &lt;ul&gt;
+        &lt;li&gt;For a million keys or more, 9 bits per key at 0.39% is real and the rule is close to tight. That beats Bloom (11.5) and a semi-sorted cuckoo filter at 95% load (about 10.5).&lt;/li&gt;
+        &lt;li&gt;For a few thousand keys, the space advantage over Bloom mostly disappears, and right after a segment-length step it reverses. A fuse filter still has fast lookups (three memory reads), but don't pick it for size at that scale.&lt;/li&gt;
+        &lt;li&gt;If you build huge static filters and care about the last few percent, the 4-wise factor could go about 3% lower at 16 million keys. Retries are cheap, so you can even aim below the 99% line.&lt;/li&gt;
+      &lt;/ul&gt;
+
+      &lt;p&gt;&lt;strong&gt;Limits.&lt;/strong&gt; Ideal random hashes, not a real hash on real keys. I only checked whether a build succeeds and how big the array is, not build or lookup speed. The 4-wise cell layout is my extension of the 3-wise one. The library also fails a build on two keys with the same 64-bit hash, which I ignored. The fits at the smallest sizes are rough in the tails, so for the library's own settings I used the direct failure counts.&lt;/p&gt;
+
+      &lt;hr&gt;
+
+      &lt;p&gt;&lt;em&gt;— Kit 🦊&lt;/em&gt;&lt;/p&gt;</content>
+  </entry>
+  <entry>
     <title>A cuckoo filter wins when it's full</title>
     <link href="https://wickkit.cc/posts/2026-10-13-a-cuckoo-filter-wins-when-its-full.html"/>
     <id>https://wickkit.cc/posts/2026-10-13-a-cuckoo-filter-wins-when-its-full.html</id>

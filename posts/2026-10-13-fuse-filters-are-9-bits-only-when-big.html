@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>A binary fuse filter is 9 bits per key only when it's big — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/tools.html">tools</a>
+      <a href="/den.html">den</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+
+    <article>
+      <h1>A binary fuse filter is 9 bits per key only when it's big</h1>
+      <div class="meta">2026-10-13 · Kit Wickham</div>
+
+      <p>After <a href="/posts/2026-10-13-a-cuckoo-filter-wins-when-its-full.html">the cuckoo filter post</a> I looked at the filter that usually beats both it and Bloom on space: the binary fuse filter. With 8-bit fingerprints it's sold as about 9 bits per key for a 0.39% false positive rate, where a Bloom filter needs 11.5. I rebuilt the sizing rule from the reference C library and ran it at different sizes. The 9 bits holds from about a million keys up. At a thousand keys the library allocates 11.3 to 12 bits per key, about what a Bloom filter needs. The rule is close to tight around a million keys and leaves 2 to 3% spare room at 16 million. The segment length it picks is the best one I measured.</p>
+
+      <h2>How a fuse filter is built</h2>
+
+      <p>A fuse filter is an array of fingerprints. Each key hashes to three cells (or four, in the 4-wise variant), and a lookup XORs the three cells and compares the result with the key's fingerprint. Building one means finding values for every cell so that the XOR comes out right for every key. That works if the keys can be <em>peeled</em>: find a cell only one remaining key uses, set that key aside, and repeat until no keys are left. If peeling gets stuck, the build fails and the library tries again with a new hash seed, up to 100 times.</p>
+
+      <p>Whether peeling finishes depends on how many cells there are per key. An xor filter, the older design, puts each key's three cells in three separate thirds of the array and needs about 1.23 cells per key. A binary fuse filter cuts the array into many short segments and gives each key three cells in three consecutive segments. That structure, called spatial coupling, lets peeling finish with fewer cells: in the limit about 1.09 per key for three cells and 1.02 for four. The <a href="https://github.com/FastFilter/xor_singleheader">reference single-header C library</a> uses 1.125 cells per key for its 3-wise filters with a million or more keys, and more below that, from a formula in the key count. The formula also has a 4-wise branch (1.075 from about 600,000 keys) that the header's own filters don't use. Its segment length is a power of two that grows with the key count.</p>
+
+      <h2>The setup</h2>
+
+      <p>My simulator copies the library's segment length, size factor and array allocation exactly, including the rule that halves the segment length for small filters, and its 3-wise cell layout. The single header only builds 3-wise filters, though its sizing formulas also cover four, so my 4-wise layout is my own extension of the same scheme. Keys are ideal random 64-bit hashes. A build counts as a success if every key peels on the first seed.</p>
+
+      <p>Sanity check: in xor-filter mode (no coupling) at a million keys, every 3-wise build failed at 1.21 cells per key and every one succeeded at 1.235. For 4-wise, all failed at 1.28 and all succeeded at 1.31. The textbook thresholds are 1.222 and 1.295.</p>
+
+      <p>Four sweeps, all with random seeds: the library's defaults from 1,000 to 10 million keys (2,000 seeds at the small end, 20 at the top); a grid of size factors at 2<sup>10</sup> to 2<sup>24</sup> keys; the library's array with the key count varied finely, which turns the factor into a continuous dial; and segment lengths from 2<sup>6</sup> to 2<sup>18</sup> at a million keys.</p>
+
+      <h2>What the library allocates</h2>
+
+      <table class="compact">
+        <tr><th>Keys</th><th>Cells per key</th><th>Bits per key</th><th>First build fails</th></tr>
+        <tr><td>1,000</td><td>1.408</td><td>11.3</td><td>3.2%</td></tr>
+        <tr><td>1,024</td><td>1.500</td><td>12.0</td><td>–</td></tr>
+        <tr><td>10,000</td><td>1.254</td><td>10.0</td><td>6.6%</td></tr>
+        <tr><td>100,000</td><td>1.188</td><td>9.5</td><td>0.6%</td></tr>
+        <tr><td>1,000,000</td><td>1.131</td><td>9.0</td><td>0.5% (1 in 200)</td></tr>
+        <tr><td>10,000,000</td><td>1.127</td><td>9.0</td><td>0 of 20</td></tr>
+      </table>
+      <p class="caption">3-wise, library defaults, 8-bit fingerprints (false positive rate 2<sup>−8</sup> = 0.39%). Failure share is over 2,000 seeds at 1,000 and 10,000 keys, 500 at 100,000 and 200 at a million.</p>
+
+      <p>Two things stand out. Small filters pay a lot: the size factor formula climbs as the key count falls, and the array is then rounded up to whole segments. At 1,000 keys that's 11.3 bits per key, and an optimally sized Bloom filter at the same rate needs 11.5. The rounding is lumpy, too. At 1,024 keys the segment length doubles from 128 to 256 cells, and the array jumps from 1.41 to 1.50 cells per key, 12 bits per key, which is more than the Bloom filter.</p>
+
+      <p>And retries are rare but not zero. The library's own comment says the success probability "should always be > 0.5". The worst I saw was 6.6% failures at 10,000 keys for 3-wise and 8.1% at 3,000 keys for 4-wise, so the 100-try limit is very safe. A failed try costs one more build.</p>
+
+      <h2>How much room is left</h2>
+
+      <p>To see how close the rule is to the edge, I kept the library's array and inserted more keys than it was sized for, then fit where the first build succeeds half the time and 99% of the time.</p>
+
+      <table class="compact">
+        <tr><th>Keys</th><th>Library</th><th>50% succeed</th><th>99% succeed</th></tr>
+        <tr><td>2<sup>12</sup></td><td>1.313</td><td>1.246</td><td>1.302</td></tr>
+        <tr><td>2<sup>16</sup></td><td>1.188</td><td>1.174</td><td>1.192</td></tr>
+        <tr><td>2<sup>20</sup></td><td>1.125</td><td>1.122</td><td>1.127</td></tr>
+        <tr><td>2<sup>22</sup></td><td>1.125</td><td>1.111</td><td>1.115</td></tr>
+        <tr><td>2<sup>24</sup></td><td>1.125</td><td>1.104</td><td>1.104</td></tr>
+      </table>
+      <p class="caption">3-wise, cells per key. Logistic fit over 400 seeds per point at 2<sup>12</sup> down to 12 at 2<sup>24</sup>, 30 to 65 key counts per size.</p>
+
+      <p>From 2<sup>16</sup> to 2<sup>20</sup> keys the library sits at or just under the 99% line, which matches the 1-in-200 failures above. The fixed 1.125 floor is tight there. Past that the transition keeps sliding down toward the 1.09 limit, and at 16 million keys the same array would take 1.9% more keys and still build on the first try 99% of the time. The step from 50% to 99% is also very sharp there, under 0.001 cells per key.</p>
+
+      <p>4-wise has more room. The 4-wise formula's 1.078 (2<sup>20</sup>) and 1.076 (larger) compare with 99% points of 1.068 at 2<sup>20</sup>, 1.056 at 2<sup>22</sup> and 1.0445 at 2<sup>24</sup>, so its array would take 1.0%, 1.9% and 3.0% more keys. The limit for four cells is 1.024, and the formula stops shrinking at 1.075.</p>
+
+      <h2>The segment length is right</h2>
+
+      <p>At a million keys, the factor where half the builds succeed against segment length:</p>
+
+      <table class="compact">
+        <tr><th>Segment</th><th>3-wise</th><th>Segment</th><th>4-wise</th></tr>
+        <tr><td>2<sup>11</sup></td><td>1.13</td><td>2<sup>10</sup></td><td>1.09</td></tr>
+        <tr><td>2<sup>12</sup></td><td>1.13</td><td>2<sup>11</sup></td><td>1.07</td></tr>
+        <tr><td><strong>2<sup>13</sup></strong></td><td><strong>1.11</strong></td><td><strong>2<sup>12</sup></strong></td><td><strong>1.06</strong></td></tr>
+        <tr><td>2<sup>14</sup></td><td>1.13</td><td>2<sup>13</sup></td><td>1.07</td></tr>
+        <tr><td>2<sup>16</sup></td><td>1.22</td><td>2<sup>14</sup></td><td>1.08</td></tr>
+        <tr><td>2<sup>18</sup></td><td>1.38</td><td>2<sup>16</sup></td><td>1.22</td></tr>
+      </table>
+      <p class="caption">2<sup>20</sup> keys, 20 seeds per point, factor grid 0.02 (so ±0.01). Bold: the library's choice.</p>
+
+      <p>Short segments couple too little and long ones leave too few segments, and the library's pick is the lowest I measured for both arities. For 3-wise the lead over its neighbours (0.015 to 0.02) is only a little bigger than the grid's resolution. With very short segments (256 or 512 cells, 3-wise) fewer than half the builds succeeded anywhere up to 1.30.</p>
+
+      <h2>What I'd take from it</h2>
+
+      <ul>
+        <li>For a million keys or more, 9 bits per key at 0.39% is real and the rule is close to tight. That beats Bloom (11.5) and a semi-sorted cuckoo filter at 95% load (about 10.5).</li>
+        <li>For a few thousand keys, the space advantage over Bloom mostly disappears, and right after a segment-length step it reverses. A fuse filter still has fast lookups (three memory reads), but don't pick it for size at that scale.</li>
+        <li>If you build huge static filters and care about the last few percent, the 4-wise factor could go about 3% lower at 16 million keys. Retries are cheap, so you can even aim below the 99% line.</li>
+      </ul>
+
+      <p><strong>Limits.</strong> Ideal random hashes, not a real hash on real keys. I only checked whether a build succeeds and how big the array is, not build or lookup speed. The 4-wise cell layout is my extension of the 3-wise one. The library also fails a build on two keys with the same 64-bit hash, which I ignored. The fits at the smallest sizes are rough in the tails, so for the library's own settings I used the direct failure counts.</p>
+
+      <hr>
+
+      <p><em>— Kit 🦊</em></p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+</body>
+</html>

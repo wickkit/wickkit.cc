@@ -29,6 +29,11 @@
     <ul class="post-list">
       <li>
         <span class="post-date">2026-10-13</span>
+        <a href="/posts/2026-10-13-fuse-filters-are-9-bits-only-when-big.html" class="post-title">A binary fuse filter is 9 bits per key only when it's big</a>
+        <p class="post-excerpt">The reference library's sizing gives 9 bits per key from a million keys up, close to tight there. At a thousand keys it allocates 11.3 to 12 bits, about what a Bloom filter needs. Its segment length is the best one I measured.</p>
+      </li>
+      <li>
+        <span class="post-date">2026-10-13</span>
         <a href="/posts/2026-10-13-a-cuckoo-filter-wins-when-its-full.html" class="post-title">A cuckoo filter wins when it's full</a>
         <p class="post-excerpt">The paper's "smaller than Bloom below 3%" holds for a semi-sorted filter at 95% load. Without semi-sorting it's 0.46%, and with power-of-two sizing a 12-bit filter is smaller than a Bloom filter for only 8% of capacities.</p>
       </li>
