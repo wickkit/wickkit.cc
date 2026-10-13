@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Node lets go of finished requests; a hand-rolled Promise.race timeout doesn't — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/tools.html">tools</a>
+      <a href="/den.html">den</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+
+    <article>
+      <h1>Node lets go of finished requests; a hand-rolled Promise.race timeout doesn't</h1>
+      <div class="meta">2026-10-13 · Kit Wickham</div>
+
+      <p>Today I found that <a href="/posts/2026-10-13-a-cancelled-asyncio-timeout-keeps-your-request.html">asyncio</a> and <a href="/posts/2026-10-13-go-cancelled-timeouts-keep-requests-too.html">Go</a> both keep a finished request's data alive after its timeout is cancelled, because the cancelled timer stays in the runtime's heap still pointing at it. Node.js 26 doesn't do this. <code>clearTimeout</code> unlinks the timer right away, <code>AbortSignal.timeout</code>'s timer only holds a weak reference to its signal, and <code>fetch</code> with a timeout signal kept nothing in my tests. What does keep requests alive in Node is two common userland patterns, and there the retention is by design, not a bug: a <code>Promise.race</code> timeout whose timer is never cleared, and an abort listener on a timeout signal that is never removed. Both keep every request's data for the full timeout. At about 440 requests a second with 30-second timeouts and 32 KiB per request, that was about 13,000 finished requests and 430 MB held at any moment.</p>
+
+      <h2>The test</h2>
+
+      <p>Each request makes a 32 KiB state object, does 1–3 ms of async work under a 30-second timeout, and returns. I register every state object in a <code>FinalizationRegistry</code>. After 2,000 requests have finished, with all their timeouts still pending, I force a few garbage collections (<code>node --expose-gc</code>) and count the states that haven't been finalized. Anything above zero is a finished request something still reaches. Node v26.10.0, Linux arm64.</p>
+
+      <table class="compact">
+        <thead><tr><th>Pattern</th><th>Kept of 2,000</th></tr></thead>
+        <tbody>
+          <tr><td><code>setTimeout</code> + <code>clearTimeout</code> when done</td><td>0</td></tr>
+          <tr><td><code>Promise.race</code> with a timeout promise, timer never cleared</td><td>2,000</td></tr>
+          <tr><td>Same, <code>clearTimeout</code> in <code>finally</code></td><td>0</td></tr>
+          <tr><td><code>timers/promises</code> <code>setTimeout</code> with a signal, aborted when done</td><td>0</td></tr>
+          <tr><td><code>AbortSignal.timeout</code> + abort listener, never removed</td><td>2,000</td></tr>
+          <tr><td>Same with <code>{ once: true }</code></td><td>2,000</td></tr>
+          <tr><td>Same with <code>events.addAbortListener</code>, never disposed</td><td>2,000</td></tr>
+          <tr><td>Listener removed (or disposed) when done</td><td>0</td></tr>
+          <tr><td><code>AbortSignal.any([controller, timeout])</code>, listener removed</td><td>0</td></tr>
+          <tr><td><code>events.once(emitter, …, { signal: AbortSignal.timeout(…) })</code></td><td>0</td></tr>
+          <tr><td><code>fetch</code> with no signal, <code>AbortSignal.timeout</code>, or <code>AbortSignal.any</code> (Response objects kept)</td><td>0</td></tr>
+        </tbody>
+      </table>
+
+      <p>With a 3-second timeout, the 2,000 kept in the race and listener rows went to 0 a second after the timers fired. Nothing leaks forever; it's held for exactly as long as the timeout.</p>
+
+      <h2>Why the race keeps the result</h2>
+
+      <p>This is the hand-rolled timeout I mean:</p>
+
+<pre><code>const result = await Promise.race([
+  doWork(),
+  new Promise((_, reject) =&gt; setTimeout(() =&gt; reject(new Error('timeout')), 30_000)),
+]);</code></pre>
+
+      <p>When <code>doWork()</code> wins, the race's promise settles with its result, but the timer is still armed. The timer's callback holds <code>reject</code>, which holds the timeout promise. <code>Promise.race</code> subscribed to the timeout promise, so the timeout promise holds a reaction pointing back at the race's promise, and the race's promise holds the result. Every result stays reachable until its timer fires 30 seconds later. The timer also keeps the process from exiting, which is the reason most people know to clear it. Clearing it in a <code>finally</code> fixes both.</p>
+
+      <h2>Why the listener keeps the signal</h2>
+
+      <p><code>AbortSignal.timeout</code> is written so that a pending timer doesn't keep its signal alive: the timer closes over a <code>WeakRef</code>, and a finalization registry clears the timer if the signal is collected. But a signal with an abort listener has to be able to fire it. So when the first non-weak abort listener is added, Node puts the signal in a module-level set, <code>gcPersistentSignals</code>, and takes it out when the listener is removed or the timer fires (<a href="https://github.com/nodejs/node/blob/v26.10.0/lib/internal/abort_controller.js"><code>lib/internal/abort_controller.js</code></a>). A listener that closes over the request, and is never removed because the request finished first, keeps the request until the timeout. <code>{ once: true }</code> doesn't help: the listener is only removed once it has run.</p>
+
+      <p><code>AbortSignal.any</code> also adds every timeout signal you pass it to that set, listener or not. In my test that cost about 650 bytes per call of Node's own objects until the timer fired (20,000 calls: 17.9 MB of heap against 4.6 MB for the control, back to 5.4 MB after the timeouts). No request data came with it.</p>
+
+      <h2>Under steady load</h2>
+
+      <p>I ran each pattern at about 440 requests a second for 60 seconds, then stopped the load, sampling once a second after a forced GC. The race and the <code>{ once: true }</code> listener both climbed for 30 seconds and leveled off at about 13,000 finished requests and 430 MB of buffers, which is rate × timeout × 32 KiB. After the load stopped they drained to 0 over the next 30 seconds. The cleared race, the removed listener, <code>AbortSignal.any</code> and <code>fetch</code> stayed at about 25, the requests actually in flight.</p>
+
+      <h2>What to take from it</h2>
+
+      <p>Node's runtime keeps none of your request data that it can't still use, which is the difference from asyncio and Go: there, the timer is cancelled and can never fire, yet still holds the request. In Node, what holds the request can still run. The fixes are the ones you'd expect: clear the timer of a race in <code>finally</code>, or use <code>AbortSignal.timeout</code> and remove your abort listeners (or dispose what <code>events.addAbortListener</code> returns) when the work finishes. The cost of not doing it is your request rate × your timeout × your request size, held all the time.</p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+</body>
+</html>
