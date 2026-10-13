@@ -8,6 +8,57 @@
   <updated>2026-10-13T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
   <entry>
+    <title>A few survivors keep Python's freed memory</title>
+    <link href="https://wickkit.cc/posts/2026-10-13-a-few-survivors-keep-pythons-freed-memory.html"/>
+    <id>https://wickkit.cc/posts/2026-10-13-a-few-survivors-keep-pythons-freed-memory.html</id>
+    <updated>2026-10-13T00:00:00Z</updated>
+    <summary>CPython returns a 1 MiB arena only when every object in it is gone, so 1 survivor in 100,000 kept 36 of 256 MiB and 1 in 3,300 kept all of it, as a one-line formula predicts. The free-threaded build kept nearly everything even with no survivors, ten minutes on.</summary>
+    <content type="html">&lt;p&gt;I built 256 MiB of small Python objects, dropped all but a random few, and measured how much memory the process gave back. In the normal CPython 3.14 build, with 64-byte objects, keeping one object in 100,000 kept 36 MiB resident, and keeping one in 3,300 kept all 256 MiB. A one-line formula predicts it to within 7 MiB. The free-threaded build has finer-grained bookkeeping, so the same survivors should pin far less, but by default it gave back almost nothing at all, even when every object was freed, and it still hadn't ten minutes later.&lt;/p&gt;
+
+      &lt;h2&gt;Why survivors pin memory&lt;/h2&gt;
+
+      &lt;p&gt;The normal build allocates small objects (up to 512 bytes) from its own allocator, pymalloc. It gets memory from the OS in 1 MiB &lt;em&gt;arenas&lt;/em&gt;, splits each arena into 16 KiB &lt;em&gt;pools&lt;/em&gt;, and each pool holds objects of one size (sizes in &lt;a href="https://github.com/python/cpython/blob/v3.14.0/Include/internal/pycore_obmalloc.h"&gt;pycore_obmalloc.h&lt;/a&gt;). In &lt;a href="https://github.com/python/cpython/blob/v3.14.0/Objects/obmalloc.c"&gt;obmalloc.c&lt;/a&gt; an arena goes back to the OS only when every pool in it is empty. One live object anywhere in the arena keeps the whole megabyte.&lt;/p&gt;
+
+      &lt;p&gt;Objects allocated one after another fill arenas in order. With 64-byte objects one arena held about 16,070 of them (63 usable pools of 255). If a fraction &lt;code&gt;p&lt;/code&gt; of objects survive at random, an arena is released only if none of its &lt;code&gt;k&lt;/code&gt; objects survived, which happens with probability &lt;code&gt;(1 − p)&lt;sup&gt;k&lt;/sup&gt;&lt;/code&gt;. With &lt;code&gt;k&lt;/code&gt; = 16,070, that is already 85% at &lt;code&gt;p&lt;/code&gt; = 1 in 100,000, and essentially zero at 1 in 3,000.&lt;/p&gt;
+
+      &lt;h2&gt;The test&lt;/h2&gt;
+
+      &lt;p&gt;Each run builds about 256 MiB of distinct &lt;code&gt;bytes&lt;/code&gt; objects of one size (64, 128, 256 or 512 bytes as reported by &lt;code&gt;sys.getsizeof&lt;/code&gt;), keeps a chosen fraction, deletes the rest, runs &lt;code&gt;gc.collect()&lt;/code&gt;, waits 2.5 s while doing some light allocation of lists and dicts, and reads resident memory from &lt;code&gt;/proc/self/statm&lt;/code&gt;. Survivors were picked at random (3 seeds each), as every n-th object, or as the oldest n objects. CPython 3.14.8, normal and free-threaded builds, on Linux arm64 with 4 KiB pages.&lt;/p&gt;
+
+      &lt;figure class="fig smooth"&gt;&lt;img src="https://wickkit.cc/img/pyfree.png" alt="Two panels, 64-byte and 512-byte objects: MiB still resident against the fraction of objects still alive. The normal build follows an S-curve from 0 to 256 MiB that matches the 1 MiB arena model; free-threaded with purge delay 0 follows a similar curve shifted about 16 times to the right, matching a 64 KiB page model; free-threaded default stays near 256 MiB everywhere, including with no survivors."&gt;&lt;/figure&gt;
+
+      &lt;p&gt;The normal build (blue) matches the arena model throughout. Bigger objects mean fewer per arena, so the same fraction pins less: at 1 in 10,000, 64-byte objects kept 202 MiB and 512-byte objects kept 45 MiB. Which objects survive matters as much as how many. Keeping the oldest 1% kept 5 MiB or less, because they sat together in the first few arenas. Keeping every 1,000th kept all of it, because every arena had one.&lt;/p&gt;
+
+      &lt;table class="compact"&gt;
+        &lt;thead&gt;&lt;tr&gt;&lt;th&gt;survivors (random)&lt;/th&gt;&lt;th&gt;64-byte objects&lt;/th&gt;&lt;th&gt;512-byte objects&lt;/th&gt;&lt;th&gt;model, 64 / 512&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;
+        &lt;tbody&gt;
+          &lt;tr&gt;&lt;td&gt;none&lt;/td&gt;&lt;td&gt;0 MiB&lt;/td&gt;&lt;td&gt;0 MiB&lt;/td&gt;&lt;td&gt;0 / 0&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;1 in 100,000&lt;/td&gt;&lt;td&gt;36 MiB&lt;/td&gt;&lt;td&gt;3 MiB&lt;/td&gt;&lt;td&gt;39 / 5&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;1 in 10,000&lt;/td&gt;&lt;td&gt;202 MiB&lt;/td&gt;&lt;td&gt;45 MiB&lt;/td&gt;&lt;td&gt;209 / 48&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;1 in 3,300&lt;/td&gt;&lt;td&gt;256 MiB&lt;/td&gt;&lt;td&gt;117 MiB&lt;/td&gt;&lt;td&gt;259 / 119&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;1 in 1,000&lt;/td&gt;&lt;td&gt;255 MiB&lt;/td&gt;&lt;td&gt;223 MiB&lt;/td&gt;&lt;td&gt;260 / 230&lt;/td&gt;&lt;/tr&gt;
+        &lt;/tbody&gt;
+      &lt;/table&gt;
+
+      &lt;p&gt;The kept memory isn't wasted for good. Empty pools inside a pinned arena can serve any object size, so when I then allocated 256 MiB of 128-byte objects, the process grew by only 73 MiB at 1 survivor in 1,000, 16 MiB of which was the new list. A pool that still holds a survivor serves only its own size, though, and at 1 in 100 nearly every pool has one: the same allocation grew the process by 251 MiB, so the program now held about twice what it was using.&lt;/p&gt;
+
+      &lt;h2&gt;The free-threaded build keeps everything&lt;/h2&gt;
+
+      &lt;p&gt;The free-threaded build doesn't use pymalloc. It allocates objects with &lt;a href="https://github.com/microsoft/mimalloc"&gt;mimalloc&lt;/a&gt;, whose small-object pages are 64 KiB, sixteen times smaller than an arena. By the same formula, the same survivors should pin far less. Instead, in its default configuration, it kept roughly 200 to 330 MiB resident (the objects plus the list that held them) at every survivor fraction, including zero. In a longer run, the process grew about 365 MiB, freed everything, and kept allocating small lists and dicts every 50 ms; ten minutes later 314 MiB was still resident.&lt;/p&gt;
+
+      &lt;p&gt;The &lt;a href="https://docs.python.org/3.14/howto/free-threading-python.html"&gt;free-threading HOWTO&lt;/a&gt; warns about this: mimalloc defers returning freed memory to the OS, and setting &lt;code&gt;MIMALLOC_PURGE_DELAY=0&lt;/code&gt; shortens the delay. The source shows why "deferred" can mean indefinitely. When a page empties, CPython parks it on a per-thread list until it's safe to reuse; it's handed back to its 32 MiB segment (&lt;a href="https://github.com/python/cpython/blob/v3.14.0/Include/internal/mimalloc/mimalloc/types.h"&gt;types.h&lt;/a&gt;) only during a later allocation. The segment then schedules a purge 10 ms out, and every further free in the burst pushes that out by another millisecond. Nothing runs the purge on a timer. The 10 ms and 1 ms are defaults in &lt;a href="https://github.com/python/cpython/blob/v3.14.0/Objects/mimalloc/options.c"&gt;options.c&lt;/a&gt;. The purge happens when the program frees into or allocates from that same segment again (&lt;a href="https://github.com/python/cpython/blob/v3.14.0/Objects/mimalloc/segment.c"&gt;segment.c&lt;/a&gt;). &lt;code&gt;gc.collect()&lt;/code&gt; doesn't trigger it. A program whose later allocations fit in pages it already has never touches those segments again, so their memory stays resident.&lt;/p&gt;
+
+      &lt;p&gt;With &lt;code&gt;MIMALLOC_PURGE_DELAY=0&lt;/code&gt; (green in the chart), memory came back, and survivors pinned it by the 64 KiB page model: at 1 in 1,000, 512-byte objects kept 27 MiB instead of the normal build's 223. But it came back only once the program allocated again. A process that freed everything and then sat idle kept all of it, with or without the setting. In a crude timing test on a busy machine, the setting made a build-and-drop loop about 8% slower, and a small-object churn loop got through about 17% fewer rounds; treat those as rough.&lt;/p&gt;
+
+      &lt;p&gt;None of this memory is lost to the program. After freeing 256 MiB, the free-threaded process could allocate 256 MiB of tuples, a different kind of object that lives in a separate mimalloc heap, and ended within about 12 MiB of a fresh process that allocated only the tuples. The difference is what the OS, a container's memory limit, or a dashboard sees: a free-threaded process's resident size behaves like a high-water mark.&lt;/p&gt;
+
+      &lt;h2&gt;What to do&lt;/h2&gt;
+
+      &lt;p&gt;In the normal build, if a big batch of objects goes away, it matters whether the ones you keep were created in the middle of it. A cache that retains a few entries from each batch, or a dict that keeps one in a thousand results, keeps the whole batch's memory. Long-lived objects created before or apart from the batch don't (the oldest-1% case). I didn't test whether copying survivors into fresh objects helps; pymalloc fills its fullest arenas first, so the copies may land right back in the pinned ones. In the free-threaded build, don't read resident memory as live data. If the number matters, for example under a container limit, try &lt;code&gt;MIMALLOC_PURGE_DELAY=0&lt;/code&gt; and measure what it costs your workload; even then, memory returns only while the program keeps allocating.&lt;/p&gt;
+
+      &lt;p&gt;Versions: CPython 3.14.8 standalone builds (normal and free-threaded), Linux arm64, 4 KiB pages; source quoted from v3.14.0. All runs single-threaded. Sizes are MiB; "kept" is resident memory above where the run started, so the list holding the objects is included until it's freed.&lt;/p&gt;</content>
+  </entry>
+  <entry>
     <title>SQLite's WAL grows while any reader is open, even short ones</title>
     <link href="https://wickkit.cc/posts/2026-10-13-sqlite-wal-grows-while-any-reader-is-open.html"/>
     <id>https://wickkit.cc/posts/2026-10-13-sqlite-wal-grows-while-any-reader-is-open.html</id>

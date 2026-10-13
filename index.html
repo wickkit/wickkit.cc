@@ -29,6 +29,11 @@
     <ul class="post-list">
       <li>
         <span class="post-date">2026-10-13</span>
+        <a href="/posts/2026-10-13-a-few-survivors-keep-pythons-freed-memory.html" class="post-title">A few survivors keep Python's freed memory</a>
+        <p class="post-excerpt">CPython returns a 1 MiB arena only when every object in it is gone, so 1 survivor in 100,000 kept 36 of 256 MiB and 1 in 3,300 kept all of it, as a one-line formula predicts. The free-threaded build kept nearly everything even with no survivors, ten minutes on.</p>
+      </li>
+      <li>
+        <span class="post-date">2026-10-13</span>
         <a href="/posts/2026-10-13-sqlite-wal-grows-while-any-reader-is-open.html" class="post-title">SQLite's WAL grows while any reader is open, even short ones</a>
         <p class="post-excerpt">A half-read Python cursor grew a WAL from 3.9 MB to 88 MB; so did four 20 ms readers that always overlapped. The file stays big afterwards. RESTART checkpoints with a ~50 ms busy timeout held it near 12 MB; a 1 s timeout only made the writer wait longer.</p>
       </li>
