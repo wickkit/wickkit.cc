@@ -50,13 +50,17 @@
 
       <h2>What this says</h2>
 
-      <p>The first four rows are zero because nothing outlives the call. From the counts, dropping a <code>Timeout</code> or a <code>Sleep</code> leaves nothing in the runtime's timer that references the request, and a dropped child token leaves nothing on its parent. Compare Go and asyncio, where a timer callback is registered with the runtime and holds the request's context until it's cancelled or fires.</p>
+      <p>The first four rows are zero because nothing outlives the call. From the counts, dropping a <code>Timeout</code> or a <code>Sleep</code> leaves nothing in the runtime's timer that references the request, and a dropped child token leaves nothing on its parent. Compare Go and asyncio, where a timer callback is registered with the runtime and holds the request's context until the timer fires or the runtime cleans out the cancelled entry.</p>
 
       <p>The costs are all in tasks. A dropped <code>JoinHandle</code> detaches the task instead of cancelling it, so a timeout wrapped around a handle ends your wait, not the work: the buffer lives until the work ends, however long that is. Aborting the handle fixes that. A detached sleeper holding an <code>Arc</code> of the state keeps it for the whole timeout, same as a never-cancelled timer elsewhere; abort it and it's gone. The last row isn't a timeout at all, but it's the version with no end: a task waiting on a token nobody cancels held its state through every sample, and by construction keeps it until the token is cancelled.</p>
 
       <h2>What to take from it</h2>
 
-      <p>In tokio, put the timeout around the future itself, not around a handle to a spawned one. If you have to spawn, keep the handle and abort it when you stop caring. These counts are from synthetic requests with a counter, one machine, and I didn't read tokio's timer internals beyond the behavior above, so treat the "why" as the observed mechanism, not a citation.</p>
+      <p>In tokio, put the timeout around the future itself, not around a handle to a spawned one. If you have to spawn, keep the handle and abort it when you stop caring. These counts are from synthetic requests with a counter, on one machine.</p>
+
+      <h2>Why a dropped timer can't linger</h2>
+
+      <p>I read the timer code afterwards (tokio 1.53.2). Dropping a <code>Sleep</code> drops its <code>TimerEntry</code>, whose <code>Drop</code> calls <code>cancel</code>. That takes the timer driver's lock and removes the entry from the timing wheel right then, from whichever thread dropped it (<code>clear_entry</code> in <code>runtime/time/mod.rs</code>). Go's runtime instead marks a stopped timer dead and leaves it in the heap until housekeeping gets to it, which is why Go keeps request data under load. Here there is no such deferral, so I checked the case that triggers it in Go: 64 concurrent requests, 200,000 in all, each with a 30-second timeout or a child token, beside 0, 10,000 or 100,000 other live one-hour timers. Request buffers still alive after each batch: 0 every time, and the process grew by 2 to 3 MB in every configuration.</p>
     </article>
   </main>
 
