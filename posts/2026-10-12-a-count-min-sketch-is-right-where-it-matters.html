@@ -41,7 +41,24 @@
 
       <p>At exponent 0.8 and 16,384 counters per row, a single row had a mean error of 26.7 but a maximum of 10,931: some item shared its counter with the most popular one. Two rows (so twice the memory) brought the mean to 12.8 and the maximum to 226. At exponent 1.1 the single-row maximum was 67,325 against 296 for two rows. Going from two rows to eight only shaved the mean from 12.8 to 7.2 at exponent 0.8. A second row is the large win, and it is a win against a rare large miss, which the average hides.</p>
 
-      <p>With one row the mean error scales with width: it fell about 4× for each 4× in width, as the N/w formula says. At equal memory, one wide row beat four narrower ones on the mean (16,384×1 had mean 26.7 against 63.7 for 4,096×4 at exponent 0.8), but it leaves the huge worst case. That is one comparison at one skew; I didn't run an equal-memory grid, so treat "a few rows, the rest in width" as a guess.</p>
+      <p>With one row the mean error scales with width: it fell about 4× for each 4× in width, as the N/w formula says.</p>
+
+      <h2>Width or depth, at the same memory</h2>
+
+      <p>The grid above grows memory along with depth, so it can't say how to spend a fixed budget. A follow-up run did: total counters fixed at 2,048, 8,192, 32,768 or 131,072, split as 1, 2, 3, 4, 6 or 8 rows (width = total ÷ depth, rounded down), the same three exponents, eight seeds each.</p>
+
+      <table class="compact">
+        <tr><th>Rows × width</th><th>Mean error</th><th>99th percentile</th><th>Max error</th></tr>
+        <tr><td>1 × 8,192</td><td>56.1</td><td>494</td><td>67,323</td></tr>
+        <tr><td>2 × 4,096</td><td>29.5</td><td>115</td><td>2,234</td></tr>
+        <tr><td>4 × 2,048</td><td>51.3</td><td>109</td><td>367</td></tr>
+        <tr><td>8 × 1,024</td><td>106.7</td><td>169</td><td>301</td></tr>
+      </table>
+      <p>Plain update, exponent 1.1, 8,192 counters in total, mean over eight seeds.</p>
+
+      <p>Each metric wants a different depth. The mean is lowest at two rows; past that, going from four rows to eight halves the width and roughly doubles the mean. The maximum keeps falling until six or eight rows. The 99th percentile sits in between, best at two to four. At exponent 1.1 that held at every budget; at 1.4 the best depth for the mean and the 99th percentile crept up to three or four rows (and deeper once errors fell below one count), while the maximum was still lowest at six or eight. At exponent 0.8 (flatter traffic) one wide row had the lowest mean at the three smaller budgets (57.1 against 76.5 for two rows at 8,192), but its maximum was 10,936 against 1,214, and two rows still won the 99th percentile everywhere.</p>
+
+      <p>Conservative update pays less for extra rows. At exponent 1.1 and 8,192 counters, going from two rows to four raised its mean 44% (20.7 to 29.8) against 74% for plain update, and its maximum still fell from 284 at four rows to 168 at eight. At exponent 0.8 it took the best mean from one row to two at budgets of 8,192 and up. With conservative update the top-100 error was 0.1 or less at every depth from two to eight once the budget reached 8,192 counters.</p>
 
       <h2>Conservative update makes the top exact</h2>
 
@@ -61,8 +78,8 @@
 
       <ul>
         <li>If you want "who are the heavy hitters and how big are they", use conservative update. It turns a sketch that is off by a hundred into one that's right for the items you care about.</li>
-        <li>Use at least two rows. One row has no protection against a collision with a giant.</li>
-        <li>With one row the mean error follows N/w, so width is the lever for the average; with more rows I didn't fit a rule.</li>
+        <li>Use at least two rows. One row has no protection against a collision with a giant, even when the second row costs half the width.</li>
+        <li>For a fixed budget, two rows if you care about the typical item, four if you care about the bad tail; eight only if the single worst answer is all that matters. One row is only competitive on the mean, and only when traffic is fairly flat.</li>
         <li>More skew helps: at exponent 1.4 and 16,384×4 the sketch was exact for 96% of items (99% with conservative update) since a few items dominate the stream.</li>
       </ul>
 
