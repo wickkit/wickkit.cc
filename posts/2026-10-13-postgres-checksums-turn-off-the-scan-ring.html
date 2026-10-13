@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>With checksums on, a Postgres scan of fresh data floods the buffer cache — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/tools.html">tools</a>
+      <a href="/den.html">den</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+
+    <article>
+      <h1>With checksums on, a Postgres scan of fresh data floods the buffer cache</h1>
+      <div class="meta">2026-10-13 · Kit Wickham</div>
+
+      <p>A sequential scan of a big table in PostgreSQL is supposed to leave the shared buffer cache alone. It reads through a small ring of buffers and reuses them over and over, so the pages other queries rely on stay put. I found one case where that doesn't happen, and PostgreSQL 18 makes it the default. If data checksums are on and the table hasn't been vacuumed since it was loaded, the first scan after a checkpoint gives up its ring. A plain <code>SELECT count(*)</code> over a table twice the size of <code>shared_buffers</code> filled 99% of the cache with that table, pushed out a hot table that had the highest possible usage count, and wrote 233 MiB of WAL for a 256 MiB table. With checksums off, or with no checkpoint between the load and the scan, the same scan used 282 buffers and wrote no WAL.</p>
+
+      <h2>How the ring is supposed to work</h2>
+
+      <p>Postgres replaces buffers with a clock sweep. Each buffer has a usage count from 0 to 5. A normal access adds one, and the sweep hand takes one away each time it passes. It evicts the first unpinned buffer it finds at zero. A page touched often holds a 5 and survives five trips of the hand.</p>
+
+      <p>A sequential scan of a table larger than a quarter of <code>shared_buffers</code> (<code>initscan()</code> in <code>heapam.c</code>) gets a <code>BAS_BULKREAD</code> access strategy instead: a ring of buffers that the scan keeps recycling. Pages it reads are capped at usage count 1, and once the ring is full the scan reuses its own buffers rather than taking new ones from the clock. The buffer manager's <a href="https://github.com/postgres/postgres/blob/REL_18_STABLE/src/backend/storage/buffer/README">README</a> calls it a 256 KB ring. The 18 code adds room for asynchronous reads, <code>io_combine_limit × effective_io_concurrency</code> on top of 256 KB (capped by the per-backend pin limit), so with the defaults it's 2,304 kB, or 288 buffers, and I measured 282 buffers left behind by a scan.</p>
+
+      <p>There's an escape hatch. Before the buffer manager reuses a buffer, it checks whether writing that page out would need a WAL flush first, meaning the page's LSN is newer than what's already on disk. If so, <code>StrategyRejectBuffer()</code> in <code>freelist.c</code> drops the buffer from the ring and the scan takes a fresh one from the main clock sweep. That saves the scan from waiting on WAL flushes. The README spells out the trade-off: the strategy "works best for scans that are read-only (or at worst update hint bits)", while a bulk <code>UPDATE</code> dirties every page and "the ring strategy effectively degrades to the normal strategy."</p>
+
+      <h2>Where hint bits come in</h2>
+
+      <p>The first time anything reads a freshly written row, it sets hint bits on the tuple to record that the inserting transaction committed, so later readers don't have to look it up. That makes the page dirty. Without checksums, a hint-bit change writes no WAL, the page's LSN doesn't move, and the ring can write the page out and reuse the buffer. With checksums, a torn write of a hint-only change would break the checksum. So the first hint-bit change to a page since the last checkpoint writes a full-page image to WAL (<code>MarkBufferDirtyHint()</code>), and that moves the page's LSN past the flushed WAL. A few hundred buffers later, when the ring comes back around, every one of its buffers needs a flush, gets rejected, and the scan pulls a new buffer from the clock. A read-only scan now behaves like the bulk <code>UPDATE</code> the README warns about. The same happens with <code>wal_log_hints = on</code>, which <code>pg_rewind</code> requires.</p>
+
+      <p>Before version 18, <code>initdb</code> left checksums off unless you asked. In 18 it turns them on by default (<a href="https://www.postgresql.org/docs/18/release-18.html">release notes</a>), so new clusters have this behavior unless someone opts out.</p>
+
+      <h2>The test</h2>
+
+      <p>PostgreSQL 18.6 on Linux (arm64), <code>shared_buffers = 128MB</code> (16,384 buffers), the 18 defaults for <code>effective_io_concurrency</code> (16) and <code>io_combine_limit</code> (128 kB). Each run:</p>
+
+      <ol>
+        <li>Load table <code>big</code> with <code>INSERT … SELECT</code>: 32,768 pages (256 MiB, twice <code>shared_buffers</code>), four rows of about 1.8 kB per page, autovacuum off for that table so nothing sets hint bits behind my back.</li>
+        <li>Optionally run <code>CHECKPOINT</code>. In production the checkpoint just has to happen between the load and the first scan, which with the default <code>checkpoint_timeout</code> of 5 minutes is likely.</li>
+        <li>Empty the cache with <code>pg_buffercache_evict_all()</code> (new in 18). Scan a 3,000-page <code>hot</code> table six times, so all of it sits in cache at usage count 5. Then fill the rest of the cache with four 3,200-page tables read once (usage count 1).</li>
+        <li>Run <code>SELECT count(*) FROM big</code> once. Count each table's pages in <code>pg_buffercache</code>, WAL from the insert LSN before and after, and the <code>bulkread</code> row of <code>pg_stat_io</code>.</li>
+      </ol>
+
+      <p>Three clusters: checksums on (the 18 default), checksums off (<code>--no-data-checksums</code>), and checksums off with <code>wal_log_hints = on</code>. Each row of the table below ran at least twice, and repeats matched to within a few buffers. The size and <code>VACUUM</code> runs further down are single runs.</p>
+
+      <table>
+        <thead><tr><th>Cluster</th><th>Checkpoint after load</th><th><code>hot</code> pages left (of 3,000)</th><th><code>big</code> pages in cache</th><th>WAL from the scan</th><th>Ring reuses / clock evictions</th></tr></thead>
+        <tbody>
+          <tr><td>Checksums on</td><td>yes</td><td><strong>0</strong></td><td><strong>16,246</strong></td><td><strong>233 MiB</strong></td><td>0 / ~10,500</td></tr>
+          <tr><td>Checksums on</td><td>no</td><td>3,000</td><td>282</td><td>0</td><td>~11,000 / 0</td></tr>
+          <tr><td>Checksums off</td><td>yes</td><td>3,000</td><td>282</td><td>0</td><td>~11,000 / 0</td></tr>
+          <tr><td><code>wal_log_hints</code> on</td><td>yes</td><td><strong>0</strong></td><td><strong>16,248</strong></td><td><strong>233 MiB</strong></td><td>0 / ~11,000</td></tr>
+        </tbody>
+      </table>
+
+      <p>The last column is the mechanism. In <code>pg_stat_io</code>, a normal ring scan counts all its buffer turnover as <code>reuses</code>. In the bad case there wasn't a single reuse: every buffer came from the clock sweep as an eviction. WAL came to 0.91 bytes per byte of table, one full-page image per page. Only that first scan is affected: it leaves hint bits set, and a second scan of the same table wrote no WAL.</p>
+
+      <p>Smaller tables do less damage. They still went into the cache wholesale: all 4,915 pages of a 0.3× table, all 8,192 of a 0.5× table, and 13,247 of a 1× table's 16,384. But in this setup there were 12,800 pages of usage-1 filler to push out first, so the hot table survived. From 2× up the scan had to go through the usage-5 pages too, and 4× did the same. So the scan is as harsh as one with no ring at all, no worse: it consumes the cache from the coldest pages up.</p>
+
+      <h2>What to do</h2>
+
+      <p>Vacuum before the first big read. With the same load and checkpoint, I ran <code>VACUUM big</code> before the scan. VACUUM sets the hint bits, which also writes full-page images (237 MiB), but its own ring flushes WAL itself instead of rejecting dirty buffers, so it kept all 3,000 hot pages. The scan afterward used its ring (350 buffers) and left the hot table alone too.</p>
+
+      <p>Autovacuum gets there by itself eventually, since inserts count toward its thresholds. The risk is the gap: a nightly load or a <code>pg_restore</code>, a checkpoint, then a report or a <code>pg_dump</code> reading the new tables before autovacuum has done them. Each of those first scans writes a table's worth of WAL from a read-only query (which also goes to replicas) and refills the cache with pages from the bulk table.</p>
+
+      <h2>A smaller cliff</h2>
+
+      <p>The quarter-of-<code>shared_buffers</code> threshold has its own edge, which I checked first. After the same warm-up, scanning fifteen different tables of 0.26× <code>shared_buffers</code> (vacuumed, so no hint-bit writes) left all 3,000 hot pages in place. Tables of 0.24× get no ring at all, and the hot table was untouched through six of them, then down to 2,451 pages after the seventh and gone after the eighth, about 1.9× <code>shared_buffers</code> of reading. That one is by design (a table under a quarter of the cache is assumed to be worth caching), but it means a series of mid-sized scans, say a reporting job over many partitions just under the limit, can clear the cache when one big scan wouldn't.</p>
+
+      <p>Source read: PostgreSQL 18.0 <code>src/backend/storage/buffer/</code> (<code>freelist.c</code>, <code>bufmgr.c</code>, <code>README</code>) and <code>heapam.c</code>; tests on 18.6. Sizes: MiB = 2<sup>20</sup> bytes, one page = 8 KiB.</p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+</body>
+</html>

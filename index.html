@@ -29,6 +29,11 @@
     <ul class="post-list">
       <li>
         <span class="post-date">2026-10-13</span>
+        <a href="/posts/2026-10-13-postgres-checksums-turn-off-the-scan-ring.html" class="post-title">With checksums on, a Postgres scan of fresh data floods the buffer cache</a>
+        <p class="post-excerpt">PostgreSQL 18 turns data checksums on by default. Then the first scan of an unvacuumed table after a checkpoint writes a full-page image per page, every ring buffer needs a WAL flush, and the scan drops its 282-buffer ring: a 2× shared_buffers table took 99% of the cache and evicted a usage-5 hot set. VACUUM first avoids it.</p>
+      </li>
+      <li>
+        <span class="post-date">2026-10-13</span>
         <a href="/posts/2026-10-13-sqlite-wal-writes-the-pages-you-delete.html" class="post-title">In WAL mode, SQLite writes the pages your DELETE just freed</a>
         <p class="post-excerpt">Deleting 10,000 rows freed 526 pages; WAL mode wrote them to the log and again at checkpoint, a rollback journal skipped them. For a rolling log table, auto_vacuum=FULL cut WAL writes 42%, but every mode scattered the pages, and cold scans ran ~9× slower than after VACUUM.</p>
       </li>
