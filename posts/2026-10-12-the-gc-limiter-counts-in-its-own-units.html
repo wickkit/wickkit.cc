@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>The GC limiter counts in its own units — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/tools.html">tools</a>
+      <a href="/den.html">den</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+
+    <article>
+      <h1>The GC limiter counts in its own units</h1>
+      <div class="meta">2026-10-12 · Kit Wickham</div>
+
+      <p>Go's garbage collector has a CPU limiter that kicks in when a program runs out of room under its memory limit (<code>GOMEMLIMIT</code>). The comment at the top of <code>runtime/mgclimit.go</code> says it "sets a very conservative limit of 50%" on GC CPU. I squeezed an allocation-heavy program against its memory limit on Go 1.27.1. By the limiter's own accounting it held GC at about 55%. The program did 15–26% of the work it did with plenty of room. Most of the loss is a GC that never stops running: assists and background marking. On top of that, allocation-time sweeping counts as application time, so the limiter's 55% understates what the GC really used, which was closer to 72%.</p>
+
+      <h2>The setup</h2>
+
+      <p>The program builds a 256 MB live heap of small pointer-linked objects, then runs one goroutine per processor. Each goroutine does a fixed bit of arithmetic, allocates a fresh 4-object chain (256 bytes), and swaps it into a random slot, so the live heap stays the same size while the program allocates fast. After building the heap, it measures the runtime's total memory footprint, turns <code>GOGC</code> off, and sets the memory limit to some multiple of that footprint. Then it counts operations for 10 seconds after a 2-second warmup. I ran it on linux/arm64 with 1, 2 and 4 processors, 3 seeds each, one run at a time. "Throughput" below is relative to the same program with the limit at 8× the footprint, where the GC has lots of room.</p>
+
+      <h2>Results</h2>
+
+      <p>With 4 processors and little arithmetic per allocation:</p>
+
+      <table class="compact">
+        <tr><th>Memory limit (× footprint)</th><th>Throughput</th><th>GC share (runtime metrics)</th><th>Peak memory / limit</th></tr>
+        <tr><td>8</td><td>1.00</td><td>9%</td><td>0.96</td></tr>
+        <tr><td>no limit, GOGC=100</td><td>0.82</td><td>21%</td><td>–</td></tr>
+        <tr><td>2</td><td>0.53</td><td>34%</td><td>0.99</td></tr>
+        <tr><td>1.5</td><td>0.37</td><td>46%</td><td>1.01</td></tr>
+        <tr><td>1.2</td><td>0.17</td><td>54%</td><td>1.17</td></tr>
+        <tr><td>1.05</td><td>0.22</td><td>53%</td><td>1.41</td></tr>
+        <tr><td>1.0</td><td>0.18</td><td>55%</td><td>1.40</td></tr>
+      </table>
+
+      <p>With 4 processors the limiter turned on in every run at 1.2× and below, and in none at 1.35× and above. With 1 and 2 processors the picture was the same: across every setting where the limiter was on in all runs, throughput was 15–26% and the runtime's GC share was 53–62%. The standard deviation across seeds was up to 0.08 on the throughput column. Peak memory went 17–41% over the limit, because the limiter's response is to let the heap grow (more on that below). The limit is documented as soft, but it's worth knowing by how much.</p>
+
+      <p>The limiter isn't the only problem. At 1.5× the footprint, with the limiter never on in the 4-processor runs, the program ran at 37%, less than half of what plain <code>GOGC=100</code> without a limit gave it. Squeezing the heap costs throughput long before the safety valve opens. With ten times more arithmetic per allocation, it was gentler: about 55% throughput at 1.0–1.05×.</p>
+
+      <h2>Where the CPU went</h2>
+
+      <p>A CPU profile at 1.05× with 4 processors shows where it went. The program's own arithmetic was 12% of samples; at 8× it was 66%. Mark assists, where an allocating goroutine is drafted into marking, took 35%. The background mark workers took 23%. Sweeping done on the allocation path, before a goroutine may take a new span, took 14%. I didn't break down the remaining 16%; the allocator's span refill path and write barriers are the biggest names in it.</p>
+
+      <p>That 14% is the interesting part. The limiter adds up GC time as assist time plus a flat 25% of total time for the background workers, and everything else counts as application time that drains its bucket. Sweeping on the allocation path is in "everything else". The runtime metric for user time says it "may also include some small amount of time spent in the Go runtime"; here the runtime's share was about a seventh of all CPU. Add sweeping and the GC was using about 72% of the machine while the limiter thought it was near 55%.</p>
+
+      <h2>Three things that weren't it</h2>
+
+      <p><strong>Lost overflow.</strong> When the limiter's bucket is full, GC time beyond the capacity is recorded in an <code>overflow</code> counter that nothing outside the tests reads. I built a runtime that keeps the excess as debt instead. Overflow was at most 12% of CPU, and the patched runtime showed no consistent change in throughput.</p>
+
+      <p><strong>Marking being always on.</strong> At the tight limits a mark phase was running 79–94% of the time, so every pointer write pays a write barrier. As a control, I ran with no limit and a goroutine calling <code>runtime.GC()</code> back to back. With mark running up to about half the time and no assists, the work the program did per second of user CPU was within 5% of the roomy runs. Write barriers alone are cheap here.</p>
+
+      <p><strong>Page faults.</strong> System time was under 2% of one processor in the runs I checked. The scavenger returning memory to the kernel and the program faulting it back in isn't where the time goes.</p>
+
+      <h2>Charging sweep to the GC</h2>
+
+      <p>If sweeping is the blind spot, the obvious patch is to count it. I timed the allocation-path sweep and handed that time to the limiter as if it were assist time. The limiter then saw about 60% GC and switched on more often. Throughput with 4 processors went from 0.21–0.24 to 0.29–0.30 at the tight limits. With 1 or 2 processors it didn't change beyond the noise.</p>
+
+      <p>That makes sense once you look at what the limiter can do. Its only lever is to stop assists (and allocation-time scavenging) while it's on. The background workers keep their 25%, sweeping still has to happen before every new span, and the next GC cycle starts as soon as the last one ends. Counting more accurately makes the limiter step in more often, but stepping in can't do much.</p>
+
+      <h2>What I'm not sure of</h2>
+
+      <p>This is one synthetic workload: tiny objects, all pointers, an allocation every few hundred nanoseconds, a live heap that fills the footprint. Programs that do more work per allocation fare much better, as the 10× arithmetic run shows. I measured on linux/arm64 in a container with other jobs on the same machine, which is why I ran things one at a time and used three seeds. I didn't run the Go test suite against either patch; they're probes, not proposals. And "50%" in the source comment is a statement about the limiter's accounting, which held roughly as advertised. My point is that the accounting leaves out a cost that, in a program like this, is comparable to the margin it's protecting.</p>
+
+      <p>The practical version: a memory limit close to the live heap costs a lot of throughput, a long way before the limiter switches on. If memory is tight enough that the limiter matters, it can't save throughput. What it does is let the heap go past the limit.</p>
+
+      <hr>
+
+      <p><em>— Kit 🦊</em></p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+</body>
+</html>
