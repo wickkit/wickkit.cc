@@ -8,6 +8,91 @@
   <updated>2026-10-13T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
   <entry>
+    <title>Roaring bitmaps pay 16 bits where 6 would do</title>
+    <link href="https://wickkit.cc/posts/2026-10-13-roaring-bitmaps-pay-16-bits-where-6-would-do.html"/>
+    <id>https://wickkit.cc/posts/2026-10-13-roaring-bitmaps-pay-16-bits-where-6-would-do.html</id>
+    <updated>2026-10-13T00:00:00Z</updated>
+    <summary>On random sets just under 6.25% dense, Roaring stores 16 bits per element where the floor is 5.6 and Elias-Fano needs 6.1. On clustered sets it flips: with run_optimize Roaring is about twice the floor and Elias-Fano many times it.</summary>
+    <content type="html">&lt;p&gt;&lt;a href="https://roaringbitmap.org/"&gt;Roaring bitmaps&lt;/a&gt; are the default compressed integer set in a lot of software: search engines, analytics databases, anything that intersects lists of row IDs. They are built to be fast, not as small as possible. I wanted to know how far from the smallest possible they are, and where. So I measured their real serialized size across densities from 0.001% to 98%, on random sets and on clustered ones, and compared it with the information-theoretic floor and with Elias-Fano, the usual compact encoding for sorted integers.&lt;/p&gt;
+
+      &lt;p&gt;The short answer: on random sets just under 6.25% dense, Roaring spends 16 bits per element where the floor is 5.6 and Elias-Fano needs 6.1. That's 2.9 times the floor. On clustered sets it's the other way around: Roaring is about two to two and a half times the floor, and Elias-Fano, which can't see runs, is dozens of times over once they get long.&lt;/p&gt;
+
+      &lt;h2&gt;How Roaring stores a set&lt;/h2&gt;
+
+      &lt;p&gt;Roaring splits the 32-bit range into chunks of 65,536 values. Each non-empty chunk gets one container, chosen by what's smallest:&lt;/p&gt;
+
+      &lt;ul&gt;
+        &lt;li&gt;an &lt;strong&gt;array&lt;/strong&gt; of the low 16 bits of each value, sorted: 16 bits per element, used up to 4,096 elements;&lt;/li&gt;
+        &lt;li&gt;a &lt;strong&gt;bitmap&lt;/strong&gt; of 65,536 bits (8 KB), used above 4,096 elements;&lt;/li&gt;
+        &lt;li&gt;a &lt;strong&gt;run&lt;/strong&gt; container of (start, length) pairs, 32 bits per run, but only if you ask for it with &lt;code&gt;run_optimize&lt;/code&gt;.&lt;/li&gt;
+      &lt;/ul&gt;
+
+      &lt;p&gt;The serialized format adds 8 bytes per container (key, count and offset; see the &lt;a href="https://github.com/RoaringBitmap/RoaringFormatSpec"&gt;format spec&lt;/a&gt;). Notice what's missing: an array spends 16 bits on every element no matter how far apart the elements are. If a chunk holds 4,000 values, the gap between neighbours is about 16, which takes about 4 bits to write down plus some change. Roaring writes 16.&lt;/p&gt;
+
+      &lt;h2&gt;The setup&lt;/h2&gt;
+
+      &lt;p&gt;A universe of 2&lt;sup&gt;24&lt;/sup&gt; values (256 chunks). For each of 41 densities from 0.001% to 98%, five seeds of:&lt;/p&gt;
+
+      &lt;ul&gt;
+        &lt;li&gt;&lt;strong&gt;random sets&lt;/strong&gt;: each value is in with probability &lt;em&gt;p&lt;/em&gt;;&lt;/li&gt;
+        &lt;li&gt;&lt;strong&gt;clustered sets&lt;/strong&gt;: alternating runs and gaps with geometric lengths, mean run length 4, 16, 64 or 256, with the gap length set so the density is &lt;em&gt;p&lt;/em&gt;.&lt;/li&gt;
+      &lt;/ul&gt;
+
+      &lt;p&gt;I built each set with &lt;a href="https://github.com/Ezibenroc/PyRoaringBitMap"&gt;pyroaring&lt;/a&gt; (CRoaring underneath), serialized it before and after &lt;code&gt;run_optimize&lt;/code&gt;, and divided the bytes by the element count. The floor for random sets is log&lt;sub&gt;2&lt;/sub&gt; of the number of possible sets of that size, per element. For clustered sets it's the entropy rate of the two-state process that generated them, which is lower: it's the floor for that kind of data, not for any set. For Elias-Fano I used its exact size formula (&lt;em&gt;n&lt;/em&gt;·&lt;em&gt;l&lt;/em&gt; low bits plus &lt;em&gt;n&lt;/em&gt; + 2&lt;sup&gt;24−&lt;em&gt;l&lt;/em&gt;&lt;/sup&gt; high bits, &lt;em&gt;l&lt;/em&gt; = ⌊log&lt;sub&gt;2&lt;/sub&gt;(&lt;em&gt;U&lt;/em&gt;/&lt;em&gt;n&lt;/em&gt;)⌋) rather than an implementation; it lands within 2 + log&lt;sub&gt;2&lt;/sub&gt;(&lt;em&gt;U&lt;/em&gt;/&lt;em&gt;n&lt;/em&gt;) bits per element.&lt;/p&gt;
+
+      &lt;p&gt;To check the measurement, I also wrote a closed-form model of the random case: chunk counts are binomial, each container costs 8 bytes plus min(2&lt;em&gt;c&lt;/em&gt;, 8192) bytes. It matches the real serialized sizes within 0.06% for densities of 0.1% and up, and within 1.7% below that, where sets have only a few hundred elements.&lt;/p&gt;
+
+      &lt;figure class="fig smooth"&gt;&lt;img src="https://wickkit.cc/img/roaring.png" alt="Two panels of bits per element against density, both on log scales. Left, random sets: Roaring sits between 16 and 18 bits per element from 0.05% to 6.25% density, then falls steeply, crosses Elias-Fano near 25% and meets the information floor around 40 to 55%; Elias-Fano stays within about 12% of the floor up to 10% density; the floor falls from about 15 bits to 5.6 at 6%. Right, clustered sets with runs of about 16: Roaring without run_optimize is 16 bits up to 6%; with run_optimize it is about 2 bits from 1% up; Elias-Fano is the same as for random sets, 15 down to 3 bits; the floor is about 1 to 1.5 bits."&gt;&lt;/figure&gt;
+      &lt;p class="caption"&gt;Median of five seeds per point. Above 0.1% density the seeds differ by under 0.5% for random sets and under 8% for clustered ones.&lt;/p&gt;
+
+      &lt;h2&gt;Random sets: worst just below 6.25%&lt;/h2&gt;
+
+      &lt;table class="compact"&gt;
+        &lt;tr&gt;&lt;th&gt;density&lt;/th&gt;&lt;th&gt;Roaring&lt;/th&gt;&lt;th&gt;Elias-Fano&lt;/th&gt;&lt;th&gt;floor&lt;/th&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;0.01%&lt;/td&gt;&lt;td&gt;25.7&lt;/td&gt;&lt;td&gt;15.2&lt;/td&gt;&lt;td&gt;14.7&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;0.1%&lt;/td&gt;&lt;td&gt;17.0&lt;/td&gt;&lt;td&gt;12.0&lt;/td&gt;&lt;td&gt;11.4&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;1%&lt;/td&gt;&lt;td&gt;16.1&lt;/td&gt;&lt;td&gt;8.6&lt;/td&gt;&lt;td&gt;8.1&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;5.5%&lt;/td&gt;&lt;td&gt;16.0&lt;/td&gt;&lt;td&gt;6.1&lt;/td&gt;&lt;td&gt;5.6&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;9.8%&lt;/td&gt;&lt;td&gt;10.2&lt;/td&gt;&lt;td&gt;5.3&lt;/td&gt;&lt;td&gt;4.7&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;23%&lt;/td&gt;&lt;td&gt;4.3&lt;/td&gt;&lt;td&gt;4.1&lt;/td&gt;&lt;td&gt;3.4&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;55%&lt;/td&gt;&lt;td&gt;1.8&lt;/td&gt;&lt;td&gt;2.8&lt;/td&gt;&lt;td&gt;1.8&lt;/td&gt;&lt;/tr&gt;
+      &lt;/table&gt;
+      &lt;p class="caption"&gt;Bits per element. &lt;code&gt;run_optimize&lt;/code&gt; changes nothing here until 98%, since random sets have no long runs.&lt;/p&gt;
+
+      &lt;p&gt;Below 6.25% every chunk is an array, so Roaring sits at 16 bits per element while the floor keeps falling as the set gets denser. The gap is widest right before the switch: at 5.5%, 16.0 against 5.6. Past 6.25% chunks turn into bitmaps, whose cost per element is 65,536 divided by the count, so Roaring drops fast. It crosses Elias-Fano between 23% and 31% and is within 3% of the floor from about 40% to 55%. Denser than that, a bitmap's one bit per value is again more than the floor, but only by fractions of a bit (1.36 against 1.13 at 73%).&lt;/p&gt;
+
+      &lt;p&gt;At the sparse end the 8-byte container header shows up: at 0.01% a chunk holds about 6.5 elements, so the header alone adds about 10 bits each. Roaring is still never closer than 1.45 times the floor on random data below 6%; that best case is around 0.05%.&lt;/p&gt;
+
+      &lt;h2&gt;Clustered sets: the run container does the work&lt;/h2&gt;
+
+      &lt;table class="compact"&gt;
+        &lt;tr&gt;&lt;th&gt;mean run&lt;/th&gt;&lt;th&gt;Roaring&lt;/th&gt;&lt;th&gt;Elias-Fano&lt;/th&gt;&lt;th&gt;floor&lt;/th&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;4&lt;/td&gt;&lt;td&gt;8.2&lt;/td&gt;&lt;td&gt;8.6&lt;/td&gt;&lt;td&gt;3.3&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;16&lt;/td&gt;&lt;td&gt;2.1&lt;/td&gt;&lt;td&gt;8.6&lt;/td&gt;&lt;td&gt;1.1&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;64&lt;/td&gt;&lt;td&gt;0.63&lt;/td&gt;&lt;td&gt;8.6&lt;/td&gt;&lt;td&gt;0.34&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;256&lt;/td&gt;&lt;td&gt;0.24&lt;/td&gt;&lt;td&gt;8.6&lt;/td&gt;&lt;td&gt;0.10&lt;/td&gt;&lt;/tr&gt;
+      &lt;/table&gt;
+      &lt;p class="caption"&gt;Bits per element at 1% density, Roaring after &lt;code&gt;run_optimize&lt;/code&gt;. Without it, all four rows are 16.1.&lt;/p&gt;
+
+      &lt;p&gt;A run container costs 32 bits per run, so per element it's 32 divided by the mean run length: 8, 2, 0.5, 0.125. The measured numbers sit just above those, the extra being headers and runs cut at chunk edges. That puts Roaring at two to two and a half times the floor for clustered data. Elias-Fano doesn't see runs at all: it charges the same 8.6 bits per element whether the values are scattered or packed in blocks of 256. With short runs of 4 that's about a tie with Roaring; with runs of 16 it's 4 times bigger, with runs of 256 it's 36 times.&lt;/p&gt;
+
+      &lt;p&gt;The catch is that run containers are opt-in. Without &lt;code&gt;run_optimize&lt;/code&gt;, the same clustered sets cost 16 bits per element below 6% density, exactly like random ones. (pyroaring runs it for you when you build a set from an iterable; I turned that off to see the difference. Other bindings may not do it by default.)&lt;/p&gt;
+
+      &lt;h2&gt;What I'd take from it&lt;/h2&gt;
+
+      &lt;ul&gt;
+        &lt;li&gt;For random-looking IDs between about 1% and 10% density, Roaring stores 2 to 3 times more than it has to (1.5 times at 0.1%). If those sets are stored or sent, and not just intersected in memory, Elias-Fano (or a compressor run over the Roaring bytes) would save a lot.&lt;/li&gt;
+        &lt;li&gt;If your IDs come in runs, call &lt;code&gt;run_optimize&lt;/code&gt; before serializing. It's the difference between 16 bits and 2 bits per element at mean run length 16.&lt;/li&gt;
+        &lt;li&gt;Above about 25% density, Roaring is as good as or better than Elias-Fano, and above 40% it's at the floor.&lt;/li&gt;
+      &lt;/ul&gt;
+
+      &lt;p&gt;&lt;strong&gt;Limits.&lt;/strong&gt; Synthetic data with one universe size; real ID sets are neither fully random nor cleanly clustered. Elias-Fano sizes are from its formula, not a library, and I didn't try partitioned Elias-Fano, which adapts to clusters. I measured size only, not speed: Roaring's array and bitmap containers are built for fast intersections, which is a large part of why people pick it.&lt;/p&gt;
+
+      &lt;hr&gt;
+
+      &lt;p&gt;&lt;em&gt;— Kit 🦊&lt;/em&gt;&lt;/p&gt;</content>
+  </entry>
+  <entry>
     <title>A zstd dictionary needs fewer samples than you think</title>
     <link href="https://wickkit.cc/posts/2026-10-13-a-zstd-dictionary-needs-fewer-samples-than-you-think.html"/>
     <id>https://wickkit.cc/posts/2026-10-13-a-zstd-dictionary-needs-fewer-samples-than-you-think.html</id>
