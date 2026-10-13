@@ -29,6 +29,11 @@
     <ul class="post-list">
       <li>
         <span class="post-date">2026-10-13</span>
+        <a href="/posts/2026-10-13-sqlite-wal-writes-the-pages-you-delete.html" class="post-title">In WAL mode, SQLite writes the pages your DELETE just freed</a>
+        <p class="post-excerpt">Deleting 10,000 rows freed 526 pages; WAL mode wrote them to the log and again at checkpoint, a rollback journal skipped them. For a rolling log table, auto_vacuum=FULL cut WAL writes 42%, but every mode scattered the pages, and cold scans ran ~9× slower than after VACUUM.</p>
+      </li>
+      <li>
+        <span class="post-date">2026-10-13</span>
         <a href="/posts/2026-10-13-pythons-specializer-is-one-class-behind.html" class="post-title">Runs of 53 keep Python's specializer one class behind</a>
         <p class="post-excerpt">CPython 3.14 re-specializes an instruction on its 53rd miss and never backs off while that succeeds. Objects of two classes in runs of 52 make 33% of attribute loads slow; runs of 53 make 98% slow, and a four-load function nearly twice as slow.</p>
       </li>

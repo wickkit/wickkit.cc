@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>In WAL mode, SQLite writes the pages your DELETE just freed — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/tools.html">tools</a>
+      <a href="/den.html">den</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+
+    <article>
+      <h1>In WAL mode, SQLite writes the pages your DELETE just freed</h1>
+      <div class="meta">2026-10-13 · Kit Wickham</div>
+
+      <p>I deleted 10,000 rows from a 200,000-row SQLite table, which emptied 526 pages. With a rollback journal, SQLite wrote 8 pages to the database file. In WAL mode it wrote 533 pages to the WAL and copied all 533 back into the database at the next checkpoint: the 526 freed pages, which hold nothing anyone will read, were written twice. The code marks freed pages "don't write", and only the rollback-journal path checks that mark.</p>
+
+      <p>That led to a second question about a common pattern, a rolling log table that inserts new rows and deletes the oldest. For it, <code>auto_vacuum=FULL</code> cut WAL writes from 116 to 67 pages per commit. No mode kept the table's pages in order, though, and once the order was broken a cold full scan of the 226 MB table took about 1 second instead of 0.11 seconds after a <code>VACUUM</code>.</p>
+
+      <h2>Freed pages in WAL mode</h2>
+
+      <p>When a b-tree page becomes empty, <code>freePage2()</code> in <code>btree.c</code> puts it on the freelist and calls <code>sqlite3PagerDontWrite()</code>, which flags the cached page <code>PGHDR_DONT_WRITE</code>: its content is garbage, so there's no need to save it. The page is already dirty, because the delete removed its cells one at a time before it emptied. In rollback-journal mode, <code>pager_write_pagelist()</code> skips flagged pages when writing the database file. In WAL mode the commit goes through <code>pagerWalFrames()</code> instead, which drops only pages past the end of a shrinking file and never looks at the flag. So every freed page becomes a WAL frame, and the checkpoint later copies it into the database file.</p>
+
+      <p>I counted page writes per file with a counting VFS (apsw with SQLite 3.54.0), for one <code>DELETE</code> of the oldest 10,000 of 200,000 rows of about 200 bytes each:</p>
+
+      <table class="compact">
+        <thead><tr><th>Journal mode</th><th>Journal or WAL pages</th><th>Database pages</th><th>Total</th></tr></thead>
+        <tbody>
+          <tr><td>Rollback (<code>DELETE</code>)</td><td>533 (old contents, for rollback)</td><td>8</td><td>541</td></tr>
+          <tr><td>WAL</td><td>533</td><td>533 (at checkpoint)</td><td>1,066</td></tr>
+        </tbody>
+      </table>
+
+      <p>The rollback journal still has to save the old contents of all 533 pages, so it isn't free either, but the database file only gets the 8 pages that really changed. WAL writes the garbage to both files. SQLite 3.53.1 through Python gave the same 533 WAL frames, and <code>secure_delete</code>, which zeroes freed pages on purpose, didn't change the count.</p>
+
+      <h2>A rolling log table</h2>
+
+      <p>The workload: a rowid table of 1 million rows of 150 to 250 bytes (226 MB). Each transaction inserts the 1,000 newest rows and deletes the 1,000 oldest. WAL mode, with a checkpoint after every commit so I could count frames. I ran 2,000 commits (the table turned over twice) and 10,000 commits (ten times), under each <a href="https://sqlite.org/pragma.html#pragma_auto_vacuum"><code>auto_vacuum</code></a> setting (the table below has no secondary index):</p>
+
+      <ul>
+        <li><code>NONE</code>, the default: freed pages go on the freelist and later inserts reuse them.</li>
+        <li><code>FULL</code>: at every commit, <code>autoVacuumCommit()</code> moves pages from the end of the file into the free slots and truncates the file.</li>
+        <li><code>INCREMENTAL</code>: the same moves, but only when you run <code>PRAGMA incremental_vacuum</code>. I ran it after every commit, or after every 100th.</li>
+        <li><code>NONE</code> followed by one <code>VACUUM</code> at the end, as the reference for a freshly rebuilt file.</li>
+      </ul>
+
+      <p>The file size stayed at 226 to 227 MB in every mode, since inserts reuse whatever deletes free. The differences were in what got written and where pages ended up.</p>
+
+      <table>
+        <thead><tr><th>Mode</th><th>WAL pages per commit</th><th>Next leaf is the next page (2× / 10× turnover)</th><th>Mean sequential run, pages (2× / 10×)</th></tr></thead>
+        <tbody>
+          <tr><td><code>NONE</code></td><td>116</td><td>92.6% / 83.5%</td><td>13.6 / 6.1</td></tr>
+          <tr><td><code>FULL</code></td><td>67</td><td>89.6% / 63.5%</td><td>9.6 / 2.7</td></tr>
+          <tr><td><code>INCREMENTAL</code>, every commit</td><td>123</td><td>85.5% / 75.7%</td><td>6.9 / 4.1</td></tr>
+          <tr><td><code>INCREMENTAL</code>, every 100th</td><td>118</td><td>92.3% / —</td><td>13.1 / —</td></tr>
+          <tr><td>After <code>VACUUM</code></td><td>—</td><td>99.7%</td><td>362</td></tr>
+        </tbody>
+      </table>
+
+      <p>Page order comes from the <a href="https://sqlite.org/dbstat.html"><code>dbstat</code></a> virtual table, which lists every b-tree page with its path from the root; sorted by path, the table's leaf pages come in the order a scan visits them. A "sequential run" is a stretch of leaves on consecutive page numbers. The numbers are means over 2 or 3 seeds, which agreed to within 0.3 percentage points.</p>
+
+      <p><code>FULL</code> writes less for the reason in the first section. Each commit adds about 55 new leaf pages at the end of the file and frees about 55 old ones. Under <code>NONE</code>, both sets get written: the new pages because they're new, the freed ones because WAL ignores the "don't write" flag. Under <code>FULL</code>, the new pages are moved into the freed slots before anything is written, the file is truncated, and the commit writes each page once, at its final place. Running <code>incremental_vacuum</code> as a separate step doesn't get this saving, because by then the freed pages have already been committed.</p>
+
+      <p>But no mode keeps the table in order. Under <code>NONE</code>, new leaves land wherever freelist pages happen to be. Under <code>FULL</code> they're moved into the holes, and that scattered them fastest: after ten turnovers, the average sequential run was under 3 pages.</p>
+
+      <h2>What scattered pages cost</h2>
+
+      <p>With the file in the OS cache, nothing: a full scan (<code>SELECT sum(length(payload)) FROM log</code>) took 0.10 seconds in every mode. Cold is different. I made each cold copy by writing the file with caching turned off (<code>F_NOCACHE</code> on macOS), checked with <code>mincore</code> that such a copy has none of its pages resident, and scanned each layout 5 times this way:</p>
+
+      <table class="compact">
+        <thead><tr><th>Layout</th><th>Cold full scan, median</th><th>Warm</th></tr></thead>
+        <tbody>
+          <tr><td>After <code>VACUUM</code></td><td>0.11 s</td><td>0.10 s</td></tr>
+          <tr><td>Churned, any mode, 2× turnover</td><td>0.91 to 1.04 s</td><td>0.10 s</td></tr>
+          <tr><td>Churned, any mode, 10× turnover</td><td>0.99 to 1.11 s</td><td>0.10 s</td></tr>
+        </tbody>
+      </table>
+
+      <p>The cost isn't proportional to the damage. A layout where 93% of steps go to the next page scanned about as slowly as one where 64% do. The likely reason is readahead: the OS reads ahead only while reads stay sequential, and a jump every 7 to 14 pages keeps it from ever getting going. Reading the same 55,198 pages with plain 4 KiB reads took 0.05 s cold in sorted order and 0.95 s in the table's scan order.</p>
+
+      <p>An index on a random key is worse: its page splits scatter it in every mode (mean run 1.0 page). A cold index-only scan over the index's 4,113 pages took 0.53 s under both <code>NONE</code> and <code>FULL</code>, and 0.006 s after <code>VACUUM</code> laid them out in order.</p>
+
+      <p>These cold numbers are noisy, and I nearly got one wrong. Random 4 KiB reads on this machine's SSD came in two speeds, about 17 µs or 50 to 65 µs per page, switching between runs for reasons I didn't pin down. Sometimes a churned scan finished in 0.2 s. With three seeds, <code>FULL</code> looked 8 times slower than <code>NONE</code> on the index scan. Alternating the two files 9 times gave 0.527 s and 0.533 s. The medians above are the slow speed, which was the usual one.</p>
+
+      <h2>What to do</h2>
+
+      <p>If a WAL database mostly inserts new rows and deletes old ones, <code>auto_vacuum=FULL</code> saved about 40% of WAL writes here, and the file never holds free pages. It has to be set before the first table is created, or followed by a <code>VACUUM</code>. It won't keep the data in order; nothing short of <code>VACUUM</code> does. That only matters for data read cold: databases larger than memory, or the first queries after a restart. Then a periodic <code>VACUUM</code>, or <code>VACUUM INTO</code> a new file that you then swap in, makes cold scans close to 10 times faster here, and index scans much more than that.</p>
+
+      <p>Versions: SQLite 3.53.1 (Python 3.14 on macOS, Apple SSD) for the workload and timings, SQLite 3.54.0 through apsw on Linux for the write counts. Page size 4,096. Sizes in MB are millions of bytes.</p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+</body>
+</html>
