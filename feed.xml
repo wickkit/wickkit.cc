@@ -8,6 +8,75 @@
   <updated>2026-10-13T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
   <entry>
+    <title>A cancelled asyncio timeout keeps your request alive</title>
+    <link href="https://wickkit.cc/posts/2026-10-13-a-cancelled-asyncio-timeout-keeps-your-request.html"/>
+    <id>https://wickkit.cc/posts/2026-10-13-a-cancelled-asyncio-timeout-keeps-your-request.html</id>
+    <updated>2026-10-13T00:00:00Z</updated>
+    <summary>CPython's cancelled timer handles keep a copy of the request's context variables until a lazy heap cleanup. With 10,000 timers ahead, 10,000 finished requests stay alive; with Sentry's scope that's 132 MB instead of 1.6 MB. One line fixes it; uvloop doesn't have it.</summary>
+    <content type="html">&lt;p&gt;Wrap a fast request in &lt;code&gt;asyncio.timeout(60)&lt;/code&gt; and the timeout almost never fires: the request finishes, the timer is cancelled, and that should be the end of it. In CPython's event loop it isn't. The cancelled timer stays in the loop's heap until a lazy cleanup removes it, and while it waits it still holds a copy of the request's &lt;code&gt;contextvars&lt;/code&gt; context. Anything a context variable pointed to during the request stays alive with it. With 10,000 other timers on the loop, I measured 10,000 finished requests' contexts kept around at the peak. With Sentry's per-request scope in those contexts, that came to 132 MB instead of 1.6 MB. Clearing the context in &lt;code&gt;Handle.cancel()&lt;/code&gt;, one line, brings it back to one context. uvloop doesn't have the problem.&lt;/p&gt;
+
+      &lt;h2&gt;Where the context goes&lt;/h2&gt;
+
+      &lt;p&gt;Every callback asyncio schedules is a &lt;code&gt;Handle&lt;/code&gt;. When you don't pass a context, the handle takes &lt;code&gt;contextvars.copy_context()&lt;/code&gt; of the code that scheduled it, so the callback later runs with the same context variables. &lt;code&gt;asyncio.timeout()&lt;/code&gt; schedules its timer with &lt;code&gt;loop.call_at(when, self._on_timeout)&lt;/code&gt; from inside your task, so the timer handle gets a copy of the task's context: request IDs, tracing spans, error-reporting scopes, whatever your framework keeps there. &lt;code&gt;asyncio.wait_for()&lt;/code&gt; uses &lt;code&gt;asyncio.timeout()&lt;/code&gt; since 3.12, and a cancelled &lt;code&gt;asyncio.sleep()&lt;/code&gt; cancels its own timer handle the same way.&lt;/p&gt;
+
+      &lt;p&gt;Here is &lt;a href="https://github.com/python/cpython/blob/main/Lib/asyncio/events.py"&gt;&lt;code&gt;Handle.cancel()&lt;/code&gt;&lt;/a&gt; in 3.14 and on main:&lt;/p&gt;
+
+&lt;pre&gt;&lt;code&gt;def cancel(self):
+    if not self._cancelled:
+        self._cancelled = True
+        if self._loop.get_debug():
+            self._repr = repr(self)
+        self._callback = None
+        self._args = None&lt;/code&gt;&lt;/pre&gt;
+
+      &lt;p&gt;It drops the callback and its arguments, but not &lt;code&gt;_context&lt;/code&gt;. That would matter little if a cancelled timer left the loop right away, but it doesn't. The loop keeps timers in a binary heap, and removing an entry from the middle of a heap is awkward, so cancellation only marks the handle. The loop pops cancelled handles when they reach the front of the heap, and once there are more than 100 timers and more than half of them are cancelled, it rebuilds the heap without them. The cleanup came out of &lt;a href="https://github.com/python/cpython/issues/66638"&gt;a 2014 issue about unbounded memory&lt;/a&gt; from cancelled timers; the 100 and the one-half are constants at the top of &lt;a href="https://github.com/python/cpython/blob/main/Lib/asyncio/base_events.py"&gt;&lt;code&gt;base_events.py&lt;/code&gt;&lt;/a&gt;. The context argument came four years later, in 3.7, and cancelled handles have held a context ever since.&lt;/p&gt;
+
+      &lt;p&gt;So a cancelled timeout leaves quickly only if it's at the front of the heap. If any live timer has an earlier deadline (a slow request still in flight, a connection's idle timeout, a periodic task), every fast request's cancelled timer queues behind it until the cleanup. The cleanup runs when the cancelled timers outnumber the live ones, so with L live timers ahead, up to about L finished requests' contexts are held at once. Because of the 100-timer floor, even a single live timer ahead lets about 100 pile up. A cancelled timer also leaves by its own deadline at the latest, so a server handling fewer than L requests per timeout period holds fewer.&lt;/p&gt;
+
+      &lt;h2&gt;Counting them&lt;/h2&gt;
+
+      &lt;p&gt;Each simulated request sets a context variable to a small object I can track with a weak reference, runs &lt;code&gt;async with asyncio.timeout(60): await asyncio.sleep(0)&lt;/code&gt;, and ends. Separately, L timers sit on the loop with 30-second deadlines, ahead of every request's 60 seconds. After each request I count how many request objects are still alive. Python 3.14.8, garbage collector off so only plain references keep anything alive. "Fixed" is the same run with &lt;code&gt;Handle.cancel()&lt;/code&gt; patched to also set &lt;code&gt;self._context = None&lt;/code&gt;.&lt;/p&gt;
+
+      &lt;table class="compact"&gt;
+        &lt;thead&gt;&lt;tr&gt;&lt;th&gt;Live timers ahead (L)&lt;/th&gt;&lt;th&gt;Requests kept, peak&lt;/th&gt;&lt;th&gt;Requests kept, mean&lt;/th&gt;&lt;th&gt;Fixed, peak&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;
+        &lt;tbody&gt;
+          &lt;tr&gt;&lt;td&gt;1&lt;/td&gt;&lt;td&gt;99&lt;/td&gt;&lt;td&gt;50&lt;/td&gt;&lt;td&gt;1&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;100&lt;/td&gt;&lt;td&gt;100&lt;/td&gt;&lt;td&gt;50&lt;/td&gt;&lt;td&gt;1&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;1,000&lt;/td&gt;&lt;td&gt;1,000&lt;/td&gt;&lt;td&gt;500&lt;/td&gt;&lt;td&gt;1&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;10,000&lt;/td&gt;&lt;td&gt;10,000&lt;/td&gt;&lt;td&gt;5,833&lt;/td&gt;&lt;td&gt;1&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;100,000&lt;/td&gt;&lt;td&gt;100,000&lt;/td&gt;&lt;td&gt;58,333&lt;/td&gt;&lt;td&gt;1&lt;/td&gt;&lt;/tr&gt;
+        &lt;/tbody&gt;
+      &lt;/table&gt;
+
+      &lt;p&gt;The count climbs to L, the cleanup drops it, and it climbs again, so on average half to 60% of L finished requests are alive. The one that's always kept is the request just finished. With the same live timers placed after the requests' deadlines instead of before, nothing piles up: the cancelled timers are at the front and leave on the next loop iteration. Under uvloop 0.23.0 the count stayed at 1 for L = 1, 1,000 and 10,000: its &lt;a href="https://github.com/MagicStack/uvloop/blob/master/uvloop/cbhandles.pyx"&gt;timer handle&lt;/a&gt; closes its libuv timer when cancelled, so nothing waits for a cleanup.&lt;/p&gt;
+
+      &lt;h2&gt;What a kept context costs&lt;/h2&gt;
+
+      &lt;p&gt;That depends entirely on what your context variables point to. A request ID costs nothing worth measuring. When each request's context held a 32 KB object, peak traced memory at L = 10,000 was 320 MB against 3 MB fixed.&lt;/p&gt;
+
+      &lt;p&gt;A more realistic payload is an error reporter's scope. The Sentry Python SDK keeps its per-request isolation scope (tags, user, breadcrumbs) in a &lt;a href="https://github.com/getsentry/sentry-python/blob/master/sentry_sdk/scope.py"&gt;context variable&lt;/a&gt;. I ran Sentry SDK 2.72.0 with no network: each request opened an isolation scope, set a tag and a user, and added breadcrumbs that looked like database queries. At L = 10,000:&lt;/p&gt;
+
+      &lt;table class="compact"&gt;
+        &lt;thead&gt;&lt;tr&gt;&lt;th&gt;Breadcrumbs per request&lt;/th&gt;&lt;th&gt;Peak, unpatched&lt;/th&gt;&lt;th&gt;Per kept request&lt;/th&gt;&lt;th&gt;Peak, fixed&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;
+        &lt;tbody&gt;
+          &lt;tr&gt;&lt;td&gt;0&lt;/td&gt;&lt;td&gt;37.6 MB&lt;/td&gt;&lt;td&gt;3.9 KB&lt;/td&gt;&lt;td&gt;1.5 MB&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;20&lt;/td&gt;&lt;td&gt;132 MB&lt;/td&gt;&lt;td&gt;13.5 KB&lt;/td&gt;&lt;td&gt;1.6 MB&lt;/td&gt;&lt;/tr&gt;
+        &lt;/tbody&gt;
+      &lt;/table&gt;
+
+      &lt;p&gt;None of this is a leak in the strict sense: the cleanup does run, and memory stops growing at about L kept requests. But the bound scales with how many timers a busy server has, which is the same thing that makes the server big. A server with 10,000 open connections, each with an idle timeout, can carry 10,000 finished requests' worth of context.&lt;/p&gt;
+
+      &lt;h2&gt;The cleanup itself is a pause&lt;/h2&gt;
+
+      &lt;p&gt;The rebuild is a pass over the whole heap followed by &lt;code&gt;heapify&lt;/code&gt;, done in one loop iteration. Normally a request in my loop took about 6 µs. The slowest one, the request during which the rebuild ran, took 1.5 ms at L = 10,000, 15 ms at 100,000 and 153 ms at a million, even with the fix. Unpatched it took 3.1, 36 and 366 ms, because the rebuild also frees all the kept contexts at once. The cost per timer is small and it's paid once per L cancellations, but it's paid all at once.&lt;/p&gt;
+
+      &lt;h2&gt;The fix&lt;/h2&gt;
+
+      &lt;p&gt;Setting &lt;code&gt;self._context = None&lt;/code&gt; in &lt;code&gt;Handle.cancel()&lt;/code&gt; is enough for the memory. A cancelled handle never runs, and the one place in the standard library that reads a handle's context afterwards, the loop's exception handler, already copes with &lt;code&gt;None&lt;/code&gt;. Until something like that lands, the workarounds are uvloop, or keeping timeouts on long deadlines from sitting behind earlier timers, which is hard to arrange on a busy server. The rebuild pause would need a different structure, like uvloop's or a timer wheel, where cancelling removes the timer.&lt;/p&gt;
+
+      &lt;p&gt;I haven't run CPython's own asyncio test suite against the change, so treat it as a sketch rather than a patch. Versions measured: CPython 3.14.8 on Linux, uvloop 0.23.0, sentry-sdk 2.72.0. The &lt;code&gt;Handle.cancel()&lt;/code&gt; code and the cleanup thresholds are the same on CPython's main branch today.&lt;/p&gt;</content>
+  </entry>
+  <entry>
     <title>A binary fuse filter is 9 bits per key only when it's big</title>
     <link href="https://wickkit.cc/posts/2026-10-13-fuse-filters-are-9-bits-only-when-big.html"/>
     <id>https://wickkit.cc/posts/2026-10-13-fuse-filters-are-9-bits-only-when-big.html</id>

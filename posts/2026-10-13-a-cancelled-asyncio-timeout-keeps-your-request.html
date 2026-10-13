@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>A cancelled asyncio timeout keeps your request alive — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/tools.html">tools</a>
+      <a href="/den.html">den</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+
+    <article>
+      <h1>A cancelled asyncio timeout keeps your request alive</h1>
+      <div class="meta">2026-10-13 · Kit Wickham</div>
+
+      <p>Wrap a fast request in <code>asyncio.timeout(60)</code> and the timeout almost never fires: the request finishes, the timer is cancelled, and that should be the end of it. In CPython's event loop it isn't. The cancelled timer stays in the loop's heap until a lazy cleanup removes it, and while it waits it still holds a copy of the request's <code>contextvars</code> context. Anything a context variable pointed to during the request stays alive with it. With 10,000 other timers on the loop, I measured 10,000 finished requests' contexts kept around at the peak. With Sentry's per-request scope in those contexts, that came to 132 MB instead of 1.6 MB. Clearing the context in <code>Handle.cancel()</code>, one line, brings it back to one context. uvloop doesn't have the problem.</p>
+
+      <h2>Where the context goes</h2>
+
+      <p>Every callback asyncio schedules is a <code>Handle</code>. When you don't pass a context, the handle takes <code>contextvars.copy_context()</code> of the code that scheduled it, so the callback later runs with the same context variables. <code>asyncio.timeout()</code> schedules its timer with <code>loop.call_at(when, self._on_timeout)</code> from inside your task, so the timer handle gets a copy of the task's context: request IDs, tracing spans, error-reporting scopes, whatever your framework keeps there. <code>asyncio.wait_for()</code> uses <code>asyncio.timeout()</code> since 3.12, and a cancelled <code>asyncio.sleep()</code> cancels its own timer handle the same way.</p>
+
+      <p>Here is <a href="https://github.com/python/cpython/blob/main/Lib/asyncio/events.py"><code>Handle.cancel()</code></a> in 3.14 and on main:</p>
+
+<pre><code>def cancel(self):
+    if not self._cancelled:
+        self._cancelled = True
+        if self._loop.get_debug():
+            self._repr = repr(self)
+        self._callback = None
+        self._args = None</code></pre>
+
+      <p>It drops the callback and its arguments, but not <code>_context</code>. That would matter little if a cancelled timer left the loop right away, but it doesn't. The loop keeps timers in a binary heap, and removing an entry from the middle of a heap is awkward, so cancellation only marks the handle. The loop pops cancelled handles when they reach the front of the heap, and once there are more than 100 timers and more than half of them are cancelled, it rebuilds the heap without them. The cleanup came out of <a href="https://github.com/python/cpython/issues/66638">a 2014 issue about unbounded memory</a> from cancelled timers; the 100 and the one-half are constants at the top of <a href="https://github.com/python/cpython/blob/main/Lib/asyncio/base_events.py"><code>base_events.py</code></a>. The context argument came four years later, in 3.7, and cancelled handles have held a context ever since.</p>
+
+      <p>So a cancelled timeout leaves quickly only if it's at the front of the heap. If any live timer has an earlier deadline (a slow request still in flight, a connection's idle timeout, a periodic task), every fast request's cancelled timer queues behind it until the cleanup. The cleanup runs when the cancelled timers outnumber the live ones, so with L live timers ahead, up to about L finished requests' contexts are held at once. Because of the 100-timer floor, even a single live timer ahead lets about 100 pile up. A cancelled timer also leaves by its own deadline at the latest, so a server handling fewer than L requests per timeout period holds fewer.</p>
+
+      <h2>Counting them</h2>
+
+      <p>Each simulated request sets a context variable to a small object I can track with a weak reference, runs <code>async with asyncio.timeout(60): await asyncio.sleep(0)</code>, and ends. Separately, L timers sit on the loop with 30-second deadlines, ahead of every request's 60 seconds. After each request I count how many request objects are still alive. Python 3.14.8, garbage collector off so only plain references keep anything alive. "Fixed" is the same run with <code>Handle.cancel()</code> patched to also set <code>self._context = None</code>.</p>
+
+      <table class="compact">
+        <thead><tr><th>Live timers ahead (L)</th><th>Requests kept, peak</th><th>Requests kept, mean</th><th>Fixed, peak</th></tr></thead>
+        <tbody>
+          <tr><td>1</td><td>99</td><td>50</td><td>1</td></tr>
+          <tr><td>100</td><td>100</td><td>50</td><td>1</td></tr>
+          <tr><td>1,000</td><td>1,000</td><td>500</td><td>1</td></tr>
+          <tr><td>10,000</td><td>10,000</td><td>5,833</td><td>1</td></tr>
+          <tr><td>100,000</td><td>100,000</td><td>58,333</td><td>1</td></tr>
+        </tbody>
+      </table>
+
+      <p>The count climbs to L, the cleanup drops it, and it climbs again, so on average half to 60% of L finished requests are alive. The one that's always kept is the request just finished. With the same live timers placed after the requests' deadlines instead of before, nothing piles up: the cancelled timers are at the front and leave on the next loop iteration. Under uvloop 0.23.0 the count stayed at 1 for L = 1, 1,000 and 10,000: its <a href="https://github.com/MagicStack/uvloop/blob/master/uvloop/cbhandles.pyx">timer handle</a> closes its libuv timer when cancelled, so nothing waits for a cleanup.</p>
+
+      <h2>What a kept context costs</h2>
+
+      <p>That depends entirely on what your context variables point to. A request ID costs nothing worth measuring. When each request's context held a 32 KB object, peak traced memory at L = 10,000 was 320 MB against 3 MB fixed.</p>
+
+      <p>A more realistic payload is an error reporter's scope. The Sentry Python SDK keeps its per-request isolation scope (tags, user, breadcrumbs) in a <a href="https://github.com/getsentry/sentry-python/blob/master/sentry_sdk/scope.py">context variable</a>. I ran Sentry SDK 2.72.0 with no network: each request opened an isolation scope, set a tag and a user, and added breadcrumbs that looked like database queries. At L = 10,000:</p>
+
+      <table class="compact">
+        <thead><tr><th>Breadcrumbs per request</th><th>Peak, unpatched</th><th>Per kept request</th><th>Peak, fixed</th></tr></thead>
+        <tbody>
+          <tr><td>0</td><td>37.6 MB</td><td>3.9 KB</td><td>1.5 MB</td></tr>
+          <tr><td>20</td><td>132 MB</td><td>13.5 KB</td><td>1.6 MB</td></tr>
+        </tbody>
+      </table>
+
+      <p>None of this is a leak in the strict sense: the cleanup does run, and memory stops growing at about L kept requests. But the bound scales with how many timers a busy server has, which is the same thing that makes the server big. A server with 10,000 open connections, each with an idle timeout, can carry 10,000 finished requests' worth of context.</p>
+
+      <h2>The cleanup itself is a pause</h2>
+
+      <p>The rebuild is a pass over the whole heap followed by <code>heapify</code>, done in one loop iteration. Normally a request in my loop took about 6 µs. The slowest one, the request during which the rebuild ran, took 1.5 ms at L = 10,000, 15 ms at 100,000 and 153 ms at a million, even with the fix. Unpatched it took 3.1, 36 and 366 ms, because the rebuild also frees all the kept contexts at once. The cost per timer is small and it's paid once per L cancellations, but it's paid all at once.</p>
+
+      <h2>The fix</h2>
+
+      <p>Setting <code>self._context = None</code> in <code>Handle.cancel()</code> is enough for the memory. A cancelled handle never runs, and the one place in the standard library that reads a handle's context afterwards, the loop's exception handler, already copes with <code>None</code>. Until something like that lands, the workarounds are uvloop, or keeping timeouts on long deadlines from sitting behind earlier timers, which is hard to arrange on a busy server. The rebuild pause would need a different structure, like uvloop's or a timer wheel, where cancelling removes the timer.</p>
+
+      <p>I haven't run CPython's own asyncio test suite against the change, so treat it as a sketch rather than a patch. Versions measured: CPython 3.14.8 on Linux, uvloop 0.23.0, sentry-sdk 2.72.0. The <code>Handle.cancel()</code> code and the cleanup thresholds are the same on CPython's main branch today.</p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+</body>
+</html>

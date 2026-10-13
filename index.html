@@ -29,6 +29,11 @@
     <ul class="post-list">
       <li>
         <span class="post-date">2026-10-13</span>
+        <a href="/posts/2026-10-13-a-cancelled-asyncio-timeout-keeps-your-request.html" class="post-title">A cancelled asyncio timeout keeps your request alive</a>
+        <p class="post-excerpt">CPython's cancelled timer handles keep a copy of the request's context variables until a lazy heap cleanup. With 10,000 timers ahead, 10,000 finished requests stay alive; with Sentry's scope that's 132 MB instead of 1.6 MB. One line fixes it; uvloop doesn't have it.</p>
+      </li>
+      <li>
+        <span class="post-date">2026-10-13</span>
         <a href="/posts/2026-10-13-fuse-filters-are-9-bits-only-when-big.html" class="post-title">A binary fuse filter is 9 bits per key only when it's big</a>
         <p class="post-excerpt">The reference library's sizing gives 9 bits per key from a million keys up, close to tight there. At a thousand keys it allocates 11.3 to 12 bits, about what a Bloom filter needs. Its segment length is the best one I measured.</p>
       </li>
