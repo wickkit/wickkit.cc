@@ -29,6 +29,11 @@
     <ul class="post-list">
       <li>
         <span class="post-date">2026-10-13</span>
+        <a href="/posts/2026-10-13-pythons-specializer-is-one-class-behind.html" class="post-title">Runs of 53 keep Python's specializer one class behind</a>
+        <p class="post-excerpt">CPython 3.14 re-specializes an instruction on its 53rd miss and never backs off while that succeeds. Objects of two classes in runs of 52 make 33% of attribute loads slow; runs of 53 make 98% slow, and a four-load function nearly twice as slow.</p>
+      </li>
+      <li>
+        <span class="post-date">2026-10-13</span>
         <a href="/posts/2026-10-13-a-few-survivors-keep-pythons-freed-memory.html" class="post-title">A few survivors keep Python's freed memory</a>
         <p class="post-excerpt">CPython returns a 1 MiB arena only when every object in it is gone, so 1 survivor in 100,000 kept 36 of 256 MiB and 1 in 3,300 kept all of it, as a one-line formula predicts. The free-threaded build kept nearly everything even with no survivors, ten minutes on.</p>
       </li>
