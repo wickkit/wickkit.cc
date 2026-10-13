@@ -5,8 +5,95 @@
   <link href="https://wickkit.cc/"/>
   <link rel="self" href="https://wickkit.cc/feed.xml"/>
   <id>https://wickkit.cc/</id>
-  <updated>2026-10-12T00:00:00Z</updated>
+  <updated>2026-10-13T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
+  <entry>
+    <title>A cuckoo filter wins when it's full</title>
+    <link href="https://wickkit.cc/posts/2026-10-13-a-cuckoo-filter-wins-when-its-full.html"/>
+    <id>https://wickkit.cc/posts/2026-10-13-a-cuckoo-filter-wins-when-its-full.html</id>
+    <updated>2026-10-13T00:00:00Z</updated>
+    <summary>The paper's "smaller than Bloom below 3%" holds for a semi-sorted filter at 95% load. Without semi-sorting it's 0.46%, and with power-of-two sizing a 12-bit filter is smaller than a Bloom filter for only 8% of capacities.</summary>
+    <content type="html">&lt;p&gt;The cuckoo filter paper says it uses less space than a Bloom filter whenever you want a false positive rate under about 3%. I simulated cuckoo filters and checked that claim. The number is right, but it assumes two things: the filter is about 95% full, and it uses semi-sorting, a bucket-compression trick that the reference library leaves off by default. Without semi-sorting the break-even drops to 0.46%. And because the table size has to be a power of two, a filter holding the number of items it was sized for usually sits well below 95%. At that point the Bloom filter is smaller.&lt;/p&gt;
+
+      &lt;h2&gt;The setup&lt;/h2&gt;
+
+      &lt;p&gt;A cuckoo filter stores a short fingerprint of each item (&lt;code&gt;f&lt;/code&gt; bits) in a table of buckets with &lt;code&gt;b&lt;/code&gt; slots each. An item can live in one of two buckets: &lt;code&gt;i1&lt;/code&gt; from its hash, and &lt;code&gt;i2 = i1 XOR hash(fingerprint)&lt;/code&gt;. That XOR is the trick that makes it a filter: you can find a fingerprint's other bucket without the original item. When both buckets are full, an insert kicks a random resident to its other bucket, which may kick another, and gives up after a fixed number of kicks. The &lt;a href="https://github.com/efficient/cuckoofilter"&gt;reference implementation&lt;/a&gt; uses &lt;code&gt;b = 4&lt;/code&gt;, 500 kicks, a bucket count rounded up to a power of two (so the XOR stays in range), and doubles the table if the requested capacity would fill it past 96%.&lt;/p&gt;
+
+      &lt;p&gt;My simulator fills a table with random items until the first insert fails, then queries 200,000 items that were never inserted to measure the false positive rate. The main sweep hashes the fingerprint with a bit mixer to get the second bucket; a second sweep uses the library's exact formula. A baseline mode gives every item an independent random second bucket, which is what a cuckoo hash table storing whole keys would do. Tables from 2&lt;sup&gt;10&lt;/sup&gt; to 2&lt;sup&gt;24&lt;/sup&gt; buckets, bucket sizes 2, 4 and 8, fingerprints 2 to 16 bits, 10 to 20 seeds per setting.&lt;/p&gt;
+
+      &lt;p&gt;Sanity check: the measured false positive rate matches the textbook &lt;code&gt;1 − (1 − 1/(2&lt;sup&gt;f&lt;/sup&gt;−1))&lt;sup&gt;2b·load&lt;/sup&gt;&lt;/code&gt; to within 2.3% for 8- and 12-bit fingerprints at every table size (2.96% against 2.97% for 8 bits at 2&lt;sup&gt;20&lt;/sup&gt; buckets). The 16-bit rates are within 9%, which is the noise you'd expect from a couple of hundred hits.&lt;/p&gt;
+
+      &lt;h2&gt;How full it gets&lt;/h2&gt;
+
+      &lt;p&gt;With 4-slot buckets and 500 kicks, the first failure comes at about 97% full in a small table and 95.5% in a big one. With 12- or 16-bit fingerprints the filter behaves the same as the random-second-bucket baseline to within 0.3 points, so the XOR trick costs nothing there. The library's own formula gave the same loads to within 0.2 points.&lt;/p&gt;
+
+      &lt;table class="compact"&gt;
+        &lt;tr&gt;&lt;th&gt;Buckets&lt;/th&gt;&lt;th&gt;b = 2&lt;/th&gt;&lt;th&gt;b = 4&lt;/th&gt;&lt;th&gt;b = 8&lt;/th&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;2&lt;sup&gt;10&lt;/sup&gt;&lt;/td&gt;&lt;td&gt;88.8%&lt;/td&gt;&lt;td&gt;97.2%&lt;/td&gt;&lt;td&gt;99.4%&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;2&lt;sup&gt;16&lt;/sup&gt;&lt;/td&gt;&lt;td&gt;87.4%&lt;/td&gt;&lt;td&gt;96.2%&lt;/td&gt;&lt;td&gt;99.0%&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;2&lt;sup&gt;20&lt;/sup&gt;&lt;/td&gt;&lt;td&gt;86.6%&lt;/td&gt;&lt;td&gt;95.9%&lt;/td&gt;&lt;td&gt;98.6%&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;2&lt;sup&gt;24&lt;/sup&gt;&lt;/td&gt;&lt;td&gt;86.2%&lt;/td&gt;&lt;td&gt;95.5%&lt;/td&gt;&lt;td&gt;98.4%&lt;/td&gt;&lt;/tr&gt;
+      &lt;/table&gt;
+      &lt;p class="caption"&gt;Mean load at the first failed insert, 16-bit fingerprints, 500 kicks, 10 seeds (7 for &lt;code&gt;b = 8&lt;/code&gt; at 2&lt;sup&gt;24&lt;/sup&gt;).&lt;/p&gt;
+
+      &lt;p&gt;The drop with size comes from the kick limit, not from the table. Bigger tables need longer chains of kicks near the end, and 500 cuts more of them off:&lt;/p&gt;
+
+      &lt;table class="compact"&gt;
+        &lt;tr&gt;&lt;th&gt;Kick limit&lt;/th&gt;&lt;th&gt;2&lt;sup&gt;14&lt;/sup&gt; buckets&lt;/th&gt;&lt;th&gt;2&lt;sup&gt;22&lt;/sup&gt; buckets&lt;/th&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;100&lt;/td&gt;&lt;td&gt;93.2%&lt;/td&gt;&lt;td&gt;90.7%&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;500&lt;/td&gt;&lt;td&gt;96.6%&lt;/td&gt;&lt;td&gt;95.5%&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;2,000&lt;/td&gt;&lt;td&gt;97.5%&lt;/td&gt;&lt;td&gt;97.1%&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;8,000&lt;/td&gt;&lt;td&gt;97.8%&lt;/td&gt;&lt;td&gt;97.7%&lt;/td&gt;&lt;/tr&gt;
+      &lt;/table&gt;
+      &lt;p class="caption"&gt;Baseline mode (random second bucket), &lt;code&gt;b = 4&lt;/code&gt;, 5 seeds.&lt;/p&gt;
+
+      &lt;p&gt;This interacts with the library's 96% doubling rule. If you ask for a capacity that lands just under it, say 95.8% of a power-of-two table, the table isn't doubled, and in my runs it couldn't hold that many items: with 8-bit fingerprints, 35% of seeds failed before 96% at 2&lt;sup&gt;18&lt;/sup&gt; buckets, 90% at 2&lt;sup&gt;20&lt;/sup&gt;, and all of them from 2&lt;sup&gt;22&lt;/sup&gt; up. The library parks the one item that didn't fit in a single spare slot, so lookups stay correct, but the next insert reports the filter as full. Only capacities in a narrow band right under the threshold are affected. With 2,000 kicks, every run up to 2&lt;sup&gt;22&lt;/sup&gt; buckets got past 96.8%.&lt;/p&gt;
+
+      &lt;h2&gt;Short fingerprints hit a wall&lt;/h2&gt;
+
+      &lt;p&gt;A fingerprint can only ever sit in its pair of buckets. With &lt;code&gt;f&lt;/code&gt; bits there are only 2&lt;sup&gt;f&lt;/sup&gt;−1 fingerprints, and items with the same fingerprint and the same pair of buckets have nowhere else to go. With 4-slot buckets, nine of them don't fit. More kicks can't help: one 2&lt;sup&gt;24&lt;/sup&gt;-bucket table with 4-bit fingerprints failed at 55% full with 500, 5,000 and 50,000 kicks, and at the point of failure both buckets held four copies of the same fingerprint, with a ninth one left over.&lt;/p&gt;
+
+      &lt;p&gt;The odds follow from a Poisson count: each (pair, fingerprint) gets on average &lt;code&gt;2b·load/(2&lt;sup&gt;f&lt;/sup&gt;−1)&lt;/code&gt; items, and there are &lt;code&gt;buckets·(2&lt;sup&gt;f&lt;/sup&gt;−1)/2&lt;/code&gt; of them. For 4-bit fingerprints in 2&lt;sup&gt;24&lt;/sup&gt; buckets that predicts a 42% chance of an overfull pair before 97% load; drawing the items without building the table, 10 of 20 seeds got one, the earliest at 55%. The same count gives 0.4% by 55%, so that seed was an unlucky draw rather than a different effect. As the table grows, the minimum safe fingerprint grows with it: with 4-slot buckets, 3-bit fingerprints fell from 88% full at 2&lt;sup&gt;10&lt;/sup&gt; buckets to 46% at 2&lt;sup&gt;24&lt;/sup&gt;. From about 6 bits up, nothing changes for the table sizes I tried, and the usual settings start at 8 bits, so this is a limit you only meet if you try to squeeze.&lt;/p&gt;
+
+      &lt;h2&gt;Against a Bloom filter&lt;/h2&gt;
+
+      &lt;p&gt;A cuckoo filter at load &lt;code&gt;α&lt;/code&gt; costs &lt;code&gt;f/α&lt;/code&gt; bits per item (one bit less with semi-sorting, which sorts each 4-slot bucket and packs it into fewer bits). Its false positive rate also falls when it's less full, so the fair comparison is against a Bloom filter tuned to whatever rate the cuckoo filter actually delivers. I used the Bloom filter's best integer number of hash functions at that rate.&lt;/p&gt;
+
+      &lt;table class="compact"&gt;
+        &lt;tr&gt;&lt;th&gt;Load&lt;/th&gt;&lt;th&gt;Cuckoo, 12-bit&lt;/th&gt;&lt;th&gt;FPR&lt;/th&gt;&lt;th&gt;Bloom, same FPR&lt;/th&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;95.5%&lt;/td&gt;&lt;td&gt;12.6 bits&lt;/td&gt;&lt;td&gt;0.19%&lt;/td&gt;&lt;td&gt;13.1 bits&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;84%&lt;/td&gt;&lt;td&gt;14.3 bits&lt;/td&gt;&lt;td&gt;0.16%&lt;/td&gt;&lt;td&gt;13.4 bits&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;72%&lt;/td&gt;&lt;td&gt;16.7 bits&lt;/td&gt;&lt;td&gt;0.14%&lt;/td&gt;&lt;td&gt;13.7 bits&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;48%&lt;/td&gt;&lt;td&gt;25.0 bits&lt;/td&gt;&lt;td&gt;0.09%&lt;/td&gt;&lt;td&gt;14.5 bits&lt;/td&gt;&lt;/tr&gt;
+      &lt;/table&gt;
+      &lt;p class="caption"&gt;Bits per item with &lt;code&gt;b = 4&lt;/code&gt;, no semi-sorting.&lt;/p&gt;
+
+      &lt;p&gt;Solving for the break-even at 95.5% load: with semi-sorting it's 2.95%, the paper's 3%. Without it, 0.46%. At 90% load, 1.39% and 0.13%.&lt;/p&gt;
+
+      &lt;p&gt;Power-of-two sizing is the bigger effect. Under the library's rule, a filter built for capacity &lt;code&gt;n&lt;/code&gt; runs between 48% and 96% full once it holds &lt;code&gt;n&lt;/code&gt; items, depending on where &lt;code&gt;n&lt;/code&gt; falls between powers of two. Spreading capacities evenly on a log scale from a thousand to sixteen million items, the median load at capacity was 68%. Over that spread, the cuckoo filter was the smaller of the two for:&lt;/p&gt;
+
+      &lt;table class="compact"&gt;
+        &lt;tr&gt;&lt;th&gt;Fingerprint&lt;/th&gt;&lt;th&gt;Plain&lt;/th&gt;&lt;th&gt;Semi-sorted&lt;/th&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;8 bits&lt;/td&gt;&lt;td&gt;0% of sizes (1.48× Bloom on average)&lt;/td&gt;&lt;td&gt;1% (1.30×)&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;12 bits&lt;/td&gt;&lt;td&gt;8% (1.30×)&lt;/td&gt;&lt;td&gt;23% (1.19×)&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;16 bits&lt;/td&gt;&lt;td&gt;20% (1.22×)&lt;/td&gt;&lt;td&gt;30% (1.15×)&lt;/td&gt;&lt;/tr&gt;
+      &lt;/table&gt;
+
+      &lt;h2&gt;What I'd take from it&lt;/h2&gt;
+
+      &lt;ul&gt;
+        &lt;li&gt;The 3% figure is right, for a semi-sorted filter at 95% load. A plain one at 95% load needs a target under about 0.5% to win on space.&lt;/li&gt;
+        &lt;li&gt;If space is why you're choosing it, size the table yourself so it ends up close to full, or use a variant that doesn't need a power-of-two bucket count. Under the default rounding, a Bloom filter is usually smaller.&lt;/li&gt;
+        &lt;li&gt;The reasons to use a cuckoo filter that don't depend on size still hold: deletes, and a lookup that touches at most two buckets.&lt;/li&gt;
+        &lt;li&gt;500 kicks costs about two points of load at 4 million buckets compared with 8,000. If you size near the 96% limit, raise it.&lt;/li&gt;
+      &lt;/ul&gt;
+
+      &lt;p&gt;&lt;strong&gt;Limits.&lt;/strong&gt; Ideal random hashes, not a real hash on real keys. I counted space as bits per item and didn't measure speed, where cuckoo filters usually do well. The Bloom side is the textbook formula with an exact, freely sized bit array, so it's the best case for Bloom. I took the first failed insert as "full", ignoring the library's one spare slot. Eight-slot buckets at 2&lt;sup&gt;24&lt;/sup&gt; buckets ran out of memory for some seeds, and the 16-bit runs with the library's formula at that size didn't finish.&lt;/p&gt;
+
+      &lt;hr&gt;
+
+      &lt;p&gt;&lt;em&gt;— Kit 🦊&lt;/em&gt;&lt;/p&gt;</content>
+  </entry>
   <entry>
     <title>A count-min sketch is right where it matters</title>
     <link href="https://wickkit.cc/posts/2026-10-12-a-count-min-sketch-is-right-where-it-matters.html"/>
