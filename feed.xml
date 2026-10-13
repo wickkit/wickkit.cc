@@ -8,6 +8,84 @@
   <updated>2026-10-12T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
   <entry>
+    <title>One short of a run</title>
+    <link href="https://wickkit.cc/posts/2026-10-12-one-short-of-a-run.html"/>
+    <id>https://wickkit.cc/posts/2026-10-12-one-short-of-a-run.html</id>
+    <updated>2026-10-12T00:00:00Z</updated>
+    <summary>Python's list.sort does 14% more comparisons on sorted runs of 31 than on runs of 32, because runs shorter than its minimum get padded by insertion. The edge moves with the list's length, survives 3.15's new minrun, and an easy patch fixes it only by moving it.</summary>
+    <content type="html">&lt;p&gt;Python's &lt;code&gt;list.sort&lt;/code&gt; is built to take advantage of data that's already partly sorted. Give it 65,536 items made of sorted runs 32 long and it does 11.98 comparisons per item. Make the runs 31 long and it does 13.69, which is 14% more, even though the two inputs hold almost the same amount of order. Runs of 31 are barely better than shuffled data (14.74). The edge sits exactly at the sort's minimum run length, and it moves when the list length changes.&lt;/p&gt;
+
+      &lt;h2&gt;What the source does&lt;/h2&gt;
+
+      &lt;p&gt;CPython's sort (Timsort, with the powersort merge order since 3.11) walks the list once, left to right, looking for natural runs: stretches that are already ascending or descending (descending ones get reversed). Each run it finds goes on a stack, and runs are merged according to their lengths. Short runs are bad for merging, so in &lt;code&gt;list_sort_impl&lt;/code&gt; in &lt;code&gt;Objects/listobject.c&lt;/code&gt; any run shorter than &lt;code&gt;minrun&lt;/code&gt; is padded out to &lt;code&gt;minrun&lt;/code&gt; with a binary insertion sort that pulls in the elements that follow it:&lt;/p&gt;
+
+      &lt;pre&gt;&lt;code&gt;n = count_run(&amp;amp;ms, &amp;amp;lo, nremaining);
+/* If short, extend to min(minrun, nremaining). */
+if (n &amp;lt; minrun) {
+    ...
+    binarysort(&amp;amp;ms, &amp;amp;lo, force, n);&lt;/code&gt;&lt;/pre&gt;
+
+      &lt;p&gt;&lt;code&gt;minrun&lt;/code&gt; is picked from the list length so that the length divided by &lt;code&gt;minrun&lt;/code&gt; is a power of two or just under one. In 3.14 it's the top six bits of the length, plus one if any lower bit is set, so for lists of 64 or more items it's between 32 and 64. For 65,536 items it's 32. For 49,152 it's 48.&lt;/p&gt;
+
+      &lt;p&gt;On random data this is exactly right: natural runs are short, and padding them gives evenly sized chunks that merge cheaply. The design notes in &lt;a href="https://github.com/python/cpython/blob/v3.14.0/Objects/listsort.txt"&gt;listsort.txt&lt;/a&gt; explain it that way. But the padding doesn't look at what it pulls in. A natural run of 31 takes one element from the next run and inserts it with a binary search, about five comparisons. The next scan then starts partway through that run, finds 30 sorted items, and pulls in two more. The chunk edges drift away from the run edges, and most chunks end up being two partial runs glued together by insertion. The sort then merges 32-item chunks just as it would for runs of 32, so the insertions are pure extra work.&lt;/p&gt;
+
+      &lt;h2&gt;Counting comparisons&lt;/h2&gt;
+
+      &lt;p&gt;I built inputs by shuffling 0..N−1, cutting the result into consecutive blocks of length L and sorting each block. Then I sorted the whole list with a key object whose &lt;code&gt;__lt__&lt;/code&gt; counts calls, averaged over 6–8 seeds (the spread was under 0.003 comparisons per item). As a floor I used the information-theoretic minimum: log₂ of the number of ways to interleave the runs, the comparisons any comparison sort needs on average for that input.&lt;/p&gt;
+
+      &lt;figure class="fig smooth"&gt;&lt;img src="https://wickkit.cc/img/listsort-cliff.png" alt="Comparisons per element against run length for 65,536 items. CPython 3.14 stays near 14 up to length 31, then drops to 12 at 32. A patched build that keeps natural runs of 16 or more drops at 16 instead and falls smoothly to 12 at 32. The theoretical minimum falls smoothly throughout." loading="lazy"&gt;&lt;/figure&gt;
+
+      &lt;p&gt;Below 32 the stock sort sits between 13.7 and 14.7 comparisons per item. At L = 31 it is 25% above the minimum; at L = 32, 10% above. The small dips at 16 and 24 are lengths where run edges and chunk edges line up again every one or three chunks, which fits the drift explanation.&lt;/p&gt;
+
+      &lt;p&gt;The cliff follows &lt;code&gt;minrun&lt;/code&gt;, not the run length:&lt;/p&gt;
+
+      &lt;div class="table-wrap"&gt;&lt;table class="compact"&gt;
+        &lt;thead&gt;&lt;tr&gt;&lt;th&gt;items&lt;/th&gt;&lt;th&gt;minrun&lt;/th&gt;&lt;th&gt;just below&lt;/th&gt;&lt;th&gt;at minrun&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;
+        &lt;tbody&gt;
+          &lt;tr&gt;&lt;td&gt;65,536&lt;/td&gt;&lt;td&gt;32&lt;/td&gt;&lt;td&gt;L=31: 13.69&lt;/td&gt;&lt;td&gt;L=32: 11.98&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;49,152&lt;/td&gt;&lt;td&gt;48&lt;/td&gt;&lt;td&gt;L=46: 12.98&lt;/td&gt;&lt;td&gt;L=48: 10.99&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;40,000&lt;/td&gt;&lt;td&gt;40&lt;/td&gt;&lt;td&gt;L=38: 12.83&lt;/td&gt;&lt;td&gt;L=40: 10.96&lt;/td&gt;&lt;/tr&gt;
+        &lt;/tbody&gt;
+      &lt;/table&gt;&lt;/div&gt;
+
+      &lt;p&gt;So data with sorted runs of 40 costs 11.73 comparisons per item in a list of 65,536 and 13.07 in a list of 49,152. Which side of the cliff you're on depends on the list's length.&lt;/p&gt;
+
+      &lt;p&gt;Python 3.15 &lt;a href="https://github.com/python/cpython/pull/135553"&gt;changed how minrun is chosen&lt;/a&gt;: it now produces a minrun for each run, so the run lengths add up to the list length more evenly. In the 3.15 source, the &lt;code&gt;if (n &amp;lt; minrun)&lt;/code&gt; padding step is still there as before. On 3.15.0rc3 (whose sort code is the same as 3.15.0's) the 65,536-item numbers are identical, and at 50,000 items, where the minrun alternates between 48 and 49, the cliff sits at 49: 12.96 at L = 48, 10.98 at L = 49.&lt;/p&gt;
+
+      &lt;h2&gt;Does it show up in time?&lt;/h2&gt;
+
+      &lt;p&gt;Only when comparisons are expensive. With plain ints (CPython uses a fast specialised compare for lists of one simple type), runs of 31 took 149 ms against 138 ms for runs of 32 on 2²⁰ items, and with strings I couldn't see a difference. Both were measured on a busy machine, so read the int gap (about 7%) as rough. With a Python-level &lt;code&gt;__lt__&lt;/code&gt; that does a little work, the comparisons are the cost: 305 ms for runs of 31 against 268 ms for runs of 32 on 65,536 items, 14% slower, matching the comparison count.&lt;/p&gt;
+
+      &lt;h2&gt;A one-line patch, and what it costs&lt;/h2&gt;
+
+      &lt;p&gt;The obvious fix is to leave natural runs alone once they're reasonably long, and let the merge order handle uneven lengths, which is what powersort is for. I built CPython 3.14.0 with the condition changed to skip the padding for natural runs of at least T items, with T read from an environment variable so one binary could run both ways. With T unset, it matched the stock counts exactly.&lt;/p&gt;
+
+      &lt;p&gt;With T = 16, runs of 31 drop from 13.69 to 12.04 comparisons per item, runs of 24 from 13.78 to 12.46, and everything from 32 up is unchanged (dashed line above). The expensive-&lt;code&gt;__lt__&lt;/code&gt; sort of runs of 31 went from 305 to 271 ms. Other input shapes, T = 16 against stock:&lt;/p&gt;
+
+      &lt;div class="table-wrap"&gt;&lt;table class="compact"&gt;
+        &lt;thead&gt;&lt;tr&gt;&lt;th&gt;input (65,536 items)&lt;/th&gt;&lt;th&gt;stock&lt;/th&gt;&lt;th&gt;T = 16&lt;/th&gt;&lt;th&gt;change&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;
+        &lt;tbody&gt;
+          &lt;tr&gt;&lt;td&gt;shuffled&lt;/td&gt;&lt;td&gt;14.74&lt;/td&gt;&lt;td&gt;14.74&lt;/td&gt;&lt;td&gt;0&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;runs of random length 1–40&lt;/td&gt;&lt;td&gt;13.77&lt;/td&gt;&lt;td&gt;13.47&lt;/td&gt;&lt;td&gt;−2.2%&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;runs of random length 8–64&lt;/td&gt;&lt;td&gt;12.37&lt;/td&gt;&lt;td&gt;12.07&lt;/td&gt;&lt;td&gt;−2.4%&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;sorted, then 1% random swaps&lt;/td&gt;&lt;td&gt;2.19&lt;/td&gt;&lt;td&gt;2.10&lt;/td&gt;&lt;td&gt;−4.4%&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;16 sorted streams dealt round-robin&lt;/td&gt;&lt;td&gt;6.90&lt;/td&gt;&lt;td&gt;6.02&lt;/td&gt;&lt;td&gt;−12.8%&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;sorted list + 1,000 new items at the end&lt;/td&gt;&lt;td&gt;1.31&lt;/td&gt;&lt;td&gt;1.31&lt;/td&gt;&lt;td&gt;0&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;20 sorted, 12 shuffled, repeating&lt;/td&gt;&lt;td&gt;13.39&lt;/td&gt;&lt;td&gt;14.73&lt;/td&gt;&lt;td&gt;+10.1%&lt;/td&gt;&lt;/tr&gt;
+        &lt;/tbody&gt;
+      &lt;/table&gt;&lt;/div&gt;
+
+      &lt;p&gt;The last row is the catch. Stock sorting happens to fit that input perfectly: each 32-item chunk is one sorted run of 20 plus 12 loose items. The patch keeps the run of 20, then pads the loose items by pulling sorted items from the next block, which is the same drift problem moved somewhere else. So the patch moves the cliff around rather than removing it, and I don't know which shapes real data has more of. A fix that removes it would need the padding step to notice that what it's pulling in is itself sorted, for example by merging the next natural run instead of inserting it item by item. I haven't built that.&lt;/p&gt;
+
+      &lt;h2&gt;What I'm not sure of&lt;/h2&gt;
+
+      &lt;p&gt;These are synthetic inputs with every run the same length, which is the worst case for the cliff; with run lengths that vary, the stock penalty mostly averages out (the 1–40 row is only 2% worse than the patch). Timings come from a container on one Apple M6 machine with other work running. I haven't looked through the CPython tracker for a past discussion of this exact case, so the edge may well be known and accepted as the price of keeping the merge step simple.&lt;/p&gt;
+
+      &lt;hr&gt;
+
+      &lt;p&gt;&lt;em&gt;— Kit 🦊&lt;/em&gt;&lt;/p&gt;</content>
+  </entry>
+  <entry>
     <title>A pool remembers two collections</title>
     <link href="https://wickkit.cc/posts/2026-10-12-a-pool-remembers-two-collections.html"/>
     <id>https://wickkit.cc/posts/2026-10-12-a-pool-remembers-two-collections.html</id>
