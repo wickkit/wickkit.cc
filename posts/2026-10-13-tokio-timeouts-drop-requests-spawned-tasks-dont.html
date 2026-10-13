@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tokio's timeouts drop the request; a spawned task keeps it — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/tools.html">tools</a>
+      <a href="/den.html">den</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+
+    <article>
+      <h1>Tokio's timeouts drop the request; a spawned task keeps it</h1>
+      <div class="meta">2026-10-13 · Kit Wickham</div>
+
+      <p>This is the sixth runtime I've checked for one question: when a request finishes before its timeout, does the timeout still keep the request's data alive? <a href="/posts/2026-10-13-a-cancelled-asyncio-timeout-keeps-your-request.html">asyncio</a> and <a href="/posts/2026-10-13-go-cancelled-timeouts-keep-requests-too.html">Go</a> do. <a href="/posts/2026-10-13-node-timeouts-promise-race-keeps-results.html">Node</a>, <a href="/posts/2026-10-13-java-timeouts-let-go-except-java-util-timer.html">Java</a> and <a href="/posts/2026-10-13-dotnet-an-undisposed-linked-token-never-lets-go.html">.NET</a> mostly don't. Rust's tokio is the cleanest of the six, for a structural reason: <code>timeout</code> and <code>select!</code> don't schedule anything that outlives the call. The sleep is a value inside your future, so when the future ends, the sleep and everything it borrowed are dropped on the spot. What keeps request data in tokio is a task you <code>spawn</code> and don't abort.</p>
+
+      <h2>The test</h2>
+
+      <p>Each request owns a 32 KiB buffer whose <code>Drop</code> decrements a live counter. 2,000 requests per run, tokio 1.53 and tokio-util 0.7 on a multi-thread runtime with four workers, release build, macOS arm64. The work takes 5 ms, or 1.5 s where noted. I count live buffers right after the last request finishes, at 0.5 s, 1 s after the long work would be done, and 1 s after the 3-second timeout. Three runs of each pattern gave identical counts.</p>
+
+      <table class="compact">
+        <thead><tr><th>Pattern</th><th>Live buffers (of 2,000)</th></tr></thead>
+        <tbody>
+          <tr><td><code>timeout(3s, work)</code>, work finishes first</td><td>0</td></tr>
+          <tr><td><code>select! { work, sleep(3s) }</code></td><td>0</td></tr>
+          <tr><td><code>timeout(5ms, work)</code> expires while work runs</td><td>0</td></tr>
+          <tr><td><code>CancellationToken::child_token()</code> of a long-lived parent, dropped with the request</td><td>0</td></tr>
+          <tr><td><code>spawn(work)</code> + <code>timeout(5ms, handle)</code>, then abort the handle</td><td>0</td></tr>
+          <tr><td>Same, handle just dropped</td><td>2,000 until the work ends (1.5 s), then 0</td></tr>
+          <tr><td><code>spawn(sleep(3s) then use state)</code> alongside the request, not aborted</td><td>2,000 until 3 s, then 0</td></tr>
+          <tr><td>Same, sleeper task aborted when the request finishes</td><td>0</td></tr>
+          <tr><td>Child token handed to a spawned task that waits on <code>cancelled()</code>, parent never cancelled</td><td>2,000 at every sample (4 s)</td></tr>
+        </tbody>
+      </table>
+
+      <h2>What this says</h2>
+
+      <p>The first four rows are zero because nothing outlives the call. From the counts, dropping a <code>Timeout</code> or a <code>Sleep</code> leaves nothing in the runtime's timer that references the request, and a dropped child token leaves nothing on its parent. Compare Go and asyncio, where a timer callback is registered with the runtime and holds the request's context until it's cancelled or fires.</p>
+
+      <p>The costs are all in tasks. A dropped <code>JoinHandle</code> detaches the task instead of cancelling it, so a timeout wrapped around a handle ends your wait, not the work: the buffer lives until the work ends, however long that is. Aborting the handle fixes that. A detached sleeper holding an <code>Arc</code> of the state keeps it for the whole timeout, same as a never-cancelled timer elsewhere; abort it and it's gone. The last row isn't a timeout at all, but it's the version with no end: a task waiting on a token nobody cancels held its state through every sample, and by construction keeps it until the token is cancelled.</p>
+
+      <h2>What to take from it</h2>
+
+      <p>In tokio, put the timeout around the future itself, not around a handle to a spawned one. If you have to spawn, keep the handle and abort it when you stop caring. These counts are from synthetic requests with a counter, one machine, and I didn't read tokio's timer internals beyond the behavior above, so treat the "why" as the observed mechanism, not a citation.</p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+</body>
+</html>
