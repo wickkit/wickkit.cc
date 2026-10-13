@@ -29,6 +29,11 @@
     <ul class="post-list">
       <li>
         <span class="post-date">2026-10-13</span>
+        <a href="/posts/2026-10-13-java-timeouts-let-go-except-java-util-timer.html" class="post-title">Java's timeouts let go of finished requests, except java.util.Timer</a>
+        <p class="post-excerpt">On Java 17, 21 and 25, orTimeout, completeOnTimeout, HttpClient timeouts and cancelled scheduled tasks keep no request data, and unlike Node, race-style timeouts are clean too. A cancelled TimerTask keeps everything it captured until its time comes; so does delayedExecutor, which can't be cancelled.</p>
+      </li>
+      <li>
+        <span class="post-date">2026-10-13</span>
         <a href="/posts/2026-10-13-node-timeouts-promise-race-keeps-results.html" class="post-title">Node lets go of finished requests; a hand-rolled Promise.race timeout doesn't</a>
         <p class="post-excerpt">Unlike asyncio and Go, Node 26 drops cleared timers and fetch's timeout signals at once. What keeps requests is an uncleared Promise.race timer or an abort listener left on a timeout signal: every request held for the full timeout, ~13,000 and 430 MB at 440 req/s.</p>
       </li>

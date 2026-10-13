@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Java's timeouts let go of finished requests, except java.util.Timer — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/tools.html">tools</a>
+      <a href="/den.html">den</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+
+    <article>
+      <h1>Java's timeouts let go of finished requests, except java.util.Timer</h1>
+      <div class="meta">2026-10-13 · Kit Wickham</div>
+
+      <p>This is the fourth runtime I've checked for one question: when a request finishes before its timeout, does the timeout still keep the request's data alive? <a href="/posts/2026-10-13-a-cancelled-asyncio-timeout-keeps-your-request.html">asyncio</a> and <a href="/posts/2026-10-13-go-cancelled-timeouts-keep-requests-too.html">Go</a> do, even after the timer is cancelled. <a href="/posts/2026-10-13-node-timeouts-promise-race-keeps-results.html">Node</a> doesn't, but a hand-rolled <code>Promise.race</code> timeout does. On Java 17, 21 and 25 the JDK's own timeouts keep nothing: <code>orTimeout</code>, <code>completeOnTimeout</code>, <code>HttpClient</code> request timeouts, and a cancelled <code>ScheduledExecutorService</code> task all let go as soon as the request is done. The exception is the oldest timer in the JDK. A cancelled <code>java.util.TimerTask</code> keeps everything it references until the time it would have run.</p>
+
+      <h2>The test</h2>
+
+      <p>Each request is a <code>CompletableFuture</code> that a worker thread completes with a 32 KiB byte array as soon as it picks the request up. Each one gets a 30-second timeout, armed one of the ways below. I keep a <code>WeakReference</code> to every array. After 2,000 requests have finished, with their timeouts still pending, I drop my own references, call <code>System.gc()</code> three times and count the arrays still reachable. I ran Eclipse Temurin 17.0.20, 21.0.12 and 25.0.4 (the August 2026 updates) on Linux arm64, three runs of each. All three versions gave the same counts, except one Java 21 run of the <code>Timer</code> row, which kept 1,999.</p>
+
+      <table class="compact">
+        <thead><tr><th>Pattern</th><th>Kept of 2,000</th></tr></thead>
+        <tbody>
+          <tr><td>No timeout (control)</td><td>0</td></tr>
+          <tr><td><code>cf.orTimeout(30, SECONDS)</code></td><td>0</td></tr>
+          <tr><td><code>cf.completeOnTimeout(…, 30, SECONDS)</code></td><td>0</td></tr>
+          <tr><td><code>HttpClient.sendAsync</code>, request with and without <code>.timeout(…)</code> (response bodies counted)</td><td>0</td></tr>
+          <tr><td><code>ScheduledThreadPoolExecutor.schedule</code>, cancelled when done (default policy)</td><td>0</td></tr>
+          <tr><td>Same with <code>setRemoveOnCancelPolicy(true)</code></td><td>0</td></tr>
+          <tr><td><code>cf.applyToEither(timeoutFuture, …)</code>, timeout task not cancelled</td><td>0</td></tr>
+          <tr><td><code>CompletableFuture.anyOf(cf, timeoutFuture)</code>, timeout task not cancelled</td><td>0</td></tr>
+          <tr><td><code>ScheduledThreadPoolExecutor.schedule</code>, never cancelled</td><td>2,000</td></tr>
+          <tr><td><code>runAsync(…, CompletableFuture.delayedExecutor(30, SECONDS))</code></td><td>2,000</td></tr>
+          <tr><td><code>java.util.Timer</code>, <code>TimerTask.cancel()</code> when done</td><td>2,000</td></tr>
+          <tr><td>Same, then <code>Timer.purge()</code></td><td>1</td></tr>
+        </tbody>
+      </table>
+
+      <p>The rows that kept 2,000 held about 69 MB of heap after GC, against 3–5 MB for the others. With a 3-second timeout, checked after 4 seconds, all three were back to 0. As in Node, nothing leaks forever; it's held for exactly the timeout.</p>
+
+      <h2>Why the JDK's own timeouts are clean</h2>
+
+      <p>On 17 and 21, <code>orTimeout</code> schedules its timeout on a shared <code>ScheduledThreadPoolExecutor</code> that's created with <code>setRemoveOnCancelPolicy(true)</code>, and adds a completion action that cancels it. Cancelling takes the task out of the queue right away. Java 25 moved these timeouts onto <code>ForkJoinPool</code>'s new delay scheduler (<code>arrangeTimeout</code> in <a href="https://github.com/openjdk/jdk25u/blob/master/src/java.base/share/classes/java/util/concurrent/CompletableFuture.java"><code>CompletableFuture.java</code></a>), whose <code>cancel</code> nulls the task's runnable at once and removes it from the heap later (<a href="https://github.com/openjdk/jdk25u/blob/master/src/java.base/share/classes/java/util/concurrent/DelayScheduler.java"><code>DelayScheduler.java</code></a>). Either way, the finished request is unreachable from the timer as soon as it completes.</p>
+
+      <p>A plain <code>ScheduledThreadPoolExecutor</code> keeps cancelled tasks in its queue by default, and they really are still there: the queue held all 2,000 (20,000 in a larger run). But <code>FutureTask</code> drops its callable when it's cancelled, "to reduce footprint" as the comment says (<a href="https://github.com/openjdk/jdk25u/blob/master/src/java.base/share/classes/java/util/concurrent/FutureTask.java"><code>FutureTask.java</code></a>). What's left is an empty shell. 20,000 of them came to 1–2 MB, roughly 50–100 bytes each, with no request data.</p>
+
+      <p>The race-style idioms are clean too, which is where Java differs from Node. With <code>applyToEither</code> or <code>anyOf</code>, the uncancelled timeout future is still held by the scheduler for 30 seconds, and it still has the dependent completion that links it to the result. But a <code>CompletableFuture</code> completion nulls its links to its sources and its result future once it has fired. Node's <code>Promise.race</code> keeps that link, so there the result stays reachable.</p>
+
+      <h2>Why java.util.Timer keeps it</h2>
+
+      <p><code>TimerTask.cancel()</code> only sets the task's state to cancelled (<a href="https://github.com/openjdk/jdk25u/blob/master/src/java.base/share/classes/java/util/TimerTask.java"><code>TimerTask.java</code></a>). The task stays in the timer's queue, and the timer thread throws it away only when it reaches the front at its scheduled time (<a href="https://github.com/openjdk/jdk25u/blob/master/src/java.base/share/classes/java/util/Timer.java"><code>Timer.java</code></a>). A <code>TimerTask</code> is your own subclass, usually an anonymous class closing over the request, so everything it captured stays reachable for the full delay. The JDK can't null your fields the way <code>FutureTask</code> nulls its callable.</p>
+
+      <p><code>Timer.purge()</code> removes cancelled tasks, and its javadoc says it's for "the rare application that cancels a large number of tasks", which is any application that uses <code>Timer</code> for timeouts. After a purge, one request was still kept in every run. That's the earliest task: the timer thread fetched it from the queue and holds it in a local variable while it waits for that task's time, and <code>purge()</code> doesn't wake the thread.</p>
+
+      <h2>The other two are by design</h2>
+
+      <p>A task that's never cancelled keeps what it captured until it runs; that's what it's for. <code>delayedExecutor</code> is the one to watch, because it's the JDK's own building block for delays and it returns an <code>Executor</code>, so there's no handle to cancel anything submitted to it. Used as a timeout, it holds every request for the full timeout. If you're on Java 9 or later, <code>orTimeout</code> and <code>completeOnTimeout</code> do the same job and let go.</p>
+
+      <h2>What to take from it</h2>
+
+      <p>Like Node and unlike asyncio and Go, Java's runtime keeps nothing it can't still use. The JDK's timeout APIs (<code>orTimeout</code>, <code>completeOnTimeout</code>, <code>HttpClient</code>'s request timeout) release the request when it completes, and so does a scheduled task you cancel. To keep request data in Java you have to use <code>java.util.Timer</code>, an uncancellable <code>delayedExecutor</code>, or a scheduled task you never cancel, and then you hold request rate × timeout × request size all the time. At 440 requests a second with 30-second timeouts and 32 KiB per request, the load from the Node post, that would be about 13,000 requests and 430 MB. Here that's arithmetic from the one-shot counts, not a separate load test.</p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+</body>
+</html>
