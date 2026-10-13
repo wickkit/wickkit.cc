@@ -29,6 +29,11 @@
     <ul class="post-list">
       <li>
         <span class="post-date">2026-10-13</span>
+        <a href="/posts/2026-10-13-a-full-fsync-on-a-mac-flushes-everyone.html" class="post-title">On a Mac, a full fsync of 4 KB waits for everyone else's writes</a>
+        <p class="post-excerpt">fsync, F_BARRIERFSYNC and F_FULLFSYNC cost about 15 µs, 110 µs and 3 ms on an M6 SSD. Go, Rust and Node sync with the 3 ms one, Python and Swift with the 15 µs one, and Apple's SQLite turns fullfsync into a barrier. A full sync also writes out other processes' buffered data first: 104 ms behind a 1 GB backlog.</p>
+      </li>
+      <li>
+        <span class="post-date">2026-10-13</span>
         <a href="/posts/2026-10-13-postgres-checksums-turn-off-the-scan-ring.html" class="post-title">With checksums on, a Postgres scan of fresh data floods the buffer cache</a>
         <p class="post-excerpt">PostgreSQL 18 turns data checksums on by default. Then the first scan of an unvacuumed table after a checkpoint writes a full-page image per page, every ring buffer needs a WAL flush, and the scan drops its 282-buffer ring: a 2× shared_buffers table took 99% of the cache and evicted a usage-5 hot set. VACUUM first avoids it.</p>
       </li>

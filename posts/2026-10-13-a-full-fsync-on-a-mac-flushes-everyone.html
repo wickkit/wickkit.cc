@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>On a Mac, a full fsync of 4 KB waits for everyone else's writes — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/tools.html">tools</a>
+      <a href="/den.html">den</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+
+    <article>
+      <h1>On a Mac, a full fsync of 4 KB waits for everyone else's writes</h1>
+      <div class="meta">2026-10-13 · Kit Wickham</div>
+
+      <p>macOS has three ways to say "make this file safe": <code>fsync()</code>, <code>fcntl(F_BARRIERFSYNC)</code> and <code>fcntl(F_FULLFSYNC)</code>. On an M6 Mac mini's internal SSD they cost about 15 µs, 110 µs and 3 ms for a 4 KB write. Which one you get depends on the language: Go, Rust and Node use the 3 ms one by default, while Python and Swift use the 15 µs one. Apple's own SQLite, asked for the strongest option, quietly uses the middle one.</p>
+
+      <p>The surprise was the expensive one. When another process has a lot of unwritten data buffered (a download, a build, a file copy), <code>F_FULLFSYNC</code> on my 4 KB file waits until that data is written too: 33 ms behind a 256 MB backlog, 104 ms behind 1 GB. Next to a process writing 1.5 GB/s, a full sync took 0.8 seconds.</p>
+
+      <h2>What each call promises</h2>
+
+      <p>Apple's <code>fsync(2)</code> man page is unusually frank: <code>fsync()</code> moves the data to the drive, but "the drive itself may not physically write the data … for quite some time and it may be written in an out-of-order sequence", so after a power cut "only some or none of their data" may be there. <code>F_FULLFSYNC</code> does an <code>fsync()</code> and then asks the drive to flush its own cache. <code>F_BARRIERFSYNC</code> does an <code>fsync()</code> and then sends a barrier: what was synced before it reaches storage before anything after it, but the call doesn't wait for that to happen. I can't test durability (it means pulling power from the machine), so everything below is about cost and about which call each language makes.</p>
+
+      <h2>The cost</h2>
+
+      <p>One thread, a 4 KB <code>pwrite</code> at a random offset in a preallocated 16 MB file, then a sync, for 5 seconds per call type:</p>
+
+      <table class="compact">
+        <thead><tr><th>Call</th><th>Median</th><th>p99</th><th>Syncs per second</th></tr></thead>
+        <tbody>
+          <tr><td><code>fsync()</code></td><td>15 µs</td><td>22 µs</td><td>58,000</td></tr>
+          <tr><td><code>F_BARRIERFSYNC</code></td><td>109 µs</td><td>535 µs</td><td>6,900</td></tr>
+          <tr><td><code>F_FULLFSYNC</code></td><td>2,975 µs</td><td>3,826 µs</td><td>355</td></tr>
+        </tbody>
+      </table>
+
+      <p>A second benchmark interleaved the calls round-robin on one file, 2,000 rounds each. The ratios held, though each call got slower when it followed a full flush: medians 50–95 µs, 310 µs and 3.5 ms. So a full flush costs about 30 barriers or 200 plain fsyncs one call at a time, and about 11 barriers or 40–65 fsyncs when interleaved. (<code>fdatasync()</code> exists in the C library, isn't in the headers, and cost the same as <code>fsync()</code> or less.)</p>
+
+      <p>Full flushes from different threads partly share the work. With each thread syncing its own file, 2 threads got no more than 1 (350 per second), 4 got 817, and 16 got 1,172, with the median wait growing to 12 ms.</p>
+
+      <h2>Who calls what</h2>
+
+      <p>I wrote a small library that wraps <code>fsync</code>, <code>fdatasync</code> and <code>fcntl</code>, loaded it into each program with <code>DYLD_INSERT_LIBRARIES</code>, and counted the calls while each program wrote 4 KB and synced it 200 times with its standard API:</p>
+
+      <table class="compact">
+        <thead><tr><th>API</th><th>Calls</th><th>Time per write + sync</th></tr></thead>
+        <tbody>
+          <tr><td>C <code>fsync()</code>, Python <code>os.fsync</code></td><td><code>fsync</code></td><td>~20 µs</td></tr>
+          <tr><td>Swift <code>FileHandle.synchronize()</code>, <code>Data.write(options: .atomic)</code></td><td><code>fsync</code></td><td>22 µs, 139 µs</td></tr>
+          <tr><td>Go <code>(*os.File).Sync</code></td><td><code>F_FULLFSYNC</code></td><td>3.0 ms</td></tr>
+          <tr><td>Rust <code>sync_all</code>, <code>sync_data</code></td><td><code>F_FULLFSYNC</code></td><td>2.8 ms</td></tr>
+          <tr><td>Node <code>fs.fsync</code>, <code>fs.fdatasync</code>, <code>filehandle.sync()</code>, <code>.datasync()</code></td><td><code>F_FULLFSYNC</code></td><td>2.8–3.2 ms</td></tr>
+        </tbody>
+      </table>
+
+      <p>Go was the one program the wrapper couldn't report on (Go exits without running the library's exit hook), so that row comes from the timing and from Go's source, where <code>internal/poll/fd_fsync_darwin.go</code> calls <code>F_FULLFSYNC</code> and falls back to <code>fsync</code> only if the file system doesn't support it. Python has no <code>os.fdatasync</code> on macOS at all. A Python program that wants the full flush has to call <code>fcntl.fcntl(fd, fcntl.F_FULLFSYNC)</code> itself.</p>
+
+      <p>So the same "sync this file" line is 150 times more expensive in Go, Rust or Node than in Python or Swift, and the Go/Rust/Node version is the one that matches what the man page says a database needs.</p>
+
+      <h2>SQLite: Apple's build swaps in the barrier</h2>
+
+      <p>SQLite has a <a href="https://sqlite.org/pragma.html#pragma_fullfsync"><code>fullfsync</code></a> pragma for exactly this, off by default. I ran 200 single-row inserts, each its own transaction, through the SQLite that ships with Python (3.53.1, built from the public source) and through Apple's system <code>libsqlite3</code> (3.54.0):</p>
+
+      <table class="compact">
+        <thead><tr><th>Mode</th><th>Public SQLite</th><th>Apple's SQLite</th><th>Per insert</th></tr></thead>
+        <tbody>
+          <tr><td>rollback journal, default</td><td>4 <code>fsync</code></td><td>4 <code>fsync</code></td><td>137 / 141 µs</td></tr>
+          <tr><td>rollback journal, <code>fullfsync=1</code></td><td>3 <code>F_FULLFSYNC</code> + 1 <code>fsync</code></td><td>3 <code>F_BARRIERFSYNC</code> + 1 <code>fsync</code></td><td>9.2 ms / 0.66 ms</td></tr>
+          <tr><td>WAL, <code>synchronous=FULL</code>, <code>fullfsync=1</code></td><td>1 <code>F_FULLFSYNC</code></td><td>1 <code>F_BARRIERFSYNC</code></td><td>3.3 ms / 0.39 ms</td></tr>
+        </tbody>
+      </table>
+
+      <p>(Counts are per commit, from totals over 200 commits.) Apple's build turns <code>fullfsync=1</code> into barriers: 14 times cheaper than the public build in rollback mode, and a weaker promise. It also has <code>checkpoint_fullfsync</code> on by default, so WAL checkpoints get a barrier even with <code>fullfsync</code> off. That reads like a deliberate trade: ordering is what keeps a SQLite file from being corrupted, and losing the last few commits after a power cut is, for most apps, acceptable. If your Mac app links the system SQLite and you turned on <code>fullfsync</code> for durability, you're getting ordering instead.</p>
+
+      <h2>Waiting for someone else's data</h2>
+
+      <p>To see what a full flush costs on a machine doing other things, I had a second process write into a 256 MB file of its own with plain buffered writes at a fixed rate, and measured syncs of my 4 KB file meanwhile (two passes, rates in opposite order, median of each pass):</p>
+
+      <table class="compact">
+        <thead><tr><th>Neighbour writes</th><th><code>F_FULLFSYNC</code></th><th><code>F_BARRIERFSYNC</code></th><th><code>fsync</code></th></tr></thead>
+        <tbody>
+          <tr><td>nothing</td><td>2.0–3.1 ms</td><td>0.14–0.22 ms</td><td>14–16 µs</td></tr>
+          <tr><td>100 MB/s</td><td>3.0–4.0 ms</td><td>0.16–0.34 ms</td><td>15–16 µs</td></tr>
+          <tr><td>400 MB/s</td><td>4.0–10 ms</td><td>0.35–0.38 ms</td><td>16–18 µs</td></tr>
+          <tr><td>1.3–1.6 GB/s</td><td>760–810 ms</td><td>0.7–0.9 ms</td><td>21–27 µs</td></tr>
+        </tbody>
+      </table>
+
+      <p>The barrier's median stayed under a millisecond, but its p99 at the highest rate was 0.13 and 1.3 seconds in the two passes. <code>fsync</code> barely noticed.</p>
+
+      <p>To see why, I used a backlog instead of a stream. A second process writes some amount of data without syncing and keeps the file open. My process, in another directory, then times one 4 KB sync. Afterwards the second process times an <code>F_FULLFSYNC</code> of its own file, which shows how much of its data was still unwritten. Nine trials each, alternating the order, medians in milliseconds:</p>
+
+      <table class="compact">
+        <thead><tr><th>Other process's unsynced data</th><th>My sync, by call</th><th>My full sync</th><th>Its full sync afterwards</th></tr></thead>
+        <tbody>
+          <tr><td>none</td><td>fsync 0.14, barrier 1.1</td><td>5.1</td><td>3.5</td></tr>
+          <tr><td>64 MB</td><td>fsync 0.07, barrier 1.9</td><td>5.9</td><td>5.4</td></tr>
+          <tr><td>256 MB</td><td>fsync 0.04, barrier 7.5</td><td>33</td><td>6.4 (33 after my fsync)</td></tr>
+          <tr><td>1 GB</td><td>fsync 0.04, barrier 9.1</td><td>104</td><td>6.4 (103 after my fsync)</td></tr>
+        </tbody>
+      </table>
+
+      <p>My full sync of 4 KB took as long as the other process's own full sync would have, and left almost nothing for it. After my plain <code>fsync</code> or barrier, the other process still had 103 ms of flushing to do. So on APFS, <code>F_FULLFSYNC</code> doesn't only empty the drive's cache: it writes out other files' unsynced data first, from any process. The man page only says it "drains the entire queue of the device", which you'd expect to cover data already sent to the drive, not data still in memory. I can't tell from outside whether APFS is committing everything it has or the cache is being flushed for some other reason; I can only see who pays.</p>
+
+      <p>The single-process version of the test, where the same program wrote the large file and then synced a small one, showed the same thing with more spread: 0.1 to 2 seconds behind 1 GB.</p>
+
+      <p>One trap I fell into: my first cross-process runs said there was no effect. My probe program did an untimed full sync on its new, empty file before it started the clock, and that call was the one that waited for the other process's data. The timed call then found nothing to wait for. Anything a benchmark does before starting its timer can absorb the cost it was built to measure.</p>
+
+      <h2>What to do</h2>
+
+      <ul>
+        <li>If you write Go, Rust or Node on a Mac, a sync per write limits you to a few hundred writes per second per thread, and a busy machine can stretch one to a second. Batch writes and sync once per batch.</li>
+        <li>If you write Python or Swift and need data to survive a power cut, plain <code>fsync</code> doesn't promise that on macOS; use <code>F_FULLFSYNC</code> where it matters, and <code>F_BARRIERFSYNC</code> where ordering is enough.</li>
+        <li>For a latency-sensitive service, a full sync's cost depends on what the rest of the machine is writing, not just on your data.</li>
+      </ul>
+
+      <p>Versions: macOS 27 on APFS, Apple M6 Mac mini internal SSD; Go 1.27.1, Rust 1.99.0, Node 26.10.0 (libuv 1.53.0), Python 3.14.8, Swift 6.4, SQLite 3.53.1 (Python) and 3.54.0 (system). The disk was about 90% full, which may make flushes slower than on an emptier one.</p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+</body>
+</html>
