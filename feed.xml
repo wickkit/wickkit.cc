@@ -8,6 +8,67 @@
   <updated>2026-10-13T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
   <entry>
+    <title>A JavaScript Map cache pays for every key it already evicted</title>
+    <link href="https://wickkit.cc/posts/2026-10-13-a-map-cache-pays-for-every-key-it-evicted.html"/>
+    <id>https://wickkit.cc/posts/2026-10-13-a-map-cache-pays-for-every-key-it-evicted.html</id>
+    <updated>2026-10-13T00:00:00Z</updated>
+    <summary>Evicting with map.keys().next() walks past every hole that earlier deletes left at the front of V8's table. At 157,000 keys that's 126 µs per eviction; one long-lived iterator does it in 166 ns.</summary>
+    <content type="html">&lt;p&gt;A JavaScript &lt;code&gt;Map&lt;/code&gt; remembers insertion order, so it makes a handy small cache. On a hit you delete the key and set it again, which moves it to the back. When the cache is full you evict the oldest key with this line:&lt;/p&gt;
+
+      &lt;pre&gt;&lt;code&gt;map.delete(map.keys().next().value);&lt;/code&gt;&lt;/pre&gt;
+
+      &lt;p&gt;The line shows up all over open-source code. In V8 (Node, Deno, Chrome) it isn't constant time. Each call walks past every key the cache has already evicted since the table last rebuilt itself. At 157,000 entries, an eviction plus an insert took 126 microseconds. Keeping one iterator alive and reusing it takes 166 nanoseconds, about 760 times less.&lt;/p&gt;
+
+      &lt;h2&gt;What a delete leaves behind&lt;/h2&gt;
+
+      &lt;p&gt;I read V8 14.6, the version in Node 26. A Map is an &lt;code&gt;OrderedHashTable&lt;/code&gt;: a bucket array plus an array of entries kept in insertion order. Deleting a key doesn't move anything. The builtin overwrites the entry's key and value with a hole marker and bumps a count of deleted entries. Holes go away only when the table is rebuilt:&lt;/p&gt;
+
+      &lt;ul&gt;
+        &lt;li&gt;&lt;strong&gt;Insert into a full table&lt;/strong&gt; (live plus deleted entries equal capacity): if at least half the slots are holes, V8 rebuilds at the same capacity without them. Otherwise it doubles the capacity (&lt;code&gt;EnsureCapacityForAdding&lt;/code&gt; in &lt;code&gt;ordered-hash-table.cc&lt;/code&gt;).&lt;/li&gt;
+        &lt;li&gt;&lt;strong&gt;Delete&lt;/strong&gt;: the table shrinks by half when fewer than a quarter of its slots hold live entries.&lt;/li&gt;
+      &lt;/ul&gt;
+
+      &lt;p&gt;A new iterator starts at entry 0 and steps forward one entry at a time until it finds one that isn't a hole (&lt;code&gt;NextSkipHashTableHoles&lt;/code&gt; in &lt;code&gt;builtins-collections-gen.cc&lt;/code&gt;). A cache that evicts its oldest key deletes from the front of the entry array, so its holes pile up at the front, exactly where a fresh iterator starts. Each &lt;code&gt;keys().next()&lt;/code&gt; walks over all of them.&lt;/p&gt;
+
+      &lt;h2&gt;How many holes&lt;/h2&gt;
+
+      &lt;p&gt;Take a FIFO cache holding N keys: every insert evicts the oldest. The live count never changes, so the table never shrinks. Each time it fills, it either rebuilds or doubles, and it doubles whenever holes are less than half the slots. It settles at the smallest power of two that's at least 2N. Between rebuilds the hole count climbs from 0 to capacity − N, so the average eviction skips (capacity − N)/2 holes, somewhere between N/2 and 1.5N. I wrote that policy as a short simulation and used it to predict the skips for each benchmark size.&lt;/p&gt;
+
+      &lt;h2&gt;Measured&lt;/h2&gt;
+
+      &lt;p&gt;Node 26, one process per run, three runs per size, median nanoseconds per evict-plus-insert. Each run is long enough to cover whole rebuild cycles. "Front" uses &lt;code&gt;map.keys().next()&lt;/code&gt; for every eviction. "Iterator" makes one &lt;code&gt;map.keys()&lt;/code&gt; once and calls &lt;code&gt;next()&lt;/code&gt; on it for each eviction. Timings come from a shared machine, so trust the ratios more than the exact figures.&lt;/p&gt;
+
+      &lt;table class="compact"&gt;
+        &lt;thead&gt;&lt;tr&gt;&lt;th&gt;Keys (N)&lt;/th&gt;&lt;th&gt;Holes skipped, predicted&lt;/th&gt;&lt;th&gt;Front, ns&lt;/th&gt;&lt;th&gt;Iterator, ns&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;
+        &lt;tbody&gt;
+          &lt;tr&gt;&lt;td&gt;153&lt;/td&gt;&lt;td&gt;195&lt;/td&gt;&lt;td&gt;211&lt;/td&gt;&lt;td&gt;78&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;1,843&lt;/td&gt;&lt;td&gt;1,092&lt;/td&gt;&lt;td&gt;802&lt;/td&gt;&lt;td&gt;79&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;9,830&lt;/td&gt;&lt;td&gt;12,290&lt;/td&gt;&lt;td&gt;7,564&lt;/td&gt;&lt;td&gt;117&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;14,745&lt;/td&gt;&lt;td&gt;8,738&lt;/td&gt;&lt;td&gt;6,721&lt;/td&gt;&lt;td&gt;99&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;78,643&lt;/td&gt;&lt;td&gt;98,305&lt;/td&gt;&lt;td&gt;68,041&lt;/td&gt;&lt;td&gt;144&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;157,286&lt;/td&gt;&lt;td&gt;196,610&lt;/td&gt;&lt;td&gt;125,963&lt;/td&gt;&lt;td&gt;166&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;235,929&lt;/td&gt;&lt;td&gt;139,810&lt;/td&gt;&lt;td&gt;88,971&lt;/td&gt;&lt;td&gt;242&lt;/td&gt;&lt;/tr&gt;
+        &lt;/tbody&gt;
+      &lt;/table&gt;
+
+      &lt;p&gt;At large sizes the front cost is 0.64 to 0.69 ns per predicted hole, so the walk is nearly all of it. Even at 153 keys it's 2.7 times slower. Because capacity is a power of two, a smaller cache can be the slower one: 157,286 keys share a 524,288-slot table with more holes than 235,929 keys do, and they take 126 µs per eviction against 89.&lt;/p&gt;
+
+      &lt;p&gt;Real caches also get hits, and a hit (delete, then set) leaves a hole in the middle of the array. With about half of all operations being hits on one of the newest N/2 keys, the front version took 38,057 ns at 157,286 keys and the long-lived iterator took 400 ns, 95 times less. The gap is smaller than in pure FIFO probably because hits fill the table with holes faster and trigger more rebuilds, but it still grows with the cache.&lt;/p&gt;
+
+      &lt;h2&gt;The fix is one iterator&lt;/h2&gt;
+
+      &lt;pre&gt;&lt;code&gt;let it = map.keys();
+function evictOldest() {
+  let r = it.next();
+  if (r.done) { it = map.keys(); r = it.next(); }
+  map.delete(r.value);
+}&lt;/code&gt;&lt;/pre&gt;
+
+      &lt;p&gt;A live iterator keeps its position. When the table is rebuilt, V8 records which entries were holes in the old table so iterators can move to the new one at the matching spot. Keys you set after creating the iterator get appended behind it, so it still reaches them. A key moved to the back by a hit gets visited at its new position, not its old one. That's the same order the front version evicts in. I checked it: on 100 random streams of hits, misses and stray deletes, at cache sizes from 1 to 1,000, both versions evicted the same keys in the same order. A deliberately broken version that skips an entry now and then failed on 40 of them, so the check does catch mistakes. The one trap is that a finished iterator stays finished, which is why the code makes a new one when &lt;code&gt;done&lt;/code&gt; comes back.&lt;/p&gt;
+
+      &lt;p&gt;The same scan sits behind &lt;code&gt;Set&lt;/code&gt; (&lt;code&gt;OrderedHashSet&lt;/code&gt; uses the same hole-skipping walk) and behind &lt;code&gt;for…of&lt;/code&gt; over a Map. A full loop is linear anyway, so you only pay for the extra holes, at most four slots per live entry. The surprise is a single &lt;code&gt;next()&lt;/code&gt; on a new iterator. It looks like O(1), but it costs O(holes). I measured V8 only. I didn't test JavaScriptCore (Bun, Safari) or SpiderMonkey (Firefox).&lt;/p&gt;</content>
+  </entry>
+  <entry>
     <title>Roaring bitmaps pay 16 bits where 6 would do</title>
     <link href="https://wickkit.cc/posts/2026-10-13-roaring-bitmaps-pay-16-bits-where-6-would-do.html"/>
     <id>https://wickkit.cc/posts/2026-10-13-roaring-bitmaps-pay-16-bits-where-6-would-do.html</id>

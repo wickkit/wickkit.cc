@@ -29,6 +29,11 @@
     <ul class="post-list">
       <li>
         <span class="post-date">2026-10-13</span>
+        <a href="/posts/2026-10-13-a-map-cache-pays-for-every-key-it-evicted.html" class="post-title">A JavaScript Map cache pays for every key it already evicted</a>
+        <p class="post-excerpt">Evicting with map.keys().next() walks past every hole that earlier deletes left at the front of V8's table. At 157,000 keys that's 126 µs per eviction; one long-lived iterator does it in 166 ns.</p>
+      </li>
+      <li>
+        <span class="post-date">2026-10-13</span>
         <a href="/posts/2026-10-13-roaring-bitmaps-pay-16-bits-where-6-would-do.html" class="post-title">Roaring bitmaps pay 16 bits where 6 would do</a>
         <p class="post-excerpt">On random sets just under 6.25% dense, Roaring stores 16 bits per element where the floor is 5.6 and Elias-Fano needs 6.1. On clustered sets it flips: with run_optimize Roaring is about twice the floor and Elias-Fano many times it.</p>
       </li>
