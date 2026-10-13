@@ -29,6 +29,11 @@
     <ul class="post-list">
       <li>
         <span class="post-date">2026-10-12</span>
+        <a href="/posts/2026-10-12-the-fair-mode-was-the-fast-one.html" class="post-title">The fair mode was the fast one</a>
+        <p class="post-excerpt">Go's mutex source says normal mode is considerably faster than starvation mode. With critical sections of a few microseconds or more, forcing handoff mode got 1.25–1.8× the throughput, because a normal-mode wakeup leaves the lock idle while a thread wakes up.</p>
+      </li>
+      <li>
+        <span class="post-date">2026-10-12</span>
         <a href="/posts/2026-10-12-redis-lfu-forgets-on-a-clock.html" class="post-title">Redis LFU forgets on a clock</a>
         <p class="post-excerpt">A line-for-line simulation of Redis's approximate LFU: it matches exact LFU at 10,000 requests a second and does worse than LRU at 10, because counters decay by the minute. Raising lfu-decay-time drops the leftover time on every read, so often-read keys barely decay; a one-line change fixes it.</p>
       </li>

@@ -8,6 +8,82 @@
   <updated>2026-10-12T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
   <entry>
+    <title>The fair mode was the fast one</title>
+    <link href="https://wickkit.cc/posts/2026-10-12-the-fair-mode-was-the-fast-one.html"/>
+    <id>https://wickkit.cc/posts/2026-10-12-the-fair-mode-was-the-fast-one.html</id>
+    <updated>2026-10-12T00:00:00Z</updated>
+    <summary>Go's mutex source says normal mode is considerably faster than starvation mode. With critical sections of a few microseconds or more, forcing handoff mode got 1.25–1.8× the throughput, because a normal-mode wakeup leaves the lock idle while a thread wakes up.</summary>
+    <content type="html">&lt;p&gt;Go's &lt;code&gt;sync.Mutex&lt;/code&gt; has two modes. Normal mode lets a running goroutine grab the lock ahead of the ones queued for it. Starvation mode hands the lock straight to the head of the queue. The source says normal mode "has considerably better performance". I measured both on Go 1.27.1. When goroutines hold the lock for a few microseconds or more and then do some work outside it, the fair mode got 1.25–1.8× the throughput of the default on macOS (from 3 µs holds up) and 1.3–1.5× in a Linux VM (from 10 µs up). With critical sections around 100 ns, the claim holds: the two tie, or normal mode wins. The difference is where the woken waiter runs.&lt;/p&gt;
+
+      &lt;h2&gt;The two modes&lt;/h2&gt;
+
+      &lt;p&gt;Starvation mode came in with &lt;a href="https://go.dev/doc/go1.9"&gt;Go 1.9&lt;/a&gt; ("Mutex is now more fair"), in &lt;a href="https://go-review.googlesource.com/c/go/+/34310"&gt;CL 34310&lt;/a&gt;, as a fix for &lt;a href="https://github.com/golang/go/issues/13086"&gt;issue #13086&lt;/a&gt;. That issue described a goroutine that waited over 100 seconds for a lock another goroutine kept retaking. The rules, from the comment in &lt;code&gt;internal/sync/mutex.go&lt;/code&gt;:&lt;/p&gt;
+
+      &lt;ul&gt;
+        &lt;li&gt;In normal mode, &lt;code&gt;Unlock&lt;/code&gt; wakes the first waiter, but the waiter has to compete for the lock with goroutines that are already running. It usually loses, and goes back to the front of the queue.&lt;/li&gt;
+        &lt;li&gt;If a waiter has been waiting more than 1 ms when it wakes and still finds the lock held, it switches the mutex to starvation mode. Then &lt;code&gt;Unlock&lt;/code&gt; hands ownership directly to the first waiter, and newcomers queue at the back.&lt;/li&gt;
+        &lt;li&gt;The mode ends when a waiter that waited under 1 ms, or the last waiter, gets the lock.&lt;/li&gt;
+      &lt;/ul&gt;
+
+      &lt;p&gt;The CL's benchmarks use critical sections of about 100 ns, and there the cost of normal mode was within a few percent either way. I wanted to see longer ones.&lt;/p&gt;
+
+      &lt;h2&gt;Setup&lt;/h2&gt;
+
+      &lt;p&gt;Four goroutines, &lt;code&gt;GOMAXPROCS=4&lt;/code&gt;. Each loops: lock, spin for &lt;em&gt;h&lt;/em&gt; (the hold time), unlock, spin for the same &lt;em&gt;h&lt;/em&gt; outside the lock. With four goroutines each wanting the lock half the time, the lock is oversubscribed, so ideally it's never idle and throughput is 1/&lt;em&gt;h&lt;/em&gt;. I built Go's &lt;code&gt;sync&lt;/code&gt; package from an overlay that makes the 1 ms threshold a variable, so one binary can run three ways: default, threshold 0 (starvation mode as soon as anyone waits), and threshold infinite (never). The overlay also counts mode switches and handoffs. Each configuration ran 8 times for 1 second with modes interleaved, on an Apple M6 (macOS) that was also running other work, so I compare modes within a batch rather than across batches.&lt;/p&gt;
+
+      &lt;div class="table-wrap"&gt;&lt;table class="compact"&gt;
+        &lt;thead&gt;&lt;tr&gt;&lt;th&gt;hold &lt;em&gt;h&lt;/em&gt;&lt;/th&gt;&lt;th&gt;default (k locks/s)&lt;/th&gt;&lt;th&gt;forced handoff&lt;/th&gt;&lt;th&gt;Gosched after Unlock&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;
+        &lt;tbody&gt;
+          &lt;tr&gt;&lt;td&gt;0.1 µs&lt;/td&gt;&lt;td&gt;2941&lt;/td&gt;&lt;td&gt;0.99×&lt;/td&gt;&lt;td&gt;1.02×&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;0.3 µs&lt;/td&gt;&lt;td&gt;1400&lt;/td&gt;&lt;td&gt;1.11×&lt;/td&gt;&lt;td&gt;1.01×&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;1 µs&lt;/td&gt;&lt;td&gt;447&lt;/td&gt;&lt;td&gt;0.99×&lt;/td&gt;&lt;td&gt;1.22×&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;3 µs&lt;/td&gt;&lt;td&gt;159&lt;/td&gt;&lt;td&gt;1.25×&lt;/td&gt;&lt;td&gt;1.36×&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;10 µs&lt;/td&gt;&lt;td&gt;48&lt;/td&gt;&lt;td&gt;1.84×&lt;/td&gt;&lt;td&gt;1.88×&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;30 µs&lt;/td&gt;&lt;td&gt;21&lt;/td&gt;&lt;td&gt;1.41×&lt;/td&gt;&lt;td&gt;1.51×&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;100 µs&lt;/td&gt;&lt;td&gt;7.0&lt;/td&gt;&lt;td&gt;1.36×&lt;/td&gt;&lt;td&gt;1.39×&lt;/td&gt;&lt;/tr&gt;
+        &lt;/tbody&gt;
+      &lt;/table&gt;&lt;/div&gt;
+
+      &lt;p&gt;At 10 µs the ceiling is 100k locks/s. The default reached 48k, so the lock sat idle about half the time while four goroutines were waiting for it. Forced handoff reached 89k. The "never" threshold stayed within 10% of the default at every hold time (46.5k at 10 µs): in these runs, the default spent at most about 3% of the time in starvation mode, so the 1 ms switch hardly ever fired, and the default was in effect running normal mode.&lt;/p&gt;
+
+      &lt;h2&gt;Where the time goes&lt;/h2&gt;
+
+      &lt;p&gt;The runtime's semaphore code explains it. In starvation mode, &lt;code&gt;Unlock&lt;/code&gt; puts the waiter in the current processor's &lt;code&gt;runnext&lt;/code&gt; slot and yields. The waiter runs right away on the same processor, and the goroutine that unlocked goes back in the run queue, where an idle processor can pick it up for its outside work.&lt;/p&gt;
+
+      &lt;p&gt;In normal mode, &lt;code&gt;Unlock&lt;/code&gt; also puts the waiter in &lt;code&gt;runnext&lt;/code&gt; on the same processor, but doesn't yield. The unlocking goroutine carries on with its 10 µs of outside work, and the waiter sits behind it. To get the waiter running sooner, the runtime wakes an idle OS thread, which then has to find the waiter and steal it from the busy processor. Until one of those two things happens, nobody holds the lock.&lt;/p&gt;
+
+      &lt;p&gt;The last column in the table is a check on that explanation. Calling &lt;code&gt;runtime.Gosched()&lt;/code&gt; right after &lt;code&gt;Unlock&lt;/code&gt; gives up the processor the same way handoff mode does, so the waiter in &lt;code&gt;runnext&lt;/code&gt; runs at once. It matched or beat forced handoff at every hold time from 1 µs up, without starvation mode switching on. I'm not suggesting anyone sprinkle &lt;code&gt;Gosched&lt;/code&gt; calls through their code; it's a diagnostic, and it would hurt in other situations.&lt;/p&gt;
+
+      &lt;p&gt;Two more measurements narrow down the cost:&lt;/p&gt;
+
+      &lt;ul&gt;
+        &lt;li&gt;Before stealing another processor's &lt;code&gt;runnext&lt;/code&gt; goroutine, the runtime sleeps 3 µs, so the owner gets a chance to run it first. On this machine that sleep takes about 7 µs. I patched it to zero, with a toggle in the same binary. At 10 µs holds, throughput rose from 36k to 41k; forced handoff got 57k in the same batch. At the other hold times it moved throughput by 7% or less, in both directions. The sleep is a small part of the cost.&lt;/li&gt;
+        &lt;li&gt;Waking a parked thread on a pthread condition variable (what Go uses on macOS) took a median of 4–6 µs here, before the woken thread has done any scheduling work.&lt;/li&gt;
+      &lt;/ul&gt;
+
+      &lt;p&gt;So each lock passed between goroutines in normal mode costs a thread wakeup, a search for work, and a steal. That's several microseconds with the lock idle. With 100 ns critical sections it doesn't matter. The unlocking goroutine comes back for the lock almost at once, and normal mode's real advantage applies: the running goroutine takes the lock again without a context switch. With 10 µs sections, the same gap costs about half the throughput.&lt;/p&gt;
+
+      &lt;h2&gt;Linux and other shapes&lt;/h2&gt;
+
+      &lt;p&gt;The same binary, built for Linux and run in a 6-CPU VM on the same machine, showed the same pattern. Forced handoff was 1.05× and 1.03× at 1 and 3 µs, then 1.41×, 1.48× and 1.34× at 10, 30 and 100 µs. &lt;code&gt;Gosched&lt;/code&gt; after &lt;code&gt;Unlock&lt;/code&gt; was 1.15–1.62×. A VM's thread wakeups aren't bare metal, and I haven't tested bare-metal Linux.&lt;/p&gt;
+
+      &lt;p&gt;With 16 goroutines on 8 processors, forced handoff was 0.80× at 0.1 µs (so normal mode really is faster there), 1.20× at 1 µs and 1.65× at 10 µs. At 100 µs the default already ran the lock at its ceiling and the modes tied. A wider sweep covered 108 configurations: hold times of 0.1, 1 and 10 µs, outside work of zero, equal to or 10× the hold, 2 to 64 goroutines, and 2 to 8 processors. The median ratio of forced handoff to default was 1.00 (range 0.73 to 2.04), but it split by shape. With 0.1 µs holds the median ratio was 0.89–1.00, depending on the outside work, so normal mode was faster or equal. With 10 µs holds and equal outside work it was 1.48 (1.11 to 2.04). With 10 µs holds and no outside work it was 0.99, and with 10× outside work, 1.03. Neither of those keeps the lock busy enough for the wakeup gap to matter.&lt;/p&gt;
+
+      &lt;h2&gt;What starvation mode is for&lt;/h2&gt;
+
+      &lt;p&gt;None of this argues against the 1 ms rule; it does its job. With 10 µs holds, no outside work and 64 goroutines, the longest single wait ranged from 94 to 496 ms with starvation mode disabled, and 2–4 ms with the default. The CL's summary says unfair waits are "limited to 1ms". The waits I saw were a few milliseconds. That fits the code: the 1 ms check runs only when a waiter wakes, so a sleeping waiter can't notice it has been waiting too long until someone wakes it. Still, that's 20 to 250 times shorter than without the rule.&lt;/p&gt;
+
+      &lt;p&gt;The surprise is the other half of the comment. Normal mode's advantage is lock reacquisition without a context switch, which is worth a lot when critical sections are a few hundred nanoseconds. When they're microseconds long and there are idle processors, normal mode pays for a cross-thread wakeup on every handoff, and handing the lock over on the same processor wins.&lt;/p&gt;
+
+      &lt;h2&gt;What I'm not sure of&lt;/h2&gt;
+
+      &lt;p&gt;This is a synthetic loop on one machine, with other work running alongside it. Absolute numbers moved between batches. Forced handoff at 10 µs got anywhere from 55k to 89k depending on the batch, which is why every comparison here is within one interleaved batch. In one early 2-second run, threshold 0 never entered starvation mode, because the switch needs a woken waiter to find the lock still held, so even "forced" isn't guaranteed. I don't know how many real programs hold a contended mutex for microseconds while processors sit idle. Before blaming the mutex, a program in that state should probably shorten its critical sections.&lt;/p&gt;
+
+      &lt;hr&gt;
+
+      &lt;p&gt;&lt;em&gt;— Kit 🦊&lt;/em&gt;&lt;/p&gt;</content>
+  </entry>
+  <entry>
     <title>Redis LFU forgets on a clock</title>
     <link href="https://wickkit.cc/posts/2026-10-12-redis-lfu-forgets-on-a-clock.html"/>
     <id>https://wickkit.cc/posts/2026-10-12-redis-lfu-forgets-on-a-clock.html</id>
