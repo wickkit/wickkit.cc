@@ -8,6 +8,71 @@
   <updated>2026-10-12T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
   <entry>
+    <title>Redis LFU forgets on a clock</title>
+    <link href="https://wickkit.cc/posts/2026-10-12-redis-lfu-forgets-on-a-clock.html"/>
+    <id>https://wickkit.cc/posts/2026-10-12-redis-lfu-forgets-on-a-clock.html</id>
+    <updated>2026-10-12T00:00:00Z</updated>
+    <summary>A line-for-line simulation of Redis's approximate LFU: it matches exact LFU at 10,000 requests a second and does worse than LRU at 10, because counters decay by the minute. Raising lfu-decay-time drops the leftover time on every read, so often-read keys barely decay; a one-line change fixes it.</summary>
+    <content type="html">&lt;p&gt;Redis's &lt;code&gt;allkeys-lfu&lt;/code&gt; eviction keeps an 8-bit frequency counter per key and lets it decay with wall-clock time. I rebuilt its eviction logic in a simulator, line for line from &lt;code&gt;evict.c&lt;/code&gt;, and ran it against exact LFU, LRU and the optimal policy. Two things came out. First, how well the approximation works depends mostly on how many requests per second the cache serves, because counters fade by the minute rather than by the request. On a fixed Zipf workload it matches exact LFU at 10,000 requests a second and does worse than plain LRU at 10. Second, raising &lt;code&gt;lfu-decay-time&lt;/code&gt; above its default of 1 doesn't just slow the decay down. A key read a few times per decay period barely decays at all, because the leftover time is thrown away on every access.&lt;/p&gt;
+
+      &lt;h2&gt;How the counter works&lt;/h2&gt;
+
+      &lt;p&gt;Each key has 24 bits of metadata. In LFU mode, 8 bits hold a counter and 16 bits hold a time in minutes. New keys start at 5, so they aren't evicted before they get a chance. On each read, the counter goes up by one with probability 1/(10·(counter−5)+1) (10 is the default &lt;code&gt;lfu-log-factor&lt;/code&gt;), so it grows roughly like a square root of the read count and tops out at 255. Before incrementing, Redis takes off one point per &lt;code&gt;lfu-decay-time&lt;/code&gt; minutes since the key's stored time, then stores the current minute. To evict, it samples 5 keys, keeps the 16 best candidates seen so far in a small pool, and evicts the one with the lowest counter.&lt;/p&gt;
+
+      &lt;p&gt;My simulator copies all of that: the counter, the minute clock, the pool's insertion rules, and the habit of evicting a pool entry without re-scoring it. The one simplification is sampling: Redis takes neighbouring keys from a random spot in its hash table, and I sample uniformly. Wall-clock time is the request number divided by a request rate. To check it, the LRU and optimal miss ratios on the standard workload (Zipf α=1, 100,000 keys, 1,000-key cache) came out at 0.495 and 0.336, matching a separate simulator I wrote for an earlier cache study.&lt;/p&gt;
+
+      &lt;h2&gt;Traffic rate decides how good it is&lt;/h2&gt;
+
+      &lt;figure class="fig smooth"&gt;&lt;img src="https://wickkit.cc/img/redis-lfu-rate.png" alt="Two panels of miss ratio against requests per second. Top: with fixed popularity, Redis LFU falls from about 0.53 at 1 request per second to exact LFU's 0.41 at 10,000 and above, crossing LRU's 0.50 near 10 requests per second. Bottom: with popularity reshuffled every 10 minutes, Redis LFU with the default 1-minute decay sits between 0.43 and 0.49, below LRU everywhere and lowest near 1,000 requests per second; with a 10-minute decay it stays above LRU."&gt;&lt;/figure&gt;
+
+      &lt;p&gt;With fixed popularity (top panel), Redis LFU's miss ratio goes from 0.529 at 1 request a second to 0.417 at 1,000 and 0.406 at 10,000, where it matches exact LFU (0.407). Below about 10 requests a second it does worse than Redis's own LRU (0.496). Popularity hasn't changed at all. What changed is that the counters drain by one a minute whether traffic is light or heavy.&lt;/p&gt;
+
+      &lt;p&gt;A rough rule fits this. What matters is the least popular key that ought to stay cached: if it gets fewer than about one read every ten decay periods, its counter sits near zero along with everything else, and eviction becomes close to a coin flip. With a 1,000-key cache that key gets about 0.05 reads a minute at 10 requests a second, which is where LFU and LRU cross. A 10,000-key cache pushes that key ten times further down the popularity curve, so I predicted a crossover around 100–140 requests a second. The simulator put it between 100 and 300.&lt;/p&gt;
+
+      &lt;p&gt;The top end is fine. The counter tops out at roughly 2,500 reads a minute, and at 1 or 10 million requests a second the hottest keys all sit at 255, but the miss ratio stays at 0.407. Ties among keys that are all clearly worth keeping don't cost anything.&lt;/p&gt;
+
+      &lt;p&gt;When popularity moves (bottom panel: every 10 minutes, all keys get new ranks), exact LFU never forgets and misses 76–93% of the time. Redis LFU with the default decay does better than LRU at every rate I tried from 30 to 30,000 requests a second, best at about 1,000 (0.433 against 0.496). The default is well chosen for that range. With a 10-minute decay it does worse than LRU everywhere, at 0.507–0.535.&lt;/p&gt;
+
+      &lt;h2&gt;The decay throws away the remainder&lt;/h2&gt;
+
+      &lt;p&gt;Here is the decay step, from &lt;code&gt;LFUDecrAndReturn&lt;/code&gt;:&lt;/p&gt;
+
+      &lt;pre&gt;&lt;code&gt;num_periods = LFUTimeElapsed(ldt) / server.lfu_decay_time;
+counter = (num_periods &amp;gt; counter) ? 0 : counter - num_periods;&lt;/code&gt;&lt;/pre&gt;
+
+      &lt;p&gt;and the access path, &lt;code&gt;updateLFU&lt;/code&gt;, writes the current minute back as &lt;code&gt;ldt&lt;/code&gt; on every read. The division rounds down, and the remainder is never stored anywhere. With a decay time of N minutes, a key read every N−1 minutes never loses a point. For a key read at random at rate r, the expected loss per unit of time is a fraction x/(eˣ−1) of what it should be, where x = r·N is reads per decay period. At one read per period that's 58%. At three it's 16%. Monte Carlo on Redis's minute clock agrees for long decay times (0.569 and 0.158 at N=60). For short ones the minute rounding adds some decay back: at three reads per period, 19% at N=10 and 36% at N=2.&lt;/p&gt;
+
+      &lt;p&gt;The default decay time of 1 avoids this. Stored times are whole minutes, so elapsed minutes just count minute boundaries crossed, and nothing is lost on average. The problem only shows up for anyone who raises &lt;code&gt;lfu-decay-time&lt;/code&gt; to make counters last longer. What they get is decay that's slower than they asked for, and much slower for exactly the keys that are read often.&lt;/p&gt;
+
+      &lt;p&gt;The fix is one line: on access, advance &lt;code&gt;ldt&lt;/code&gt; by &lt;code&gt;num_periods × N&lt;/code&gt; instead of setting it to now, so it means "last decrement" rather than "last access". That's apparently what the field once meant: a 2018 pull request (&lt;a href="https://github.com/redis/redis/pull/4784"&gt;#4784&lt;/a&gt;) points out that &lt;code&gt;ldt&lt;/code&gt; was named "last decrement time" but holds the access time. It was closed unmerged in 2023, after a separate change (&lt;a href="https://github.com/redis/redis/pull/12244"&gt;#12244&lt;/a&gt;) updated the comments in &lt;code&gt;evict.c&lt;/code&gt;. The behaviour stayed the same. I tested the fix as a toggle on the same simulator:&lt;/p&gt;
+
+      &lt;table class="compact"&gt;
+        &lt;thead&gt;&lt;tr&gt;&lt;th&gt;decay time&lt;/th&gt;&lt;th&gt;Redis today&lt;/th&gt;&lt;th&gt;with the fix&lt;/th&gt;&lt;th&gt;LRU&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;
+        &lt;tbody&gt;
+          &lt;tr&gt;&lt;td&gt;1 min (default)&lt;/td&gt;&lt;td&gt;0.420&lt;/td&gt;&lt;td&gt;0.420&lt;/td&gt;&lt;td&gt;0.496&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;2 min&lt;/td&gt;&lt;td&gt;0.446&lt;/td&gt;&lt;td&gt;0.421&lt;/td&gt;&lt;td&gt;0.496&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;5 min&lt;/td&gt;&lt;td&gt;0.479&lt;/td&gt;&lt;td&gt;0.447&lt;/td&gt;&lt;td&gt;0.496&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;10 min&lt;/td&gt;&lt;td&gt;0.500&lt;/td&gt;&lt;td&gt;0.476&lt;/td&gt;&lt;td&gt;0.496&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;30 min&lt;/td&gt;&lt;td&gt;0.510&lt;/td&gt;&lt;td&gt;0.501&lt;/td&gt;&lt;td&gt;0.496&lt;/td&gt;&lt;/tr&gt;
+        &lt;/tbody&gt;
+      &lt;/table&gt;
+      &lt;p class="caption"&gt;Miss ratio, popularity reshuffled every hour, 1,000 requests a second, 4 hours, mean of 3 seeds (spread ≤0.001).&lt;/p&gt;
+
+      &lt;p&gt;At 10,000 requests a second the fix helps by a similar amount (0.490 → 0.457 at 2 minutes, 0.505 → 0.485 at 5). It's not a free win everywhere. At 100 requests a second the 2-minute setting is better &lt;em&gt;without&lt;/em&gt; the fix (0.435 vs 0.454), because counters there are already draining faster than they should, and losing the remainder happens to offset that. Fixed popularity at low rates is the other case where it hurts. Over-remembering costs nothing when nothing changes, so the unfixed 10-minute decay looks better there (0.443 vs 0.468 at 10 requests a second). The fix also makes the setting mean what it says. With it, a 10-minute decay at X requests a second gives nearly the same result as a 1-minute decay at 10X from 100 requests a second up (0.4166 vs 0.4169, 0.4061 vs 0.4056). At 10 the two are 0.468 and 0.460. Without the fix, they drift further apart.&lt;/p&gt;
+
+      &lt;h2&gt;Things I expected to matter that didn't&lt;/h2&gt;
+
+      &lt;ul&gt;
+        &lt;li&gt;&lt;strong&gt;Stale pool scores.&lt;/strong&gt; A pool entry is evicted with the score it had when sampled, even if the key has been read since. That happened in 0.08% of evictions.&lt;/li&gt;
+        &lt;li&gt;&lt;strong&gt;Old favourites trickling along.&lt;/strong&gt; After a reshuffle, I kept every formerly hot key at one read every 30 seconds to 15 minutes. Every policy's miss ratio rose by at most 0.02, about the same for all of them.&lt;/li&gt;
+        &lt;li&gt;&lt;strong&gt;The clock wrapping.&lt;/strong&gt; The minute clock is 16 bits, so it wraps every 45.5 days, and a key left untouched that long briefly looks recently used with its old counter (the code also counts one minute short across the wrap). It's real, but you'd need memory to stay below the limit for six weeks for it to matter.&lt;/li&gt;
+      &lt;/ul&gt;
+
+      &lt;h2&gt;What I'd take from it&lt;/h2&gt;
+
+      &lt;p&gt;In my runs, Redis's LFU was a good approximation from a few hundred to tens of thousands of requests a second, with popularity that drifts over minutes to hours. Outside that range its quality depends on traffic in a way the configuration doesn't make obvious. On a quiet instance, LRU can simply be better. If you raise &lt;code&gt;lfu-decay-time&lt;/code&gt;, expect much less decay than the number suggests, especially for keys that get regular reads.&lt;/p&gt;</content>
+  </entry>
+  <entry>
     <title>The GC limiter counts in its own units</title>
     <link href="https://wickkit.cc/posts/2026-10-12-the-gc-limiter-counts-in-its-own-units.html"/>
     <id>https://wickkit.cc/posts/2026-10-12-the-gc-limiter-counts-in-its-own-units.html</id>

@@ -29,6 +29,11 @@
     <ul class="post-list">
       <li>
         <span class="post-date">2026-10-12</span>
+        <a href="/posts/2026-10-12-redis-lfu-forgets-on-a-clock.html" class="post-title">Redis LFU forgets on a clock</a>
+        <p class="post-excerpt">A line-for-line simulation of Redis's approximate LFU: it matches exact LFU at 10,000 requests a second and does worse than LRU at 10, because counters decay by the minute. Raising lfu-decay-time drops the leftover time on every read, so often-read keys barely decay; a one-line change fixes it.</p>
+      </li>
+      <li>
+        <span class="post-date">2026-10-12</span>
         <a href="/posts/2026-10-12-the-gc-limiter-counts-in-its-own-units.html" class="post-title">The GC limiter counts in its own units</a>
         <p class="post-excerpt">Squeezed against GOMEMLIMIT, an allocation-heavy Go program kept GC near the limiter's 50% by the limiter's own count, and did 15–26% of its usual work. Allocation-time sweeping counts as application time, and two runtime patches show why counting it better doesn't help much.</p>
       </li>
