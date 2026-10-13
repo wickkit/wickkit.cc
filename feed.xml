@@ -925,6 +925,69 @@ c.timer = time.AfterFunc(dur, func() {
       &lt;p&gt;Update: CPython's asyncio test suite (2,675 tests) passes with the change, as it does without it. Versions measured: CPython 3.14.8 on Linux, uvloop 0.23.0, sentry-sdk 2.72.0. The &lt;code&gt;Handle.cancel()&lt;/code&gt; code and the cleanup thresholds are the same on CPython's main branch today.&lt;/p&gt;</content>
   </entry>
   <entry>
+    <title>A ribbon filter is the smallest, and fails to build one time in twenty</title>
+    <link href="https://wickkit.cc/posts/2026-10-13-a-ribbon-filter-is-small-and-fails-one-in-twenty.html"/>
+    <id>https://wickkit.cc/posts/2026-10-13-a-ribbon-filter-is-small-and-fails-one-in-twenty.html</id>
+    <updated>2026-10-13T00:00:00Z</updated>
+    <summary>At a million keys and 1% a ribbon filter needs 7.04 bits per key against 8.6 for fuse and 9.6 for Bloom. RocksDB's sizing makes the build fail about one time in twenty; my own solver measured 0.5 to 5.8%.</summary>
+    <content type="html">&lt;p&gt;The last filter I hadn't looked at was the ribbon filter, the one &lt;a href="https://github.com/facebook/rocksdb"&gt;RocksDB&lt;/a&gt; uses in place of Bloom filters when memory matters more than build time. It is smaller than a binary fuse filter, and at a million keys and a 1% false positive rate it needs 7.04 bits per key where fuse needs 8.6 to 9.0 and Bloom 9.6. The price is in the build. RocksDB sizes the table so that building it fails about one time in twenty, then retries with a new seed or falls back to Bloom. I wrote my own ribbon builder and checked that number.&lt;/p&gt;
+
+      &lt;h2&gt;How it differs from fuse&lt;/h2&gt;
+
+      &lt;p&gt;A fuse or xor filter stores fingerprints in whole bits per key: 8, 16 and so on. A ribbon filter stores a solution to a linear system. Each key hashes to a short window of slots (128 in RocksDB's variant) plus a random pattern of bits inside it, and the builder solves for slot contents so that the XOR of a key's pattern bits reads back a fingerprint. A lookup reads one window. Because the table is a plain array of columns, the fingerprint width can be fractional: the table uses &lt;em&gt;r&lt;/em&gt; columns for some blocks and &lt;em&gt;r&lt;/em&gt;+1 for others, so you can ask for exactly 1% and get 1%, instead of rounding up to an 8-bit fingerprint (0.39%).&lt;/p&gt;
+
+      &lt;p&gt;The catch is the solve. It's Gaussian elimination over a band, and it only succeeds if the keys' windows don't over-constrain a stretch of slots. With slots per key close to 1, that fails with some probability. More slots buy a lower failure rate.&lt;/p&gt;
+
+      &lt;h2&gt;The setup&lt;/h2&gt;
+
+      &lt;p&gt;I ported RocksDB's sizing for the Standard128Ribbon (its slot count for a given key count and failure target, and its column layout for a target false positive rate) and wrote an independent banding solver in C with ideal random hashes. For each size I ran thousands of builds at the slot count RocksDB picks for three failure targets: 1 in 2, 1 in 20 (its default) and 1 in 1000. Then I counted first-seed failures. I also checked that a successful build gives a false positive rate of 2&lt;sup&gt;−r&lt;/sup&gt; for r from 1 to 16 and never a false negative.&lt;/p&gt;
+
+      &lt;h2&gt;The failure rate, measured&lt;/h2&gt;
+
+      &lt;table class="compact"&gt;
+        &lt;tr&gt;&lt;th&gt;Keys&lt;/th&gt;&lt;th&gt;Slots per key&lt;/th&gt;&lt;th&gt;Build fails (1-in-20 sizing)&lt;/th&gt;&lt;th&gt;Build fails (1-in-1000 sizing)&lt;/th&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;1,000&lt;/td&gt;&lt;td&gt;1.024 / 1.152&lt;/td&gt;&lt;td&gt;3.0%&lt;/td&gt;&lt;td&gt;0 of 20,000&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;10,000&lt;/td&gt;&lt;td&gt;1.037 / 1.050&lt;/td&gt;&lt;td&gt;0.5%&lt;/td&gt;&lt;td&gt;0.03%&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;100,000&lt;/td&gt;&lt;td&gt;1.036 / 1.057&lt;/td&gt;&lt;td&gt;5.1%&lt;/td&gt;&lt;td&gt;0.09%&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;1,000,000&lt;/td&gt;&lt;td&gt;1.048 / 1.070&lt;/td&gt;&lt;td&gt;5.8%&lt;/td&gt;&lt;td&gt;0 of 1,000&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;3,000,000&lt;/td&gt;&lt;td&gt;1.054 / 1.076&lt;/td&gt;&lt;td&gt;5.4%&lt;/td&gt;&lt;td&gt;0 of 333&lt;/td&gt;&lt;/tr&gt;
+      &lt;/table&gt;
+      &lt;p class="caption"&gt;128-wide windows, ideal random hashes. Slots per key are for the 1-in-20 / 1-in-1000 sizing. At 1-in-2 sizing the same builds failed 41 to 53% of the time from 10,000 keys up.&lt;/p&gt;
+
+      &lt;p&gt;RocksDB's calibration holds up: 0.5 to 5.8% at its default, close to the 1 in 20 it aims for (the 10,000-key row is the exception, at 0.5%). Going to 1-in-1000 costs about 2% more slots from 100,000 keys up, and failures all but disappear. A failed build is cheap to retry, since a seed gets a fresh start, which is why the default isn't tighter.&lt;/p&gt;
+
+      &lt;p&gt;Narrower windows need much more slack. For a 5% failure rate, 128-wide windows need about 2.5, 3.5 and 5% spare slots at 10,000, 100,000 and a million keys; 64-wide windows need 7, 9.5 and 12%. The slack grows with the log of the key count, so a ribbon filter gets a bit less efficient as it grows, the opposite of fuse.&lt;/p&gt;
+
+      &lt;h2&gt;The size, compared&lt;/h2&gt;
+
+      &lt;table class="compact"&gt;
+        &lt;tr&gt;&lt;th&gt;Filter&lt;/th&gt;&lt;th&gt;Bits per key at 1% (1M keys)&lt;/th&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;Ribbon (128)&lt;/td&gt;&lt;td&gt;7.04&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;Binary fuse, 4-wise&lt;/td&gt;&lt;td&gt;8.62&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;Binary fuse, 3-wise&lt;/td&gt;&lt;td&gt;9.04&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;Bloom&lt;/td&gt;&lt;td&gt;9.59&lt;/td&gt;&lt;/tr&gt;
+      &lt;/table&gt;
+      &lt;p class="caption"&gt;Sizing rules from the libraries, with ribbon's fractional columns. The fuse and Bloom figures are the sizer's, for the same 1% target.&lt;/p&gt;
+
+      &lt;p&gt;A good part of the ribbon's edge at 1% is the fractional width: the fuse library only ships 8-bit fingerprints (0.39%) and wider, so for a 1% target it pays for accuracy nobody asked for. At a 0.39% target the gap shrinks to about a quarter of a bit per key (8.4 against 8.6).&lt;/p&gt;
+
+      &lt;h2&gt;What I'd take from it&lt;/h2&gt;
+
+      &lt;ul&gt;
+        &lt;li&gt;If memory is the constraint and the filter is built once (for example one per file in an LSM tree), a ribbon filter at about 7 bits per key and 1% is the smallest of the filters I looked at.&lt;/li&gt;
+        &lt;li&gt;Expect to retry about one build in twenty with the default, and keep a fallback. Size for 1 in 1000 if retries are expensive: it costs about 2% more space at 100,000 keys and up.&lt;/li&gt;
+        &lt;li&gt;Below about a thousand slots a Bloom filter can win, so don't bother for tiny sets.&lt;/li&gt;
+      &lt;/ul&gt;
+
+      &lt;p&gt;&lt;strong&gt;Try it.&lt;/strong&gt; The &lt;a href="https://filters.wickkit.cc"&gt;filter sizer&lt;/a&gt; has a ribbon row, with the same fractional-column sizing.&lt;/p&gt;
+
+      &lt;p&gt;&lt;strong&gt;Limits.&lt;/strong&gt; Ideal random hashes, not a real hash on real keys. My solver is a plain banded elimination, not RocksDB's code, so I checked that it reproduces their failure calibration rather than copying it. I did not measure build or lookup speed,. Failure rates at the smallest sizes are noisy.&lt;/p&gt;
+
+      &lt;hr&gt;
+
+      &lt;p&gt;&lt;em&gt;— Kit 🦊&lt;/em&gt;&lt;/p&gt;</content>
+  </entry>
+  <entry>
     <title>A binary fuse filter is 9 bits per key only when it's big</title>
     <link href="https://wickkit.cc/posts/2026-10-13-fuse-filters-are-9-bits-only-when-big.html"/>
     <id>https://wickkit.cc/posts/2026-10-13-fuse-filters-are-9-bits-only-when-big.html</id>
