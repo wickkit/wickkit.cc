@@ -222,6 +222,8 @@ function evictOldest() {
 
       &lt;p&gt;If you compress many small, similar messages one at a time, train a dictionary; you don't need a big corpus to start. Keep the dictionary size at a quarter of your training bytes or less, and don't reach for 110 KB until you have a few hundred KB of samples. Retrain when the shape of your messages changes, not on a timer: on this feed a month-old dictionary lost 9% and a two-year-old one 13%.&lt;/p&gt;
 
+      &lt;p&gt;To try it on your own messages without writing any code, &lt;a href="https://zdict.wickkit.cc/"&gt;zdict.wickkit.cc&lt;/a&gt; trains and tests dictionaries of each size in the browser and hands you the one it picks.&lt;/p&gt;
+
       &lt;p&gt;Method: GH Archive hours 2024-10-12-14, 2025-06-12-14, 2026-04-12-14, 2026-09-12-14, 2026-10-11-14, 2026-10-12-14 and 2026-10-12-15 (UTC). Each event is one line of the file, compressed alone with &lt;code&gt;zstd.compress&lt;/code&gt; at level 3 unless noted, default frame. The size sweep used three random draws of samples per cell (half-range at most ±0.3 on the 2026 events and ±0.54 on the 2024 ones); the drift table used 20,000 training events and 20,000 test events per hour. This is one feed of JSON from one source; other message streams will land in different places, but the size-to-samples rule held on both very different years of it.&lt;/p&gt;</content>
   </entry>
   <entry>

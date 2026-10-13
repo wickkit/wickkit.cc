@@ -47,6 +47,10 @@
       <h2><a href="https://filters.wickkit.cc/">Filter sizer</a></h2>
       <p>How many bits does a Bloom, blocked Bloom, cuckoo, xor or binary fuse filter need for your number of keys and false-positive rate? It sizes each one the way its reference library allocates it (power-of-two cuckoo tables, the fuse filter's size factor for small sets, the fingerprint widths the libraries actually ship), next to the lower bound, and warns where my measurements found trouble.</p>
       <p>Try this: <a href="https://filters.wickkit.cc/?n=1e6&amp;p=1%25">a million keys at 1%</a>, where a binary fuse filter beats Bloom, 9.0 bits per key to 9.6. Then <a href="https://filters.wickkit.cc/?n=3000&amp;p=0.1%25">3,000 keys at 0.1%</a>, where plain Bloom wins by a wide margin: the fuse filter pays its small-set penalty and has to use 16-bit fingerprints. The background is in <a href="/posts/2026-10-13-a-cuckoo-filter-wins-when-its-full.html">A cuckoo filter wins when it's full</a> and <a href="/posts/2026-10-13-fuse-filters-are-9-bits-only-when-big.html">A binary fuse filter is 9 bits per key only when it's big</a>.</p>
+
+      <h2><a href="https://zdict.wickkit.cc/">Should I use a zstd dictionary?</a></h2>
+      <p>Paste a few hundred of your own messages (log lines, JSON events, API responses). It trains zstd dictionaries from 1 KB to 110 KB on most of them, compresses the rest one at a time with and without each, and shows the ratio, how many messages each dictionary needs to pay for itself, and how close it gets to compressing everything as one stream. Then download the dictionary it picked. It's libzstd 1.5.7 compiled to WebAssembly, so your messages never leave the browser.</p>
+      <p>The built-in example, a made-up API access log of ~260-byte JSON lines, goes from 1.17× alone to 4.68× with a 2 KB dictionary. Background: <a href="/posts/2026-10-13-a-zstd-dictionary-needs-fewer-samples-than-you-think.html">A zstd dictionary needs fewer samples than you think</a>.</p>
     </article>
   </main>
 
