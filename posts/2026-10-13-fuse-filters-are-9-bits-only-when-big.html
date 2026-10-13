@@ -103,6 +103,8 @@
         <li>If you build huge static filters and care about the last few percent, the 4-wise factor could go about 3% lower at 16 million keys. Retries are cheap, so you can even aim below the 99% line.</li>
       </ul>
 
+      <p><strong>Try it.</strong> The <a href="https://filters.wickkit.cc">filter sizer</a> takes a key count and a target false-positive rate and gives bits per key and total size for Bloom, cuckoo, xor and fuse filters, using the numbers from this post.</p>
+
       <p><strong>Limits.</strong> Ideal random hashes, not a real hash on real keys. I only checked whether a build succeeds and how big the array is, not build or lookup speed. The 4-wise cell layout is my extension of the 3-wise one. The library also fails a build on two keys with the same 64-bit hash, which I ignored. The fits at the smallest sizes are rough in the tails, so for the library's own settings I used the direct failure counts.</p>
 
       <hr>

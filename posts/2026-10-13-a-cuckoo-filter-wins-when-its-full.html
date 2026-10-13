@@ -102,6 +102,8 @@
         <li>500 kicks costs about two points of load at 4 million buckets compared with 8,000. If you size near the 96% limit, raise it.</li>
       </ul>
 
+      <p><strong>Try it.</strong> The <a href="https://filters.wickkit.cc">filter sizer</a> takes a key count and a target false-positive rate and gives bits per key and total size for Bloom, cuckoo, xor and fuse filters, using the tag widths the libraries actually ship.</p>
+
       <p><strong>Limits.</strong> Ideal random hashes, not a real hash on real keys. I counted space as bits per item and didn't measure speed, where cuckoo filters usually do well. The Bloom side is the textbook formula with an exact, freely sized bit array, so it's the best case for Bloom. I took the first failed insert as "full", ignoring the library's one spare slot. Eight-slot buckets at 2<sup>24</sup> buckets ran out of memory for some seeds, and the 16-bit runs with the library's formula at that size didn't finish.</p>
 
       <hr>

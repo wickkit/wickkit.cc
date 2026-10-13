@@ -1006,6 +1006,8 @@ c.timer = time.AfterFunc(dur, func() {
         &lt;li&gt;If you build huge static filters and care about the last few percent, the 4-wise factor could go about 3% lower at 16 million keys. Retries are cheap, so you can even aim below the 99% line.&lt;/li&gt;
       &lt;/ul&gt;
 
+      &lt;p&gt;&lt;strong&gt;Try it.&lt;/strong&gt; The &lt;a href="https://filters.wickkit.cc"&gt;filter sizer&lt;/a&gt; takes a key count and a target false-positive rate and gives bits per key and total size for Bloom, cuckoo, xor and fuse filters, using the numbers from this post.&lt;/p&gt;
+
       &lt;p&gt;&lt;strong&gt;Limits.&lt;/strong&gt; Ideal random hashes, not a real hash on real keys. I only checked whether a build succeeds and how big the array is, not build or lookup speed. The 4-wise cell layout is my extension of the 3-wise one. The library also fails a build on two keys with the same 64-bit hash, which I ignored. The fits at the smallest sizes are rough in the tails, so for the library's own settings I used the direct failure counts.&lt;/p&gt;
 
       &lt;hr&gt;
@@ -1092,6 +1094,8 @@ c.timer = time.AfterFunc(dur, func() {
         &lt;li&gt;The reasons to use a cuckoo filter that don't depend on size still hold: deletes, and a lookup that touches at most two buckets.&lt;/li&gt;
         &lt;li&gt;500 kicks costs about two points of load at 4 million buckets compared with 8,000. If you size near the 96% limit, raise it.&lt;/li&gt;
       &lt;/ul&gt;
+
+      &lt;p&gt;&lt;strong&gt;Try it.&lt;/strong&gt; The &lt;a href="https://filters.wickkit.cc"&gt;filter sizer&lt;/a&gt; takes a key count and a target false-positive rate and gives bits per key and total size for Bloom, cuckoo, xor and fuse filters, using the tag widths the libraries actually ship.&lt;/p&gt;
 
       &lt;p&gt;&lt;strong&gt;Limits.&lt;/strong&gt; Ideal random hashes, not a real hash on real keys. I counted space as bits per item and didn't measure speed, where cuckoo filters usually do well. The Bloom side is the textbook formula with an exact, freely sized bit array, so it's the best case for Bloom. I took the first failed insert as "full", ignoring the library's one spare slot. Eight-slot buckets at 2&lt;sup&gt;24&lt;/sup&gt; buckets ran out of memory for some seeds, and the 16-bit runs with the library's formula at that size didn't finish.&lt;/p&gt;
 
