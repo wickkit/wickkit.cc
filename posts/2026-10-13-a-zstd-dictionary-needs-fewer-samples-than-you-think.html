@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>A zstd dictionary needs fewer samples than you think — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/tools.html">tools</a>
+      <a href="/den.html">den</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+
+    <article>
+      <h1>A zstd dictionary needs fewer samples than you think</h1>
+      <div class="meta">2026-10-13 · Kit Wickham</div>
+
+      <p>Small JSON messages compress badly on their own: there's nothing earlier in the message to point back to. A zstd dictionary fixes that by giving every message the same shared history. On an hour of real GitHub events, compressing each event alone, a dictionary took the ratio from 1.88 to 4.12. The zstd docs suggest training on about 100 times the dictionary's size in samples, "a few thousand" messages. On these events, ten messages already got 84% of the savings the best dictionary got. The trap runs the other way: if you ask for the default 110 KB dictionary with only a hundred samples, it compresses worse than a 16 KB one by about a quarter.</p>
+
+      <h2>The data</h2>
+
+      <p><a href="https://www.gharchive.org/">GH Archive</a> publishes public GitHub events as JSON in hourly files; in the files I downloaded, each line is one event. I took seven hours between October 2024 and October 2026. Recent events are small: in the hour I tested most on (12 October 2026, 15:00 UTC), 87,694 events with a median of 624 bytes, 80% of them pushes. Two years earlier the same feed carried full pull request and issue objects, so events were bigger and more varied. Each message is compressed on its own with Python 3.14's <code>compression.zstd</code> (libzstd 1.5.7) at level 3, the default, and dictionaries come from its <code>train_dict</code>, which wraps zstd's standard trainer. The ratio is total raw bytes over total compressed bytes. Training and test messages never overlap: they come from different hours, or from opposite halves of a shuffled hour.</p>
+
+      <h2>How much a dictionary buys</h2>
+
+      <p>With a 110 KB dictionary trained on 20,000 events from the hour before:</p>
+
+      <table class="compact">
+        <thead><tr><th>Event size</th><th>Events</th><th>No dictionary</th><th>Dictionary</th></tr></thead>
+        <tbody>
+          <tr><td>under 512 B</td><td>335</td><td>1.65</td><td>4.21</td></tr>
+          <tr><td>512 B – 1 KB</td><td>85,688</td><td>1.73</td><td>4.06</td></tr>
+          <tr><td>1 – 4 KB</td><td>814</td><td>2.78</td><td>4.98</td></tr>
+          <tr><td>4 – 16 KB</td><td>759</td><td>3.17</td><td>4.26</td></tr>
+          <tr><td>over 16 KB</td><td>98</td><td>3.84</td><td>4.65</td></tr>
+          <tr><td>all</td><td>87,694</td><td>1.88</td><td>4.12</td></tr>
+        </tbody>
+      </table>
+
+      <p>That matches the zstd docs' own description: the smaller the message, the more the dictionary helps. For scale, compressing the whole hour as one stream, where every message can refer to all the ones before it, gives 5.33. Per-message compression with the dictionary closes 84% of the gap between "each message alone" and "everything at once". Level 19 with the dictionary got 4.38; dropping the frame's dictionary ID, size and checksum fields added another 3% at level 3, since those bytes are a real fraction of a 150-byte output.</p>
+
+      <h2>How many samples</h2>
+
+      <p>I trained dictionaries of six sizes (1 KB to 256 KB) on 10 to 30,000 sampled events, three random draws each, and tested each on 10,000 held-out events from the same hour.</p>
+
+      <figure class="fig smooth"><img src="/img/zdict.png" alt="Two panels of compression ratio against number of training samples on a log axis, one line per dictionary size. October 2026 events: no dictionary 1.87; a 1 KB dictionary is about 3.5 from 10 samples on; larger dictionaries reach about 4.0 to 4.2 by 1,000 samples, but the 110 KB one dips to about 3.1 at 100 samples and the 256 KB one at 100 and 300. October 2024 events: no dictionary 3.0; larger dictionaries keep improving up to about 7.2 at 30,000 samples, with the same dip for big dictionaries at few samples."></figure>
+
+      <p>On the 2026 events, ten samples and a 1 KB dictionary gave 3.50. The best result anywhere in the sweep was 4.21 (256 KB, 30,000 samples). In bytes, no dictionary leaves 53.5% of the input, ten samples leave 28.6%, and the best leaves 23.8%, so ten messages got 84% of the way. A hundred samples with a 16 KB dictionary reached 3.90. When most messages are the same few shapes, a handful of examples teaches the dictionary those shapes, and that's most of what there is to learn.</p>
+
+      <p>The 2024 events need more. Ten samples gave 4.45 against 2.99 without a dictionary and 7.19 at best: 56% of the savings. With bigger, more varied messages, the dictionary keeps finding more worth keeping all the way up to 30,000 samples and 256 KB. So "few samples are enough" depends on how uniform your messages are, and the cheap way to find out is to try it: train on 100, 1,000 and 10,000 and compare.</p>
+
+      <h2>A dictionary too big for its samples</h2>
+
+      <p>The dip in both panels is the useful warning. With 100 samples of 2026 events, about 71 KB of text, asking for 16 KB gave 3.90. Asking for 64 KB, 110 KB or 256 KB all gave the same 3.08: the trainer returned a 50 KB dictionary each time, about 70% of what it was given. Those messages then compress 27% bigger than with the 16 KB dictionary. On the 2024 events, 100 samples at 110 KB came out 14% bigger than at 16 KB. Level 19 didn't rescue it.</p>
+
+      <p>Across both data sets, a bigger dictionary was safe whenever the samples held at least four times as many bytes as it: in all 53 such cells, it did as well as or better than the best smaller size for the same samples (worst case 0.2% behind). Below four times, its ratio was up to 20% lower than a smaller one's, and below twice up to 22% lower. The <a href="https://github.com/facebook/zstd/blob/dev/lib/zdict.h">zdict.h</a> advice of about 100 times is a safe default, but the rule that matters with little data is the opposite of "bigger is better": shrink the dictionary to a quarter of your sample bytes or less. zstd's advanced trainers can also pick a smaller size for you (the header's <code>shrinkDict</code> option); I didn't test those.</p>
+
+      <h2>How fast a dictionary goes stale</h2>
+
+      <p>I trained a 110 KB dictionary on each of the seven hours and tested each one on every hour. On 12 October 2026 at 15:00, compared to a dictionary trained on that same hour (4.13):</p>
+
+      <table class="compact">
+        <thead><tr><th>Dictionary trained on</th><th>Age</th><th>Ratio</th><th>vs fresh</th></tr></thead>
+        <tbody>
+          <tr><td>12 Oct 2026, 14:00</td><td>1 hour</td><td>4.09</td><td>−1%</td></tr>
+          <tr><td>11 Oct 2026</td><td>1 day</td><td>3.98</td><td>−4%</td></tr>
+          <tr><td>12 Sep 2026</td><td>1 month</td><td>3.76</td><td>−9%</td></tr>
+          <tr><td>12 Apr 2026</td><td>6 months</td><td>3.71</td><td>−10%</td></tr>
+          <tr><td>12 Jun 2025</td><td>16 months</td><td>3.56</td><td>−14%</td></tr>
+          <tr><td>12 Oct 2024</td><td>2 years</td><td>3.61</td><td>−13%</td></tr>
+          <tr><td>none</td><td></td><td>1.87</td><td>−55%</td></tr>
+        </tbody>
+      </table>
+
+      <p>Even a dictionary from before the feed's payloads changed shape still beat no dictionary by nearly two to one. Going the other way hurt more: the October 2026 dictionary on October 2024 events gave 4.39, against 6.96 for a dictionary trained on that hour, because a dictionary built from small push events has nothing to offer for the pull request bodies it never saw. A stale dictionary costs a little when the messages have only drifted, and a lot when new kinds of content show up.</p>
+
+      <h2>What to do</h2>
+
+      <p>If you compress many small, similar messages one at a time, train a dictionary; you don't need a big corpus to start. Keep the dictionary size at a quarter of your training bytes or less, and don't reach for 110 KB until you have a few hundred KB of samples. Retrain when the shape of your messages changes, not on a timer: on this feed a month-old dictionary lost 9% and a two-year-old one 13%.</p>
+
+      <p>Method: GH Archive hours 2024-10-12-14, 2025-06-12-14, 2026-04-12-14, 2026-09-12-14, 2026-10-11-14, 2026-10-12-14 and 2026-10-12-15 (UTC). Each event is one line of the file, compressed alone with <code>zstd.compress</code> at level 3 unless noted, default frame. The size sweep used three random draws of samples per cell (half-range at most ±0.3 on the 2026 events and ±0.54 on the 2024 ones); the drift table used 20,000 training events and 20,000 test events per hour. This is one feed of JSON from one source; other message streams will land in different places, but the size-to-samples rule held on both very different years of it.</p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+</body>
+</html>
