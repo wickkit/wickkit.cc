@@ -8,6 +8,59 @@
   <updated>2026-10-13T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
   <entry>
+    <title>Git's new name hash forgets where files moved</title>
+    <link href="https://wickkit.cc/posts/2026-10-13-gits-new-name-hash-forgets-where-files-moved.html"/>
+    <id>https://wickkit.cc/posts/2026-10-13-gits-new-name-hash-forgets-where-files-moved.html</id>
+    <updated>2026-10-13T00:00:00Z</updated>
+    <summary>Git's name-hash v2 shrank fluentui's repack by 67% but grew Go's by 4.3% and babel's by 2.3%: it scatters files that moved directories and names one character apart. --path-walk was smallest on all five repos.</summary>
+    <content type="html">&lt;p&gt;When Git packs a repository, it compresses most objects as deltas against similar objects, and it finds candidates by sorting everything by a hash of the file's path. Git 2.49 added a second version of that hash, &lt;code&gt;--name-hash-version=2&lt;/code&gt;, to fix a real problem: in monorepos with over a hundred per-package changelog files with the same name, the old hash lumps them all together. On microsoft/fluentui, the repo the new hash was built for, it shrank my full repack from 582 MB to 191 MB. On golang/go it made the pack 4.3% bigger, and on babel 2.3% bigger. Version 2 loses two kinds of locality that version 1 had by accident: files that moved to another directory, and files whose names differ by one character, like versioned releases. The other new option, &lt;code&gt;--path-walk&lt;/code&gt;, made the smallest pack on all five repos I tried, including fluentui.&lt;/p&gt;
+
+      &lt;h2&gt;How the hash picks delta bases&lt;/h2&gt;
+
+      &lt;p&gt;&lt;code&gt;git pack-objects&lt;/code&gt; sorts objects by type, then by the 32-bit name hash, then by size, and tries each object against the 10 objects before it in that order (the &lt;code&gt;--window&lt;/code&gt;). Two versions of a file can only become a delta pair if they sort within 10 of each other. Version 1, unchanged since 2006, is a few lines in &lt;code&gt;pack-objects.h&lt;/code&gt;: for each character, &lt;code&gt;hash = (hash &amp;gt;&amp;gt; 2) + (c &amp;lt;&amp;lt; 24)&lt;/code&gt;. Only the last 16 characters survive, and the last ones count most, so all &lt;code&gt;.c&lt;/code&gt; files sort together, and &lt;code&gt;a/foo.c&lt;/code&gt; and &lt;code&gt;b/foo.c&lt;/code&gt; get the same or nearly the same hash. That's deliberate. The &lt;a href="https://github.com/git/git/commit/dca924b450"&gt;commit that added version 2&lt;/a&gt; says the collisions are "somewhat by design" so that "the same file across a directory rename (a/foo.txt to b/foo.txt)" stays together. The catch is that a hundred unrelated files with the same name also stay together, and they crowd each file's real history out of the window.&lt;/p&gt;
+
+      &lt;p&gt;Version 2 hashes each path component separately and, at every &lt;code&gt;/&lt;/code&gt;, XORs the parent's hash, shifted down 6 bits, into the result. It also reverses the bits of every byte, because the low bits of a character vary the most. The commit says this keeps "some amount of hash locality", and &lt;a href="https://git-scm.com/docs/git-pack-objects"&gt;the man page&lt;/a&gt; says version 2 "has similar locality features as version 1". In the code, the parent directory's hash lands on all but the top 6 of the 32 bits. So &lt;code&gt;a/foo.c&lt;/code&gt; and &lt;code&gt;b/foo.c&lt;/code&gt; agree only in those top 6 bits, which leaves roughly 1/64 of the repo's paths that could sort between them.&lt;/p&gt;
+
+      &lt;h2&gt;The test&lt;/h2&gt;
+
+      &lt;p&gt;I cloned five public repos and repacked each one from scratch three ways: &lt;code&gt;git pack-objects --all --no-reuse-delta --no-reuse-object&lt;/code&gt; with the default hash, with &lt;code&gt;--name-hash-version=2&lt;/code&gt;, and with &lt;code&gt;--path-walk&lt;/code&gt;, using Git 2.54 with the default window of 10 and depth of 50. I checked a Python port of both hash functions against Git's C code on all 29,111 paths in Go's history; they matched. Repeating the Go runs changed sizes by 0.2% at most.&lt;/p&gt;
+
+      &lt;table class="compact"&gt;
+        &lt;thead&gt;&lt;tr&gt;&lt;th&gt;Repo&lt;/th&gt;&lt;th&gt;v1 (default)&lt;/th&gt;&lt;th&gt;v2&lt;/th&gt;&lt;th&gt;--path-walk&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;
+        &lt;tbody&gt;
+          &lt;tr&gt;&lt;td&gt;git/git&lt;/td&gt;&lt;td&gt;144.9 MB&lt;/td&gt;&lt;td&gt;144.9 MB (+0.01%)&lt;/td&gt;&lt;td&gt;127.9 MB (−11.7%)&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;golang/go&lt;/td&gt;&lt;td&gt;235.2 MB&lt;/td&gt;&lt;td&gt;245.4 MB (+4.3%)&lt;/td&gt;&lt;td&gt;221.2 MB (−6.0%)&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;facebook/react&lt;/td&gt;&lt;td&gt;301.2 MB&lt;/td&gt;&lt;td&gt;298.9 MB (−0.8%)&lt;/td&gt;&lt;td&gt;264.8 MB (−12.1%)&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;babel/babel&lt;/td&gt;&lt;td&gt;87.6 MB&lt;/td&gt;&lt;td&gt;89.6 MB (+2.3%)&lt;/td&gt;&lt;td&gt;78.8 MB (−10.1%)&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;microsoft/fluentui&lt;/td&gt;&lt;td&gt;581.6 MB&lt;/td&gt;&lt;td&gt;191.4 MB (−67.1%)&lt;/td&gt;&lt;td&gt;173.0 MB (−70.3%)&lt;/td&gt;&lt;/tr&gt;
+        &lt;/tbody&gt;
+      &lt;/table&gt;
+
+      &lt;p&gt;Version 2 is a large win in exactly one place, about a wash in two, and a loss in two. The authors' own benchmark in the &lt;a href="https://github.com/git/git/commit/30696be71f"&gt;performance-test commit&lt;/a&gt; shows the same pattern: fluentui went from 439 MB to 161 MB, and the Git repo got "slight bloat" because it "benefits a lot from cross-path delta pairs".&lt;/p&gt;
+
+      &lt;h2&gt;Loss one: directories that moved&lt;/h2&gt;
+
+      &lt;p&gt;In September 2014, Go moved the standard library from &lt;code&gt;src/pkg/&lt;/code&gt; to &lt;code&gt;src/&lt;/code&gt;: 2,097 files changed directory in one commit. Across Go's whole history, 77% of renames keep exactly the same version-1 hash, because the last 16 characters didn't change. Under version 2, 24% do. Where the hash changes, the first copy of a file at its new path no longer sorts next to its old versions, so it can't be stored as a delta against them. Splitting the pack by path, the version-2 pack stored 857 more files from moved directories as whole objects and spent 5.4 MB more on them. A wider window didn't help: at &lt;code&gt;--window=250&lt;/code&gt;, the setting &lt;code&gt;git gc --aggressive&lt;/code&gt; uses, version 2 was still 5.7% bigger (215.8 MB against 204.1 MB).&lt;/p&gt;
+
+      &lt;h2&gt;Loss two: names that differ by one character&lt;/h2&gt;
+
+      &lt;p&gt;Babel's loss came from somewhere else. Babel commits each Yarn release it uses as its own file, &lt;code&gt;.yarn/releases/yarn-4.1.0.cjs&lt;/code&gt;, &lt;code&gt;yarn-4.1.1.cjs&lt;/code&gt; and so on, 1.6 to 3 MB each before compression. Version 1 deltified 14 of the 22 release files against each other. Version 2 deltified 3, and those files took 6.1 MB more. That's more than v2's 2.0 MB net loss on the whole pack; it won some of it back on &lt;code&gt;package.json&lt;/code&gt; and test fixtures.&lt;/p&gt;
+
+      &lt;p&gt;The cause is the bit reversal. &lt;code&gt;'0'&lt;/code&gt; and &lt;code&gt;'1'&lt;/code&gt; differ in their lowest bit. In version 1, that bit ends up low in the hash, so &lt;code&gt;yarn-4.1.0.cjs&lt;/code&gt; and &lt;code&gt;yarn-4.1.1.cjs&lt;/code&gt; are 65,536 apart. Reversed, it becomes the character's highest bit, and the gap grows to 8,388,608, 128 times as far. When I replayed pack-objects' sort order, version 1 put all the Yarn releases in one unbroken run, so each had up to 10 other releases in its window to choose a base from. Version 2 split them into small groups with unrelated files between them. No file had more than 3 other releases in its window, and 8 had none. Version 2 was designed to scatter names that differ only slightly, and these were names that differ only slightly.&lt;/p&gt;
+
+      &lt;h2&gt;Why path-walk wins both ways&lt;/h2&gt;
+
+      &lt;p&gt;&lt;code&gt;--path-walk&lt;/code&gt; (Git 2.51) doesn't need a better hash. It first deltifies each exact path's versions against each other, so one package's changelog never competes with other packages' changelogs for its own history. Then it runs the normal sorted pass over the objects that still aren't deltas, mostly one base object per path, using the version-1 hash. Moved and versioned files get their cross-path chance there, with much less crowding than when every version of every file is in the list. It also helped directory trees a lot: on git/git, tree objects dropped from 36.1 MB to 25.7 MB. Running path-walk with version 2 underneath undid part of that on Go (231.2 MB against 221.2 MB), because the second pass then has the same blind spots.&lt;/p&gt;
+
+      &lt;p&gt;There's a practical difference too: &lt;code&gt;--write-bitmap-index&lt;/code&gt; forces version 1 back on with a warning, so a server that keeps reachability bitmaps can't use version 2 at all. &lt;code&gt;git repack -adbf --path-walk&lt;/code&gt; wrote a bitmap without complaint.&lt;/p&gt;
+
+      &lt;h2&gt;What to do&lt;/h2&gt;
+
+      &lt;p&gt;If you're going to repack with a non-default option, use &lt;code&gt;--path-walk&lt;/code&gt; (&lt;code&gt;git repack -adf --path-walk&lt;/code&gt;, or &lt;code&gt;pack.usePathWalk=true&lt;/code&gt;, which &lt;code&gt;feature.experimental&lt;/code&gt; also turns on). It matched or beat version 2 on every repo here, including the one version 2 was designed for, and it doesn't cost you on repos with moved or versioned files. Use &lt;code&gt;--name-hash-version=2&lt;/code&gt; only if you've measured it on your own repo.&lt;/p&gt;
+
+      &lt;p&gt;Versions: Git 2.54.0, with source read at git/git &lt;code&gt;6de20f6&lt;/code&gt;. Full repacks of all reachable objects with &lt;code&gt;--no-reuse-delta --no-reuse-object&lt;/code&gt;, 8 threads, on macOS. MB here means 10&lt;sup&gt;6&lt;/sup&gt; bytes of &lt;code&gt;.pack&lt;/code&gt; file. Babel repacked with one thread gave the same direction (version 2 +3.6%) and the same Yarn result, so thread splitting isn't the cause. A clone you fetch is packed by the server's own settings, so these numbers apply to repacking, not to clone sizes.&lt;/p&gt;</content>
+  </entry>
+  <entry>
     <title>On a Mac, a full fsync of 4 KB waits for everyone else's writes</title>
     <link href="https://wickkit.cc/posts/2026-10-13-a-full-fsync-on-a-mac-flushes-everyone.html"/>
     <id>https://wickkit.cc/posts/2026-10-13-a-full-fsync-on-a-mac-flushes-everyone.html</id>
