@@ -8,6 +8,85 @@
   <updated>2026-10-13T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
   <entry>
+    <title>SQLite's WAL grows while any reader is open, even short ones</title>
+    <link href="https://wickkit.cc/posts/2026-10-13-sqlite-wal-grows-while-any-reader-is-open.html"/>
+    <id>https://wickkit.cc/posts/2026-10-13-sqlite-wal-grows-while-any-reader-is-open.html</id>
+    <updated>2026-10-13T00:00:00Z</updated>
+    <summary>A half-read Python cursor grew a WAL from 3.9 MB to 88 MB; so did four 20 ms readers that always overlapped. The file stays big afterwards. RESTART checkpoints with a ~50 ms busy timeout held it near 12 MB; a 1 s timeout only made the writer wait longer.</summary>
+    <content type="html">&lt;p&gt;In WAL mode, SQLite appends every commit to a &lt;code&gt;-wal&lt;/code&gt; file and copies it back into the database at a checkpoint, by default once the WAL reaches 1,000 pages. With no readers, my test writer's WAL never got past 3.9 MB. With one Python cursor left half-read, it grew 88 MB in 15,000 commits and kept growing. Four readers that each lived for only 20 ms grew it exactly as fast, as long as one of them was always open. When the readers go away, the file stays 89 MB until something truncates it. Explicit &lt;code&gt;RESTART&lt;/code&gt; checkpoints with a short busy timeout held it to about 12 MB; a longer timeout made the writer wait up to a second and didn't help.&lt;/p&gt;
+
+      &lt;h2&gt;Why a reader holds the WAL&lt;/h2&gt;
+
+      &lt;p&gt;A read transaction in WAL mode sees the database as of the moment it started: the database file plus WAL frames up to a mark. A checkpoint can copy frames into the database file only up to the oldest open reader's mark, because copying later frames would change pages that reader still reads from the file. And the writer can only go back to the start of the WAL, instead of appending, once every frame has been copied and no reader is still using the WAL. SQLite's &lt;a href="https://sqlite.org/wal.html"&gt;WAL documentation&lt;/a&gt; calls the second case checkpoint starvation: readers that overlap so there's never a moment without one.&lt;/p&gt;
+
+      &lt;h2&gt;The test&lt;/h2&gt;
+
+      &lt;p&gt;One writer connection commits one 1,000-byte row per transaction, about 1.5 WAL frames per commit, with the default auto-checkpoint. A reader opens before the first commit and is released after commit 15,000 of 20,000. I recorded the WAL file's size every 100 commits. Everything is single-threaded and deterministic, so each number below is exact for this workload; SQLite 3.46.1 and 3.53.1 gave identical sizes. Python 3.14.&lt;/p&gt;
+
+      &lt;table class="compact"&gt;
+        &lt;thead&gt;&lt;tr&gt;&lt;th&gt;What the reader does&lt;/th&gt;&lt;th&gt;WAL at commit 15,000&lt;/th&gt;&lt;th&gt;Holds a snapshot?&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;
+        &lt;tbody&gt;
+          &lt;tr&gt;&lt;td&gt;No reader&lt;/td&gt;&lt;td&gt;3.9 MB&lt;/td&gt;&lt;td&gt;—&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;&lt;code&gt;BEGIN&lt;/code&gt;, &lt;code&gt;SELECT&lt;/code&gt;, never commits&lt;/td&gt;&lt;td&gt;88.4 MB&lt;/td&gt;&lt;td&gt;yes&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;Stored cursor, first row of many fetched&lt;/td&gt;&lt;td&gt;88.4 MB&lt;/td&gt;&lt;td&gt;yes&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;Generator over a query, paused after one row&lt;/td&gt;&lt;td&gt;88.4 MB&lt;/td&gt;&lt;td&gt;yes&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;&lt;code&gt;connect(autocommit=False)&lt;/code&gt;, one &lt;code&gt;SELECT&lt;/code&gt;, then idle&lt;/td&gt;&lt;td&gt;88.4 MB&lt;/td&gt;&lt;td&gt;yes&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;Default connection, one &lt;code&gt;SELECT&lt;/code&gt;, then idle&lt;/td&gt;&lt;td&gt;3.9 MB&lt;/td&gt;&lt;td&gt;no&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;Stored cursor after &lt;code&gt;fetchall()&lt;/code&gt;&lt;/td&gt;&lt;td&gt;3.9 MB&lt;/td&gt;&lt;td&gt;no&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;Stored cursor, its only row fetched&lt;/td&gt;&lt;td&gt;3.9 MB&lt;/td&gt;&lt;td&gt;no&lt;/td&gt;&lt;/tr&gt;
+        &lt;/tbody&gt;
+      &lt;/table&gt;
+
+      &lt;p&gt;The Python rows are the ones that surprise people. A query whose rows you haven't all read is still running inside SQLite, and in these runs a running statement kept its snapshot even outside any transaction I started. So &lt;code&gt;cur.fetchone()&lt;/code&gt; on a multi-row result, or a generator that yields rows and then waits for its caller, pins the WAL for as long as the cursor or generator lives. With &lt;code&gt;autocommit=False&lt;/code&gt;, Python's PEP 249 mode added in 3.12, the module &lt;a href="https://docs.python.org/3/library/sqlite3.html#sqlite3.Connection.autocommit"&gt;keeps a transaction open at all times&lt;/a&gt;: a connection that only reads and never calls &lt;code&gt;commit()&lt;/code&gt; holds its first snapshot forever. The default mode opens transactions only before writes, so a read-only connection there is harmless.&lt;/p&gt;
+
+      &lt;h2&gt;Short readers do it too&lt;/h2&gt;
+
+      &lt;p&gt;Next, no reader stays long. Each reader runs for L commits and a new one starts every L/R commits, so R readers overlap and one is always open.&lt;/p&gt;
+
+      &lt;table class="compact"&gt;
+        &lt;thead&gt;&lt;tr&gt;&lt;th&gt;Readers (R)&lt;/th&gt;&lt;th&gt;Each lasts (L commits)&lt;/th&gt;&lt;th&gt;Idle moments&lt;/th&gt;&lt;th&gt;WAL at commit 15,000&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;
+        &lt;tbody&gt;
+          &lt;tr&gt;&lt;td&gt;1, back to back&lt;/td&gt;&lt;td&gt;200&lt;/td&gt;&lt;td&gt;none&lt;/td&gt;&lt;td&gt;88.4 MB&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;4&lt;/td&gt;&lt;td&gt;50&lt;/td&gt;&lt;td&gt;none&lt;/td&gt;&lt;td&gt;88.4 MB&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;4&lt;/td&gt;&lt;td&gt;1,000&lt;/td&gt;&lt;td&gt;none&lt;/td&gt;&lt;td&gt;88.4 MB&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;1&lt;/td&gt;&lt;td&gt;200&lt;/td&gt;&lt;td&gt;1 commit every 201&lt;/td&gt;&lt;td&gt;4.8 MB&lt;/td&gt;&lt;/tr&gt;
+        &lt;/tbody&gt;
+      &lt;/table&gt;
+
+      &lt;p&gt;How long each reader lasts doesn't matter, only whether there's ever a gap. One commit with no reader open, every 201 commits, was enough to keep the WAL under 5 MB. The gap has to land on a commit, though. In a threaded version, with one reader thread looping on &lt;code&gt;BEGIN&lt;/code&gt;, a 20 ms read and &lt;code&gt;COMMIT&lt;/code&gt;, and a writer at 1,000 commits a second, the reader is idle for microseconds between transactions. The writer never hit those gaps, and the WAL grew to 59.6 MB in 10 seconds, the same as with four overlapping readers.&lt;/p&gt;
+
+      &lt;h2&gt;The file doesn't shrink afterwards&lt;/h2&gt;
+
+      &lt;p&gt;Once the readers in the first table were gone, a checkpoint copied everything back and the next write started over at the beginning of the WAL. The file stayed 89 MB anyway: SQLite reuses the WAL file from the start rather than shrinking it. It only got smaller with &lt;code&gt;PRAGMA wal_checkpoint(TRUNCATE)&lt;/code&gt;, which cut it to 0, or with &lt;code&gt;PRAGMA journal_size_limit&lt;/code&gt; set, which trimmed it to the limit (4 MB in my runs) when the WAL was reset. Without either, a single long reader leaves its high-water mark on disk for good.&lt;/p&gt;
+
+      &lt;h2&gt;Can a checkpoint break the starvation?&lt;/h2&gt;
+
+      &lt;p&gt;The threaded setup again: four reader threads, each holding a read transaction for 20 ms, staggered so one is always open; the writer at 1,000 commits a second for 10 seconds, calling an explicit checkpoint every 1,000 commits with the connection's busy timeout set to various values. Five runs each (PASSIVE: one run each at timeouts of 0, 100 and 1,000 ms), three at a time on the same machine. Without any explicit checkpoint the WAL reached 59.6 MB.&lt;/p&gt;
+
+      &lt;table&gt;
+        &lt;thead&gt;&lt;tr&gt;&lt;th&gt;Checkpoint mode&lt;/th&gt;&lt;th&gt;Busy timeout&lt;/th&gt;&lt;th&gt;Peak WAL (median, range)&lt;/th&gt;&lt;th&gt;Checkpoints that gave up, of 10&lt;/th&gt;&lt;th&gt;Longest writer wait&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;
+        &lt;tbody&gt;
+          &lt;tr&gt;&lt;td&gt;PASSIVE&lt;/td&gt;&lt;td&gt;any&lt;/td&gt;&lt;td&gt;59.6 MB&lt;/td&gt;&lt;td&gt;0&lt;/td&gt;&lt;td&gt;&amp;lt;1 ms&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;FULL&lt;/td&gt;&lt;td&gt;100 ms&lt;/td&gt;&lt;td&gt;59.6 MB&lt;/td&gt;&lt;td&gt;3&lt;/td&gt;&lt;td&gt;121 ms&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;FULL&lt;/td&gt;&lt;td&gt;1,000 ms&lt;/td&gt;&lt;td&gt;53.6 MB&lt;/td&gt;&lt;td&gt;3&lt;/td&gt;&lt;td&gt;1,081 ms&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;RESTART&lt;/td&gt;&lt;td&gt;0&lt;/td&gt;&lt;td&gt;59.6 MB&lt;/td&gt;&lt;td&gt;10&lt;/td&gt;&lt;td&gt;0&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;RESTART&lt;/td&gt;&lt;td&gt;50 ms&lt;/td&gt;&lt;td&gt;12.1 MB (11.8–17.9)&lt;/td&gt;&lt;td&gt;3&lt;/td&gt;&lt;td&gt;66 ms&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;RESTART&lt;/td&gt;&lt;td&gt;250 ms&lt;/td&gt;&lt;td&gt;11.9 MB (11.8–17.9)&lt;/td&gt;&lt;td&gt;2&lt;/td&gt;&lt;td&gt;281 ms&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;RESTART&lt;/td&gt;&lt;td&gt;1,000 ms&lt;/td&gt;&lt;td&gt;11.9 MB (11.9–12.1)&lt;/td&gt;&lt;td&gt;2&lt;/td&gt;&lt;td&gt;1,039 ms&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;TRUNCATE&lt;/td&gt;&lt;td&gt;50 ms&lt;/td&gt;&lt;td&gt;16.6 MB (10.7–22.7)&lt;/td&gt;&lt;td&gt;4&lt;/td&gt;&lt;td&gt;70 ms&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;TRUNCATE&lt;/td&gt;&lt;td&gt;1,000 ms&lt;/td&gt;&lt;td&gt;10.7 MB (10.7–16.6)&lt;/td&gt;&lt;td&gt;2&lt;/td&gt;&lt;td&gt;1,051 ms&lt;/td&gt;&lt;/tr&gt;
+        &lt;/tbody&gt;
+      &lt;/table&gt;
+
+      &lt;p&gt;&lt;code&gt;PASSIVE&lt;/code&gt; is what auto-checkpoint already does, so it changes nothing. &lt;code&gt;FULL&lt;/code&gt; waits until readers are on the latest snapshot and copies everything back, but it doesn't wait for them to stop using the log, so the writer still can't start over and the file keeps growing. &lt;code&gt;RESTART&lt;/code&gt; and &lt;code&gt;TRUNCATE&lt;/code&gt; work, but only with a busy timeout: at 0 they give up every time. With one they succeeded most of the time, and the WAL stayed at two or three checkpoint intervals' worth. The checkpoints that failed waited out the whole timeout and failed anyway, so raising the timeout from 50 ms to a second barely changed the WAL size and made the worst writer stall about 16 times longer. In this workload, about 50 ms, a bit more than the readers' 20 ms, was the useful setting.&lt;/p&gt;
+
+      &lt;h2&gt;What to do&lt;/h2&gt;
+
+      &lt;p&gt;Fix the readers first. Read results with &lt;code&gt;fetchall()&lt;/code&gt; or close the cursor, don't keep a generator over a live query paused across slow work, and if you use &lt;code&gt;autocommit=False&lt;/code&gt;, commit or roll back read-only connections when they're done. If many short readers overlap all the time, as on a busy web server, schedule a &lt;code&gt;RESTART&lt;/code&gt; or &lt;code&gt;TRUNCATE&lt;/code&gt; checkpoint with a busy timeout a little longer than a typical read. And set &lt;code&gt;journal_size_limit&lt;/code&gt; so that one bad afternoon doesn't leave a WAL on disk the size of its worst moment.&lt;/p&gt;
+
+      &lt;p&gt;Versions: Python 3.14.8 with SQLite 3.46.1 on Linux, and Python 3.14 with SQLite 3.53.1 on macOS for the single-threaded runs, page size 4,096, default &lt;code&gt;wal_autocheckpoint&lt;/code&gt; of 1,000 pages. Sizes are in MiB, written MB. The threaded numbers depend on timing, so treat their exact values as one machine's.&lt;/p&gt;</content>
+  </entry>
+  <entry>
     <title>Tokio's timeouts drop the request; a spawned task keeps it</title>
     <link href="https://wickkit.cc/posts/2026-10-13-tokio-timeouts-drop-requests-spawned-tasks-dont.html"/>
     <id>https://wickkit.cc/posts/2026-10-13-tokio-timeouts-drop-requests-spawned-tasks-dont.html</id>

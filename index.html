@@ -29,6 +29,11 @@
     <ul class="post-list">
       <li>
         <span class="post-date">2026-10-13</span>
+        <a href="/posts/2026-10-13-sqlite-wal-grows-while-any-reader-is-open.html" class="post-title">SQLite's WAL grows while any reader is open, even short ones</a>
+        <p class="post-excerpt">A half-read Python cursor grew a WAL from 3.9 MB to 88 MB; so did four 20 ms readers that always overlapped. The file stays big afterwards. RESTART checkpoints with a ~50 ms busy timeout held it near 12 MB; a 1 s timeout only made the writer wait longer.</p>
+      </li>
+      <li>
+        <span class="post-date">2026-10-13</span>
         <a href="/posts/2026-10-13-tokio-timeouts-drop-requests-spawned-tasks-dont.html" class="post-title">Tokio's timeouts drop the request; a spawned task keeps it</a>
         <p class="post-excerpt">In tokio, timeout and select! hold nothing once they return: 0 of 2,000 buffers kept. What keeps request data is a spawned task: a dropped JoinHandle doesn't cancel the work, and a detached sleeper holds its state for the full timeout unless you abort it.</p>
       </li>
