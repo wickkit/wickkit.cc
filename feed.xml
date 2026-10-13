@@ -8,6 +8,57 @@
   <updated>2026-10-13T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
   <entry>
+    <title>Redis's 10% expired-key target counts every key with a TTL</title>
+    <link href="https://wickkit.cc/posts/2026-10-13-redis-expired-keys-ten-percent-of-every-ttl-key.html"/>
+    <id>https://wickkit.cc/posts/2026-10-13-redis-expired-keys-ten-percent-of-every-ttl-key.html</id>
+    <updated>2026-10-13T00:00:00Z</updated>
+    <summary>Redis's expire cycle stops once about 10% of the TTL keys it scans are dead, so 100 short-lived keys a second next to a million day-long keys left 109 dead keys per live one, lingering 18 minutes. Putting the short keys in their own database cut it to 99 dead in total.</summary>
+    <content type="html">&lt;p&gt;Redis deletes expired keys in the background, and &lt;a href="https://github.com/redis/redis/blob/8.10.2/redis.conf#L1308-L1323"&gt;its config file&lt;/a&gt; says the default effort "will try to avoid having more than ten percent of expired keys still in memory." Ten percent of what turns out to matter. I wrote 100 keys a second with a 10 second TTL into a Redis 8.10 instance that also held a million keys with a one-day TTL. At any moment 1,000 short keys were alive, and about 109,000 dead ones were still in memory. A dead key stayed for about 18 minutes on average. When I moved the short keys to their own database, 99 dead ones were left.&lt;/p&gt;
+
+      &lt;h2&gt;How the expire cycle decides to stop&lt;/h2&gt;
+
+      &lt;p&gt;Expired keys go away in two ways. Reading one deletes it on the spot. Keys nobody reads again are left to the active expire cycle in &lt;a href="https://github.com/redis/redis/blob/8.10.2/src/expire.c#L287-L507"&gt;&lt;code&gt;activeExpireCycle&lt;/code&gt;&lt;/a&gt;, which runs 10 times a second by default. The &lt;a href="https://redis.io/docs/latest/commands/expire/"&gt;EXPIRE docs&lt;/a&gt; say it "tests a few keys at random". The current code doesn't sample at random. It walks the table of keys that have a TTL with a scan cursor, remembered between runs, about 20 keys at a time. After each batch it checks what share of the batch had expired. If that share is more than 10%, it takes another batch. Otherwise it stops until the next run (&lt;a href="https://github.com/redis/redis/blob/8.10.2/src/expire.c#L425-L447"&gt;lines 425–447&lt;/a&gt;). A faster cycle between commands also starts only when a running estimate of that share is 10% or more, or when the last run ran out of time.&lt;/p&gt;
+
+      &lt;p&gt;So the cycle aims for about 10% expired among all the keys with a TTL it walks past, not among the keys that are actually expiring. A day-long session key counts in the denominator the same as a 10 second rate-limit counter. With a million day-long keys, the cycle settles once roughly 100,000 dead keys are spread among them (84,000 to 183,000 in my runs), however few short keys are alive. Keys without any TTL aren't in that table, so they don't dilute it.&lt;/p&gt;
+
+      &lt;h2&gt;The test&lt;/h2&gt;
+
+      &lt;p&gt;Each run used a fresh Redis 8.10.2 container (official image, one CPU, default settings except as noted). A client first wrote L keys with a one-day TTL, then wrote R new keys per second with a 10 second TTL and 100-byte values, which nobody ever read again. Every second it read &lt;code&gt;INFO&lt;/code&gt;. Dead keys are the key count minus the long keys minus the short keys written in the last 10 seconds. Each run lasted 25 minutes, and the table reports the mean of the last 5. I repeated three of the configurations, and the repeats came within 1% of each other.&lt;/p&gt;
+
+      &lt;figure class="fig smooth"&gt;&lt;img src="https://wickkit.cc/img/redis-expired-keys.png" alt="Expired keys still in memory over 25 minutes, log scale. Sharing a database with one million day-long keys, dead short keys climb to about 110,000. With 100,000 day-long keys they settle around 7,000 with a sawtooth. In their own database they stay around 100. Live short keys are 1,000."&gt;&lt;/figure&gt;
+
+      &lt;p&gt;With a million long keys the count is still climbing for 20 minutes, because at the start the cursor moves only about 20 keys per run while dead keys are sparse.&lt;/p&gt;
+
+      &lt;table class="compact"&gt;
+        &lt;thead&gt;&lt;tr&gt;&lt;th&gt;Day-long keys&lt;/th&gt;&lt;th&gt;Short keys/s&lt;/th&gt;&lt;th&gt;Live short keys&lt;/th&gt;&lt;th&gt;Dead keys (effort 1)&lt;/th&gt;&lt;th&gt;Dead keys (effort 10)&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;
+        &lt;tbody&gt;
+          &lt;tr&gt;&lt;td&gt;0&lt;/td&gt;&lt;td&gt;100&lt;/td&gt;&lt;td&gt;1,000&lt;/td&gt;&lt;td&gt;87&lt;/td&gt;&lt;td&gt;9&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;0&lt;/td&gt;&lt;td&gt;1,000&lt;/td&gt;&lt;td&gt;10,000&lt;/td&gt;&lt;td&gt;959&lt;/td&gt;&lt;td&gt;211&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;0&lt;/td&gt;&lt;td&gt;10,000&lt;/td&gt;&lt;td&gt;100,000&lt;/td&gt;&lt;td&gt;16,392&lt;/td&gt;&lt;td&gt;3,748&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;100,000&lt;/td&gt;&lt;td&gt;100&lt;/td&gt;&lt;td&gt;1,000&lt;/td&gt;&lt;td&gt;7,141&lt;/td&gt;&lt;td&gt;861&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;100,000&lt;/td&gt;&lt;td&gt;1,000&lt;/td&gt;&lt;td&gt;10,000&lt;/td&gt;&lt;td&gt;9,293&lt;/td&gt;&lt;td&gt;2,279&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;100,000&lt;/td&gt;&lt;td&gt;10,000&lt;/td&gt;&lt;td&gt;100,000&lt;/td&gt;&lt;td&gt;32,771&lt;/td&gt;&lt;td&gt;7,569&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;1,000,000&lt;/td&gt;&lt;td&gt;100&lt;/td&gt;&lt;td&gt;1,000&lt;/td&gt;&lt;td&gt;108,875&lt;/td&gt;&lt;td&gt;8,379&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;1,000,000&lt;/td&gt;&lt;td&gt;1,000&lt;/td&gt;&lt;td&gt;10,000&lt;/td&gt;&lt;td&gt;84,184&lt;/td&gt;&lt;td&gt;20,872&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;1,000,000&lt;/td&gt;&lt;td&gt;10,000&lt;/td&gt;&lt;td&gt;100,000&lt;/td&gt;&lt;td&gt;182,951&lt;/td&gt;&lt;td&gt;41,224&lt;/td&gt;&lt;/tr&gt;
+        &lt;/tbody&gt;
+      &lt;/table&gt;
+
+      &lt;p&gt;Without long keys the target works as described: dead keys are 9–10% of live ones at 100 and 1,000 keys a second, and 16% at 10,000. Next to a million day-long keys, the slowest stream is the worst off: 109 dead keys for every live one, or about 29 MB of dead keys with these 100-byte values against 0.2 MB of live ones. The dead count tracks the size of the whole TTL table, between 7% and 14% of it at the default effort, so a slower stream gets proportionally more of it.&lt;/p&gt;
+
+      &lt;h2&gt;What changes it&lt;/h2&gt;
+
+      &lt;p&gt;&lt;strong&gt;A separate database.&lt;/strong&gt; Each database has its own TTL table and its own cursor, and the cycle visits all of them on every run. With the million long keys in database 0 and the short keys in database 1, dead keys dropped to 99 at 100 keys a second and 1,389 at 1,000, against 87 and 959 when the short keys had an instance to themselves. In cluster mode there's only database 0, so this means a separate instance.&lt;/p&gt;
+
+      &lt;p&gt;&lt;strong&gt;&lt;code&gt;active-expire-effort 10&lt;/code&gt;.&lt;/strong&gt; The maximum effort lowers the stop threshold to 1% and lets each run take bigger batches and more time. It cut dead keys by 4 to 13 times, but next to a million long keys a 100 key/s stream still had 8 dead keys for each live one. The expire cycle's CPU went from 6.5 to 10.4 ms per second in the million-key, 1,000 key/s run, about 1% of a core.&lt;/p&gt;
+
+      &lt;p&gt;&lt;strong&gt;Raising &lt;code&gt;hz&lt;/code&gt; doesn't help much.&lt;/strong&gt; At &lt;code&gt;hz 100&lt;/code&gt; dead keys went from 84,184 to 74,926. The cycle isn't short of time; it stops on purpose once a batch looks clean enough.&lt;/p&gt;
+
+      &lt;p&gt;Two practical notes. &lt;code&gt;DBSIZE&lt;/code&gt; and the &lt;code&gt;keys=&lt;/code&gt; count in &lt;code&gt;INFO keyspace&lt;/code&gt; include these dead keys, so they overstate what's live. And &lt;code&gt;expired_stale_perc&lt;/code&gt; in &lt;code&gt;INFO stats&lt;/code&gt; is that same running estimate of the expired share among scanned TTL keys. It sat at 9.4% in the run with 109 dead keys per live one, which looks healthy.&lt;/p&gt;
+
+      &lt;p&gt;Versions: Redis 8.10.2 (Docker Hub &lt;code&gt;redis:8&lt;/code&gt;) on Linux arm64, default &lt;code&gt;hz 10&lt;/code&gt; with &lt;code&gt;dynamic-hz&lt;/code&gt; on and a single client connection. Source read at the 8.10.2 tag; &lt;code&gt;activeExpireCycle&lt;/code&gt; is unchanged on &lt;code&gt;unstable&lt;/code&gt; as of this week. Dead keys counted from &lt;code&gt;INFO keyspace&lt;/code&gt; once a second; values 100 bytes; memory from &lt;code&gt;used_memory&lt;/code&gt; against the level after loading the long keys.&lt;/p&gt;</content>
+  </entry>
+  <entry>
     <title>A JavaScript Map cache pays for every key it already evicted</title>
     <link href="https://wickkit.cc/posts/2026-10-13-a-map-cache-pays-for-every-key-it-evicted.html"/>
     <id>https://wickkit.cc/posts/2026-10-13-a-map-cache-pays-for-every-key-it-evicted.html</id>

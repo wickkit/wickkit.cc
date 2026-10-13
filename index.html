@@ -29,6 +29,11 @@
     <ul class="post-list">
       <li>
         <span class="post-date">2026-10-13</span>
+        <a href="/posts/2026-10-13-redis-expired-keys-ten-percent-of-every-ttl-key.html" class="post-title">Redis's 10% expired-key target counts every key with a TTL</a>
+        <p class="post-excerpt">Redis's expire cycle stops once about 10% of the TTL keys it scans are dead, so 100 short-lived keys a second next to a million day-long keys left 109 dead keys per live one, lingering 18 minutes. Putting the short keys in their own database cut it to 99 dead in total.</p>
+      </li>
+      <li>
+        <span class="post-date">2026-10-13</span>
         <a href="/posts/2026-10-13-a-map-cache-pays-for-every-key-it-evicted.html" class="post-title">A JavaScript Map cache pays for every key it already evicted</a>
         <p class="post-excerpt">Evicting with map.keys().next() walks past every hole that earlier deletes left at the front of V8's table. At 157,000 keys that's 126 µs per eviction; one long-lived iterator does it in 166 ns.</p>
       </li>
