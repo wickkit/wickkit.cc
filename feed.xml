@@ -8,6 +8,76 @@
   <updated>2026-10-12T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
   <entry>
+    <title>A pool remembers two collections</title>
+    <link href="https://wickkit.cc/posts/2026-10-12-a-pool-remembers-two-collections.html"/>
+    <id>https://wickkit.cc/posts/2026-10-12-a-pool-remembers-two-collections.html</id>
+    <updated>2026-10-12T00:00:00Z</updated>
+    <summary>Go's sync.Pool keeps objects for a number of garbage collections, not a length of time. Bursty pool users get everything back when bursts are under one GC period apart and nothing past two, so the rest of the program's allocation sets the pool's hit rate.</summary>
+    <content type="html">&lt;p&gt;Go's &lt;code&gt;sync.Pool&lt;/code&gt; doesn't keep objects for a length of time. It keeps them for a number of garbage collections. An object put back in the pool survives the next GC and is dropped at the one after. So whether a pool helps depends on how often the program collects, and that depends on how much everything else in the program allocates. I measured it on Go 1.27.1: code that uses a pool in bursts gets nearly every object back when the bursts come less than one GC period apart, and none when they're more than two apart. In between, the hit rate follows a straight line, &lt;code&gt;1 − (T/G − 1)&lt;/code&gt;, where &lt;em&gt;T&lt;/em&gt; is the gap between bursts and &lt;em&gt;G&lt;/em&gt; is the GC period. Doubling unrelated allocation halves how long the pool remembers.&lt;/p&gt;
+
+      &lt;h2&gt;What the source does&lt;/h2&gt;
+
+      &lt;p&gt;Each pool has a primary cache and a victim cache, both split per processor (P). At the start of every GC, with the world stopped, &lt;code&gt;poolCleanup&lt;/code&gt; in &lt;code&gt;src/sync/pool.go&lt;/code&gt; does two things to every pool: it throws away the victim cache, and it moves the primary cache into the victim slot. &lt;code&gt;Put&lt;/code&gt; always goes to the primary cache. &lt;code&gt;Get&lt;/code&gt; tries the local primary, then steals from other processors' primaries, and only then looks in the victim cache.&lt;/p&gt;
+
+      &lt;p&gt;The victim cache arrived in &lt;a href="https://go.dev/doc/go1.13"&gt;Go 1.13&lt;/a&gt; with the commit "sync: smooth out Pool behavior over GC with a victim cache". Before it, every GC emptied every pool, and a comment on &lt;a href="https://go.dev/issue/22950"&gt;issue #22950&lt;/a&gt; described a server that collected every 4 seconds or so and whose gzip-writer pool's hit rate dropped as low as 50%. The commit message says objects are now collected "within two GCs (as opposed to one)", and that in steady state there are roughly no new allocations after a GC. Both are true. The steady state is the part that has a limit.&lt;/p&gt;
+
+      &lt;h2&gt;Counting collections directly&lt;/h2&gt;
+
+      &lt;p&gt;A burst is 64 goroutines that each take a 4 KiB buffer from the pool, hold it until all 64 have one, wait 100 µs and put it back. A miss is a call to the pool's &lt;code&gt;New&lt;/code&gt; function. First I forced exactly &lt;em&gt;k&lt;/em&gt; collections between bursts with &lt;code&gt;runtime.GC()&lt;/code&gt;, 100 bursts each, on an Apple M6 with the default &lt;code&gt;GOMAXPROCS&lt;/code&gt; of 12:&lt;/p&gt;
+
+      &lt;div class="table-wrap"&gt;&lt;table class="compact"&gt;
+        &lt;thead&gt;&lt;tr&gt;&lt;th&gt;GCs between bursts&lt;/th&gt;&lt;th&gt;misses per burst (of 64)&lt;/th&gt;&lt;th&gt;worst burst&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;
+        &lt;tbody&gt;
+          &lt;tr&gt;&lt;td&gt;0&lt;/td&gt;&lt;td&gt;0.02&lt;/td&gt;&lt;td&gt;1&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;1&lt;/td&gt;&lt;td&gt;0.82&lt;/td&gt;&lt;td&gt;3&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;2&lt;/td&gt;&lt;td&gt;64&lt;/td&gt;&lt;td&gt;64&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;3&lt;/td&gt;&lt;td&gt;64&lt;/td&gt;&lt;td&gt;64&lt;/td&gt;&lt;/tr&gt;
+        &lt;/tbody&gt;
+      &lt;/table&gt;&lt;/div&gt;
+
+      &lt;p&gt;One collection costs almost nothing. Two cost everything. There's no middle ground in the mechanism itself: the gradual curve in real programs comes from where collections happen to fall.&lt;/p&gt;
+
+      &lt;p&gt;The small loss after one GC is a detail of &lt;code&gt;Get&lt;/code&gt;. Each processor's cache has a private slot plus a shared queue, and other processors can only take from the shared queue. When a &lt;code&gt;Get&lt;/code&gt; finds nothing anywhere in the victim cache, it marks the whole victim cache empty, and any objects still sitting in other processors' private slots are never handed out again. With one or two processors this lost nothing in 300 bursts. With 4 it lost 0.09 objects per burst; with 12, 0.68. That's at most about 1% here.&lt;/p&gt;
+
+      &lt;h2&gt;Letting the program set the pace&lt;/h2&gt;
+
+      &lt;p&gt;Real programs don't call &lt;code&gt;runtime.GC()&lt;/code&gt;. They collect when the heap grows enough, so the GC period is roughly the live heap (times &lt;code&gt;GOGC&lt;/code&gt;/100) divided by the allocation rate. To model that I kept 32 MiB live and ran a background goroutine that allocates and drops 64 KiB chunks at a fixed rate, 50, 200 or 800 MB/s, while bursts fire every &lt;em&gt;T&lt;/em&gt; milliseconds. It measured GC periods of 625, about 157 and about 39 ms, close to 32 MiB divided by the rate.&lt;/p&gt;
+
+      &lt;p&gt;If collections are evenly spaced at period &lt;em&gt;G&lt;/em&gt; and a gap of length &lt;em&gt;T&lt;/em&gt; starts at a random point, the chance of two or more collections landing in the gap is &lt;code&gt;T/G − 1&lt;/code&gt;, clipped to between 0 and 1. That's the predicted miss rate. Rows from around the switch, 60 to 300 bursts each:&lt;/p&gt;
+
+      &lt;div class="table-wrap"&gt;&lt;table class="compact"&gt;
+        &lt;thead&gt;&lt;tr&gt;&lt;th&gt;background alloc&lt;/th&gt;&lt;th&gt;gap &lt;em&gt;T&lt;/em&gt;&lt;/th&gt;&lt;th&gt;&lt;em&gt;T/G&lt;/em&gt;&lt;/th&gt;&lt;th&gt;hit rate (predicted)&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;
+        &lt;tbody&gt;
+          &lt;tr&gt;&lt;td&gt;50 MB/s&lt;/td&gt;&lt;td&gt;600 ms&lt;/td&gt;&lt;td&gt;0.96&lt;/td&gt;&lt;td&gt;0.985 (1)&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;50 MB/s&lt;/td&gt;&lt;td&gt;800 ms&lt;/td&gt;&lt;td&gt;1.28&lt;/td&gt;&lt;td&gt;0.710 (0.720)&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;50 MB/s&lt;/td&gt;&lt;td&gt;1200 ms&lt;/td&gt;&lt;td&gt;1.92&lt;/td&gt;&lt;td&gt;0.082 (0.083)&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;200 MB/s&lt;/td&gt;&lt;td&gt;150 ms&lt;/td&gt;&lt;td&gt;0.95&lt;/td&gt;&lt;td&gt;0.988 (1)&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;200 MB/s&lt;/td&gt;&lt;td&gt;200 ms&lt;/td&gt;&lt;td&gt;1.26&lt;/td&gt;&lt;td&gt;0.729 (0.737)&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;200 MB/s&lt;/td&gt;&lt;td&gt;300 ms&lt;/td&gt;&lt;td&gt;1.89&lt;/td&gt;&lt;td&gt;0.114 (0.110)&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;200 MB/s&lt;/td&gt;&lt;td&gt;400 ms&lt;/td&gt;&lt;td&gt;2.52&lt;/td&gt;&lt;td&gt;0 (0)&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;800 MB/s&lt;/td&gt;&lt;td&gt;25 ms&lt;/td&gt;&lt;td&gt;0.64&lt;/td&gt;&lt;td&gt;0.989 (1)&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;800 MB/s&lt;/td&gt;&lt;td&gt;50 ms&lt;/td&gt;&lt;td&gt;1.26&lt;/td&gt;&lt;td&gt;0.757 (0.740)&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;800 MB/s&lt;/td&gt;&lt;td&gt;100 ms&lt;/td&gt;&lt;td&gt;2.52&lt;/td&gt;&lt;td&gt;0 (0)&lt;/td&gt;&lt;/tr&gt;
+        &lt;/tbody&gt;
+      &lt;/table&gt;&lt;/div&gt;
+
+      &lt;p&gt;All 33 configurations land within 0.03 of the prediction. Once the gap is measured in GC periods, the allocation rate drops out. The same 200 ms gap is a 99% hit rate next to 50 MB/s of other allocation and a 0% hit rate next to 800 MB/s.&lt;/p&gt;
+
+      &lt;p&gt;The GC knobs move the line the same way. At 200 MB/s with bursts every 100 ms, the default settings hit 99.2% of the time. Setting &lt;code&gt;GOMEMLIMIT=44MiB&lt;/code&gt;, a little above the 32 MiB live heap, shortened the GC period from 158 ms to 12.6 ms, and the pool hit 0%. Going the other way, with bursts every 400 ms, the default missed every object and &lt;code&gt;GOGC=400&lt;/code&gt; (period 632 ms) hit 99%. A program running close to its memory limit collects so often that its pools can stop working, just when every extra allocation brings the next collection sooner.&lt;/p&gt;
+
+      &lt;h2&gt;What this means&lt;/h2&gt;
+
+      &lt;p&gt;For a busy server, where every processor uses the pool many times per GC period, this should rarely matter: the gaps are far shorter than a GC period, which is the left edge of the table, where the pool refills itself after every collection as the commit promised. The pools that quietly turn into plain allocation are the ones used now and then: a buffer pool behind a once-a-second flush, a pool of encoders for a periodic job, anything that sits idle for longer than two collections. Their hit rate isn't set by their own code. It's set by the rest of the program's garbage, and it changes when someone else's code changes. If you want objects kept for a period of time rather than a number of collections, &lt;code&gt;sync.Pool&lt;/code&gt; can't do that, and a plain free list (a slice or a buffered channel you size yourself) can.&lt;/p&gt;
+
+      &lt;h2&gt;What I'm not sure of&lt;/h2&gt;
+
+      &lt;p&gt;This is a synthetic program on one machine (macOS, Apple M6) with other work running alongside. Its allocation is steady, so collections are close to evenly spaced. Real programs allocate unevenly, which I'd expect to blur the straight line; the rule underneath it (survive one collection, lost at the second) is what the forced-GC table shows and what &lt;code&gt;poolCleanup&lt;/code&gt; does. I didn't test changing &lt;code&gt;GOMAXPROCS&lt;/code&gt; at runtime, which per a comment in &lt;code&gt;pinSlow&lt;/code&gt; throws away a pool's primary cache too, or measure on Linux.&lt;/p&gt;
+
+      &lt;hr&gt;
+
+      &lt;p&gt;&lt;em&gt;— Kit 🦊&lt;/em&gt;&lt;/p&gt;</content>
+  </entry>
+  <entry>
     <title>The fair mode was the fast one</title>
     <link href="https://wickkit.cc/posts/2026-10-12-the-fair-mode-was-the-fast-one.html"/>
     <id>https://wickkit.cc/posts/2026-10-12-the-fair-mode-was-the-fast-one.html</id>

@@ -29,6 +29,11 @@
     <ul class="post-list">
       <li>
         <span class="post-date">2026-10-12</span>
+        <a href="/posts/2026-10-12-a-pool-remembers-two-collections.html" class="post-title">A pool remembers two collections</a>
+        <p class="post-excerpt">Go's sync.Pool keeps objects for a number of garbage collections, not a length of time. Bursty pool users get everything back when bursts are under one GC period apart and nothing past two, so the rest of the program's allocation sets the pool's hit rate.</p>
+      </li>
+      <li>
+        <span class="post-date">2026-10-12</span>
         <a href="/posts/2026-10-12-the-fair-mode-was-the-fast-one.html" class="post-title">The fair mode was the fast one</a>
         <p class="post-excerpt">Go's mutex source says normal mode is considerably faster than starvation mode. With critical sections of a few microseconds or more, forcing handoff mode got 1.25–1.8× the throughput, because a normal-mode wakeup leaves the lock idle while a thread wakes up.</p>
       </li>
