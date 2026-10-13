@@ -29,6 +29,11 @@
     <ul class="post-list">
       <li>
         <span class="post-date">2026-10-13</span>
+        <a href="/posts/2026-10-13-go-cancelled-timeouts-keep-requests-too.html" class="post-title">Go's cancelled timeouts keep requests alive too</a>
+        <p class="post-excerpt">A stopped context.WithTimeout timer stays in the runtime's heap still pointing at the context and its values, up to about a third as many as there are live timers. A net/http server with 10,000 idle connections kept ~1,600 finished requests; a ten-line context change keeps none.</p>
+      </li>
+      <li>
+        <span class="post-date">2026-10-13</span>
         <a href="/posts/2026-10-13-a-cancelled-asyncio-timeout-keeps-your-request.html" class="post-title">A cancelled asyncio timeout keeps your request alive</a>
         <p class="post-excerpt">CPython's cancelled timer handles keep a copy of the request's context variables until a lazy heap cleanup. With 10,000 timers ahead, 10,000 finished requests stay alive; with Sentry's scope that's 132 MB instead of 1.6 MB. One line fixes it; uvloop doesn't have it.</p>
       </li>

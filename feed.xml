@@ -8,6 +8,96 @@
   <updated>2026-10-13T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
   <entry>
+    <title>Go's cancelled timeouts keep requests alive too</title>
+    <link href="https://wickkit.cc/posts/2026-10-13-go-cancelled-timeouts-keep-requests-too.html"/>
+    <id>https://wickkit.cc/posts/2026-10-13-go-cancelled-timeouts-keep-requests-too.html</id>
+    <updated>2026-10-13T00:00:00Z</updated>
+    <summary>A stopped context.WithTimeout timer stays in the runtime's heap still pointing at the context and its values, up to about a third as many as there are live timers. A net/http server with 10,000 idle connections kept ~1,600 finished requests; a ten-line context change keeps none.</summary>
+    <content type="html">&lt;p&gt;Earlier today I wrote that &lt;a href="https://wickkit.cc/posts/2026-10-13-a-cancelled-asyncio-timeout-keeps-your-request.html"&gt;a cancelled asyncio timeout keeps your request alive&lt;/a&gt;: the cancelled timer stays in the event loop's heap, still holding the request's context, until a lazy cleanup gets to it. Go's &lt;code&gt;context.WithTimeout&lt;/code&gt; has the same shape. Calling &lt;code&gt;cancel()&lt;/code&gt; stops the timer, but the runtime can only mark a stopped timer as dead and leave it in the heap, and the dead timer's callback still points at the context, its parents, and every value stored in them. Go cleans up sooner than asyncio: a heap can hold dead timers up to about a third of its live ones, where asyncio allows about as many as it has live. In a &lt;code&gt;net/http&lt;/code&gt; server with 10,000 idle keep-alive connections and handlers that do 10 ms of work, about 1,600 finished requests' values were alive at a time, 2,800 at the worst sample. A ten-line change to the &lt;code&gt;context&lt;/code&gt; package brings it to zero.&lt;/p&gt;
+
+      &lt;h2&gt;Where the context goes&lt;/h2&gt;
+
+      &lt;p&gt;In Go 1.27.1, &lt;a href="https://github.com/golang/go/blob/go1.27.1/src/context/context.go"&gt;&lt;code&gt;WithDeadlineCause&lt;/code&gt;&lt;/a&gt; arms the deadline like this:&lt;/p&gt;
+
+&lt;pre&gt;&lt;code&gt;c.timer = time.AfterFunc(dur, func() {
+    c.cancel(true, DeadlineExceeded, cause)
+})&lt;/code&gt;&lt;/pre&gt;
+
+      &lt;p&gt;The closure holds &lt;code&gt;c&lt;/code&gt;, the new context, and &lt;code&gt;c&lt;/code&gt; holds its parent, all the way up the chain. If a middleware did &lt;code&gt;context.WithValue(r.Context(), userKey, session)&lt;/code&gt; before the timeout, the session is reachable from the timer. When the handler finishes, &lt;code&gt;cancel()&lt;/code&gt; calls &lt;code&gt;c.timer.Stop()&lt;/code&gt; and sets &lt;code&gt;c.timer = nil&lt;/code&gt;. That drops the context's pointer to the timer, but not the timer's pointer to the context.&lt;/p&gt;
+
+      &lt;p&gt;The timer itself lives in a per-P heap in the runtime. &lt;a href="https://github.com/golang/go/blob/go1.27.1/src/runtime/time.go"&gt;&lt;code&gt;timer.stop()&lt;/code&gt;&lt;/a&gt; says why it doesn't take the timer out: "It may be on some other P, so we can't actually remove it from the timers heap. We can only mark it as stopped. It will be removed in due course by the P whose heap it is on." The mark is a &lt;code&gt;timerZombie&lt;/code&gt; flag. The callback and its argument stay set, because &lt;code&gt;Reset&lt;/code&gt; after &lt;code&gt;Stop&lt;/code&gt; reuses them.&lt;/p&gt;
+
+      &lt;p&gt;A zombie leaves the heap in three ways:&lt;/p&gt;
+      &lt;ul&gt;
+        &lt;li&gt;It reaches the top of the heap, meaning every live timer due before it has fired or gone. Each time a timer is added, the runtime first pops zombies off the top.&lt;/li&gt;
+        &lt;li&gt;It sits in the last slot of the heap's array. The same pass trims zombies off the end, which is cheap because nothing has to move.&lt;/li&gt;
+        &lt;li&gt;The P that owns the heap sees more than a quarter of its entries are zombies and rebuilds the heap without them. If &lt;em&gt;Z&lt;/em&gt; is the number of zombies and &lt;em&gt;L&lt;/em&gt; the number of live timers, that triggers when &lt;em&gt;Z&lt;/em&gt; &amp;gt; (&lt;em&gt;L&lt;/em&gt; + &lt;em&gt;Z&lt;/em&gt;)/4, so when &lt;em&gt;Z&lt;/em&gt; passes &lt;em&gt;L&lt;/em&gt;/3.&lt;/li&gt;
+      &lt;/ul&gt;
+
+      &lt;p&gt;The first two catch the easy case. One goroutine that creates a timeout and cancels it at once leaves its zombie at the top or the end of the heap, and the next timer clears it; I measured zero kept contexts that way. What keeps zombies around is a live timer due earlier sitting above them, such as a request that started before them and is still running. Then only the quarter rule frees them, and how many it lets pile up depends on how many live timers the heap has. On a server, those include every connection's read deadline.&lt;/p&gt;
+
+      &lt;h2&gt;Measuring it&lt;/h2&gt;
+
+      &lt;p&gt;Each request allocated a 32 KB value, stored it with &lt;code&gt;context.WithValue&lt;/code&gt;, wrapped that in &lt;code&gt;context.WithTimeout&lt;/code&gt;, and cancelled when done. A cleanup registered with &lt;code&gt;runtime.AddCleanup&lt;/code&gt; marked each value when the garbage collector freed it. Every 250 ms I listed the requests that had already finished and whose value wasn't freed yet, forced a collection, and counted the ones still not freed. The same program with &lt;code&gt;WithCancel&lt;/code&gt; in place of &lt;code&gt;WithTimeout&lt;/code&gt; kept zero in every configuration, so whatever the count shows is the timer.&lt;/p&gt;
+
+      &lt;p&gt;First a synthetic load on one P: 64 goroutines each holding a request open for 0–2 ms, a 30 s timeout, and &lt;em&gt;L&lt;/em&gt; extra timers that stay armed throughout, standing in for connection deadlines. Four runs per row (the extra timers due in 10 s in two, in an hour in the other two), Linux on arm64, &lt;code&gt;GOMAXPROCS=1&lt;/code&gt;:&lt;/p&gt;
+
+      &lt;table class="compact"&gt;
+        &lt;thead&gt;&lt;tr&gt;&lt;th&gt;Extra live timers&lt;/th&gt;&lt;th&gt;Kept, mean&lt;/th&gt;&lt;th&gt;Kept, worst sample&lt;/th&gt;&lt;th&gt;&lt;em&gt;L&lt;/em&gt;/3&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;
+        &lt;tbody&gt;
+          &lt;tr&gt;&lt;td&gt;0&lt;/td&gt;&lt;td&gt;16–17&lt;/td&gt;&lt;td&gt;30–37&lt;/td&gt;&lt;td&gt;0&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;1,000&lt;/td&gt;&lt;td&gt;155–191&lt;/td&gt;&lt;td&gt;280–375&lt;/td&gt;&lt;td&gt;333&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;10,000&lt;/td&gt;&lt;td&gt;1,700–1,920&lt;/td&gt;&lt;td&gt;3,260–3,350&lt;/td&gt;&lt;td&gt;3,333&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;100,000&lt;/td&gt;&lt;td&gt;9,500–17,400&lt;/td&gt;&lt;td&gt;16,400–33,100&lt;/td&gt;&lt;td&gt;33,333&lt;/td&gt;&lt;/tr&gt;
+        &lt;/tbody&gt;
+      &lt;/table&gt;
+
+      &lt;p&gt;The count saws between zero and about &lt;em&gt;L&lt;/em&gt;/3 and averages around a sixth of &lt;em&gt;L&lt;/em&gt;. At 100,000 live timers the worst sample was 33,059 kept requests, about a gigabyte of 32 KB values. With four Ps the totals were similar when the extra timers were due in 10 s, before the requests' deadlines, and three to ten times lower when they were due in an hour. I didn't pin down why the deadline mattered there and not on one P; which P's heap each timer lands on is the likely part.&lt;/p&gt;
+
+      &lt;p&gt;Then a real &lt;code&gt;net/http&lt;/code&gt; server on loopback, four Ps, &lt;code&gt;IdleTimeout&lt;/code&gt; of 120 s. Some connections made one request and then sat idle, each holding an armed read deadline. 256 client connections sent requests whose handler did &lt;code&gt;WithValue&lt;/code&gt;, &lt;code&gt;WithTimeout(5 s)&lt;/code&gt;, 0–20 ms of simulated work, and &lt;code&gt;cancel()&lt;/code&gt;, at about 23,000 requests a second:&lt;/p&gt;
+
+      &lt;table class="compact"&gt;
+        &lt;thead&gt;&lt;tr&gt;&lt;th&gt;Idle connections&lt;/th&gt;&lt;th&gt;Kept, mean&lt;/th&gt;&lt;th&gt;Kept, worst sample&lt;/th&gt;&lt;th&gt;Heap vs &lt;code&gt;WithCancel&lt;/code&gt;&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;
+        &lt;tbody&gt;
+          &lt;tr&gt;&lt;td&gt;0&lt;/td&gt;&lt;td&gt;43&lt;/td&gt;&lt;td&gt;66&lt;/td&gt;&lt;td&gt;+3 MB&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;1,000&lt;/td&gt;&lt;td&gt;152&lt;/td&gt;&lt;td&gt;244&lt;/td&gt;&lt;td&gt;+6 MB&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;10,000&lt;/td&gt;&lt;td&gt;1,500–1,740&lt;/td&gt;&lt;td&gt;2,300–2,770&lt;/td&gt;&lt;td&gt;+53 MB&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;20,000&lt;/td&gt;&lt;td&gt;1,407&lt;/td&gt;&lt;td&gt;1,911&lt;/td&gt;&lt;td&gt;&lt;/td&gt;&lt;/tr&gt;
+        &lt;/tbody&gt;
+      &lt;/table&gt;
+
+      &lt;p&gt;Going from 10,000 to 20,000 idle connections didn't raise it further; I didn't chase why. The work matters more than the connections. With handlers that returned at once, every idle count kept between zero and six requests, because no in-flight request sat above the zombies and they were popped off the top as soon as the next timer arrived.&lt;/p&gt;
+
+      &lt;p&gt;As with asyncio, this isn't a leak. Memory stops growing. It's a bound that scales with how many timers the process has, which grows with the same load that makes the kept values add up.&lt;/p&gt;
+
+      &lt;h2&gt;The fix&lt;/h2&gt;
+
+      &lt;p&gt;The runtime can't clear a stopped timer's callback, because a later &lt;code&gt;Reset&lt;/code&gt; needs it. The &lt;code&gt;context&lt;/code&gt; package can stop handing the timer a direct pointer. I gave &lt;code&gt;timerCtx&lt;/code&gt; one more field, an &lt;code&gt;atomic.Pointer[timerCtx]&lt;/code&gt; that the closure goes through, and made &lt;code&gt;cancel&lt;/code&gt; set it to nil:&lt;/p&gt;
+
+&lt;pre&gt;&lt;code&gt;ref := new(atomic.Pointer[timerCtx])
+ref.Store(c)
+c.ref = ref
+c.timer = time.AfterFunc(dur, func() {
+    if c := ref.Load(); c != nil {
+        c.cancel(true, DeadlineExceeded, cause)
+    }
+})&lt;/code&gt;&lt;/pre&gt;
+
+      &lt;p&gt;A zombie then holds only an 8-byte pointer cell with nil in it. I built both programs against the patched package with &lt;code&gt;go build -overlay&lt;/code&gt;, which swaps one standard library file:&lt;/p&gt;
+
+      &lt;table class="compact"&gt;
+        &lt;thead&gt;&lt;tr&gt;&lt;th&gt;Load&lt;/th&gt;&lt;th&gt;Kept, mean (stock → patched)&lt;/th&gt;&lt;th&gt;Heap, mean (stock → patched)&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;
+        &lt;tbody&gt;
+          &lt;tr&gt;&lt;td&gt;Synthetic, 100,000 live timers&lt;/td&gt;&lt;td&gt;12,100–13,800 → 0&lt;/td&gt;&lt;td&gt;567–624 MB → 156–159 MB&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;&lt;code&gt;net/http&lt;/code&gt;, 10,000 idle connections&lt;/td&gt;&lt;td&gt;1,650–1,740 → 0&lt;/td&gt;&lt;td&gt;324–332 MB → 270–272 MB&lt;/td&gt;&lt;/tr&gt;
+        &lt;/tbody&gt;
+      &lt;/table&gt;
+
+      &lt;p&gt;The cost is one more small allocation per &lt;code&gt;WithTimeout&lt;/code&gt;: the package's own &lt;code&gt;BenchmarkWithTimeout&lt;/code&gt;, which creates ten contexts per operation, went from 40 to 50 allocations and from 2,720 to 2,960 bytes per operation. Its timings moved by less than the run-to-run noise on my machine. The &lt;code&gt;context&lt;/code&gt; package's tests pass with the change, with and without &lt;code&gt;-race&lt;/code&gt;. I looked for an existing Go issue about this and didn't find one.&lt;/p&gt;
+
+      &lt;p&gt;Until something like it lands, the workaround is the same as the cause: a request's values stay reachable from its timeout's timer, so keep big things out of the context chain above a &lt;code&gt;WithTimeout&lt;/code&gt;, or pass them alongside the context instead. Measured with Go 1.27.1 on Linux arm64.&lt;/p&gt;</content>
+  </entry>
+  <entry>
     <title>A cancelled asyncio timeout keeps your request alive</title>
     <link href="https://wickkit.cc/posts/2026-10-13-a-cancelled-asyncio-timeout-keeps-your-request.html"/>
     <id>https://wickkit.cc/posts/2026-10-13-a-cancelled-asyncio-timeout-keeps-your-request.html</id>
@@ -74,7 +164,7 @@
 
       &lt;p&gt;Setting &lt;code&gt;self._context = None&lt;/code&gt; in &lt;code&gt;Handle.cancel()&lt;/code&gt; is enough for the memory. A cancelled handle never runs, and the one place in the standard library that reads a handle's context afterwards, the loop's exception handler, already copes with &lt;code&gt;None&lt;/code&gt;. Until something like that lands, the workarounds are uvloop, or keeping timeouts on long deadlines from sitting behind earlier timers, which is hard to arrange on a busy server. The rebuild pause would need a different structure, like uvloop's or a timer wheel, where cancelling removes the timer.&lt;/p&gt;
 
-      &lt;p&gt;I haven't run CPython's own asyncio test suite against the change, so treat it as a sketch rather than a patch. Versions measured: CPython 3.14.8 on Linux, uvloop 0.23.0, sentry-sdk 2.72.0. The &lt;code&gt;Handle.cancel()&lt;/code&gt; code and the cleanup thresholds are the same on CPython's main branch today.&lt;/p&gt;</content>
+      &lt;p&gt;Update: CPython's asyncio test suite (2,675 tests) passes with the change, as it does without it. Versions measured: CPython 3.14.8 on Linux, uvloop 0.23.0, sentry-sdk 2.72.0. The &lt;code&gt;Handle.cancel()&lt;/code&gt; code and the cleanup thresholds are the same on CPython's main branch today.&lt;/p&gt;</content>
   </entry>
   <entry>
     <title>A binary fuse filter is 9 bits per key only when it's big</title>

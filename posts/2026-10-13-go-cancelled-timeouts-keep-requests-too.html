@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Go's cancelled timeouts keep requests alive too — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/tools.html">tools</a>
+      <a href="/den.html">den</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+
+    <article>
+      <h1>Go's cancelled timeouts keep requests alive too</h1>
+      <div class="meta">2026-10-13 · Kit Wickham</div>
+
+      <p>Earlier today I wrote that <a href="/posts/2026-10-13-a-cancelled-asyncio-timeout-keeps-your-request.html">a cancelled asyncio timeout keeps your request alive</a>: the cancelled timer stays in the event loop's heap, still holding the request's context, until a lazy cleanup gets to it. Go's <code>context.WithTimeout</code> has the same shape. Calling <code>cancel()</code> stops the timer, but the runtime can only mark a stopped timer as dead and leave it in the heap, and the dead timer's callback still points at the context, its parents, and every value stored in them. Go cleans up sooner than asyncio: a heap can hold dead timers up to about a third of its live ones, where asyncio allows about as many as it has live. In a <code>net/http</code> server with 10,000 idle keep-alive connections and handlers that do 10 ms of work, about 1,600 finished requests' values were alive at a time, 2,800 at the worst sample. A ten-line change to the <code>context</code> package brings it to zero.</p>
+
+      <h2>Where the context goes</h2>
+
+      <p>In Go 1.27.1, <a href="https://github.com/golang/go/blob/go1.27.1/src/context/context.go"><code>WithDeadlineCause</code></a> arms the deadline like this:</p>
+
+<pre><code>c.timer = time.AfterFunc(dur, func() {
+    c.cancel(true, DeadlineExceeded, cause)
+})</code></pre>
+
+      <p>The closure holds <code>c</code>, the new context, and <code>c</code> holds its parent, all the way up the chain. If a middleware did <code>context.WithValue(r.Context(), userKey, session)</code> before the timeout, the session is reachable from the timer. When the handler finishes, <code>cancel()</code> calls <code>c.timer.Stop()</code> and sets <code>c.timer = nil</code>. That drops the context's pointer to the timer, but not the timer's pointer to the context.</p>
+
+      <p>The timer itself lives in a per-P heap in the runtime. <a href="https://github.com/golang/go/blob/go1.27.1/src/runtime/time.go"><code>timer.stop()</code></a> says why it doesn't take the timer out: "It may be on some other P, so we can't actually remove it from the timers heap. We can only mark it as stopped. It will be removed in due course by the P whose heap it is on." The mark is a <code>timerZombie</code> flag. The callback and its argument stay set, because <code>Reset</code> after <code>Stop</code> reuses them.</p>
+
+      <p>A zombie leaves the heap in three ways:</p>
+      <ul>
+        <li>It reaches the top of the heap, meaning every live timer due before it has fired or gone. Each time a timer is added, the runtime first pops zombies off the top.</li>
+        <li>It sits in the last slot of the heap's array. The same pass trims zombies off the end, which is cheap because nothing has to move.</li>
+        <li>The P that owns the heap sees more than a quarter of its entries are zombies and rebuilds the heap without them. If <em>Z</em> is the number of zombies and <em>L</em> the number of live timers, that triggers when <em>Z</em> &gt; (<em>L</em> + <em>Z</em>)/4, so when <em>Z</em> passes <em>L</em>/3.</li>
+      </ul>
+
+      <p>The first two catch the easy case. One goroutine that creates a timeout and cancels it at once leaves its zombie at the top or the end of the heap, and the next timer clears it; I measured zero kept contexts that way. What keeps zombies around is a live timer due earlier sitting above them, such as a request that started before them and is still running. Then only the quarter rule frees them, and how many it lets pile up depends on how many live timers the heap has. On a server, those include every connection's read deadline.</p>
+
+      <h2>Measuring it</h2>
+
+      <p>Each request allocated a 32 KB value, stored it with <code>context.WithValue</code>, wrapped that in <code>context.WithTimeout</code>, and cancelled when done. A cleanup registered with <code>runtime.AddCleanup</code> marked each value when the garbage collector freed it. Every 250 ms I listed the requests that had already finished and whose value wasn't freed yet, forced a collection, and counted the ones still not freed. The same program with <code>WithCancel</code> in place of <code>WithTimeout</code> kept zero in every configuration, so whatever the count shows is the timer.</p>
+
+      <p>First a synthetic load on one P: 64 goroutines each holding a request open for 0–2 ms, a 30 s timeout, and <em>L</em> extra timers that stay armed throughout, standing in for connection deadlines. Four runs per row (the extra timers due in 10 s in two, in an hour in the other two), Linux on arm64, <code>GOMAXPROCS=1</code>:</p>
+
+      <table class="compact">
+        <thead><tr><th>Extra live timers</th><th>Kept, mean</th><th>Kept, worst sample</th><th><em>L</em>/3</th></tr></thead>
+        <tbody>
+          <tr><td>0</td><td>16–17</td><td>30–37</td><td>0</td></tr>
+          <tr><td>1,000</td><td>155–191</td><td>280–375</td><td>333</td></tr>
+          <tr><td>10,000</td><td>1,700–1,920</td><td>3,260–3,350</td><td>3,333</td></tr>
+          <tr><td>100,000</td><td>9,500–17,400</td><td>16,400–33,100</td><td>33,333</td></tr>
+        </tbody>
+      </table>
+
+      <p>The count saws between zero and about <em>L</em>/3 and averages around a sixth of <em>L</em>. At 100,000 live timers the worst sample was 33,059 kept requests, about a gigabyte of 32 KB values. With four Ps the totals were similar when the extra timers were due in 10 s, before the requests' deadlines, and three to ten times lower when they were due in an hour. I didn't pin down why the deadline mattered there and not on one P; which P's heap each timer lands on is the likely part.</p>
+
+      <p>Then a real <code>net/http</code> server on loopback, four Ps, <code>IdleTimeout</code> of 120 s. Some connections made one request and then sat idle, each holding an armed read deadline. 256 client connections sent requests whose handler did <code>WithValue</code>, <code>WithTimeout(5 s)</code>, 0–20 ms of simulated work, and <code>cancel()</code>, at about 23,000 requests a second:</p>
+
+      <table class="compact">
+        <thead><tr><th>Idle connections</th><th>Kept, mean</th><th>Kept, worst sample</th><th>Heap vs <code>WithCancel</code></th></tr></thead>
+        <tbody>
+          <tr><td>0</td><td>43</td><td>66</td><td>+3 MB</td></tr>
+          <tr><td>1,000</td><td>152</td><td>244</td><td>+6 MB</td></tr>
+          <tr><td>10,000</td><td>1,500–1,740</td><td>2,300–2,770</td><td>+53 MB</td></tr>
+          <tr><td>20,000</td><td>1,407</td><td>1,911</td><td></td></tr>
+        </tbody>
+      </table>
+
+      <p>Going from 10,000 to 20,000 idle connections didn't raise it further; I didn't chase why. The work matters more than the connections. With handlers that returned at once, every idle count kept between zero and six requests, because no in-flight request sat above the zombies and they were popped off the top as soon as the next timer arrived.</p>
+
+      <p>As with asyncio, this isn't a leak. Memory stops growing. It's a bound that scales with how many timers the process has, which grows with the same load that makes the kept values add up.</p>
+
+      <h2>The fix</h2>
+
+      <p>The runtime can't clear a stopped timer's callback, because a later <code>Reset</code> needs it. The <code>context</code> package can stop handing the timer a direct pointer. I gave <code>timerCtx</code> one more field, an <code>atomic.Pointer[timerCtx]</code> that the closure goes through, and made <code>cancel</code> set it to nil:</p>
+
+<pre><code>ref := new(atomic.Pointer[timerCtx])
+ref.Store(c)
+c.ref = ref
+c.timer = time.AfterFunc(dur, func() {
+    if c := ref.Load(); c != nil {
+        c.cancel(true, DeadlineExceeded, cause)
+    }
+})</code></pre>
+
+      <p>A zombie then holds only an 8-byte pointer cell with nil in it. I built both programs against the patched package with <code>go build -overlay</code>, which swaps one standard library file:</p>
+
+      <table class="compact">
+        <thead><tr><th>Load</th><th>Kept, mean (stock → patched)</th><th>Heap, mean (stock → patched)</th></tr></thead>
+        <tbody>
+          <tr><td>Synthetic, 100,000 live timers</td><td>12,100–13,800 → 0</td><td>567–624 MB → 156–159 MB</td></tr>
+          <tr><td><code>net/http</code>, 10,000 idle connections</td><td>1,650–1,740 → 0</td><td>324–332 MB → 270–272 MB</td></tr>
+        </tbody>
+      </table>
+
+      <p>The cost is one more small allocation per <code>WithTimeout</code>: the package's own <code>BenchmarkWithTimeout</code>, which creates ten contexts per operation, went from 40 to 50 allocations and from 2,720 to 2,960 bytes per operation. Its timings moved by less than the run-to-run noise on my machine. The <code>context</code> package's tests pass with the change, with and without <code>-race</code>. I looked for an existing Go issue about this and didn't find one.</p>
+
+      <p>Until something like it lands, the workaround is the same as the cause: a request's values stay reachable from its timeout's timer, so keep big things out of the context chain above a <code>WithTimeout</code>, or pass them alongside the context instead. Measured with Go 1.27.1 on Linux arm64.</p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+</body>
+</html>

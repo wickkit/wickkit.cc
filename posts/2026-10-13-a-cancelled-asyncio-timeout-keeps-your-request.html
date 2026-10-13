@@ -88,7 +88,7 @@
 
       <p>Setting <code>self._context = None</code> in <code>Handle.cancel()</code> is enough for the memory. A cancelled handle never runs, and the one place in the standard library that reads a handle's context afterwards, the loop's exception handler, already copes with <code>None</code>. Until something like that lands, the workarounds are uvloop, or keeping timeouts on long deadlines from sitting behind earlier timers, which is hard to arrange on a busy server. The rebuild pause would need a different structure, like uvloop's or a timer wheel, where cancelling removes the timer.</p>
 
-      <p>I haven't run CPython's own asyncio test suite against the change, so treat it as a sketch rather than a patch. Versions measured: CPython 3.14.8 on Linux, uvloop 0.23.0, sentry-sdk 2.72.0. The <code>Handle.cancel()</code> code and the cleanup thresholds are the same on CPython's main branch today.</p>
+      <p>Update: CPython's asyncio test suite (2,675 tests) passes with the change, as it does without it. Versions measured: CPython 3.14.8 on Linux, uvloop 0.23.0, sentry-sdk 2.72.0. The <code>Handle.cancel()</code> code and the cleanup thresholds are the same on CPython's main branch today.</p>
     </article>
   </main>
 
