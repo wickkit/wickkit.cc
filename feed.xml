@@ -8,6 +8,44 @@
   <updated>2026-10-14T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
   <entry>
+    <title>One core of echo: io_uring, epoll and threads</title>
+    <link href="https://wickkit.cc/posts/2026-10-14-one-core-echo-uring-epoll-threads.html"/>
+    <id>https://wickkit.cc/posts/2026-10-14-one-core-echo-uring-epoll-threads.html</id>
+    <updated>2026-10-14T00:00:00Z</updated>
+    <summary>The same TCP echo server three ways, pinned to one CPU: with 64-byte messages and 256 connections io_uring served 876k round trips a second, epoll 629k, threads 397k. With 4 connections io_uring was the slowest, and with 4 KB messages its lead shrank to 9 to 14%.</summary>
+    <content type="html">&lt;p&gt;I wrote the same TCP echo server three ways in Rust and pinned each to a single CPU in a Linux 6.18 VM: one blocking thread per connection, one &lt;code&gt;epoll&lt;/code&gt; loop, and one &lt;code&gt;io_uring&lt;/code&gt; ring doing plain receive and send. With 64-byte messages and 256 connections, &lt;code&gt;io_uring&lt;/code&gt; served about 876,000 round trips a second, &lt;code&gt;epoll&lt;/code&gt; 629,000 and threads 397,000. That is the best case for &lt;code&gt;io_uring&lt;/code&gt;. With 4 connections it was the slowest of the three, and with 4 KB messages its lead over &lt;code&gt;epoll&lt;/code&gt; shrank to about 9 to 14%.&lt;/p&gt;
+
+      &lt;h2&gt;The setup&lt;/h2&gt;
+
+      &lt;p&gt;Every client connection sends a message, waits for it to come back, and sends it again, so each connection always has exactly one message in flight and the offered load scales with the connection count. The server reads a whole message and writes it back. The &lt;code&gt;io_uring&lt;/code&gt; version keeps one receive or one send outstanding per connection and submits whatever completed in a batch with one system call per loop; connections are accepted with a multishot accept. The &lt;code&gt;epoll&lt;/code&gt; version does one &lt;code&gt;read&lt;/code&gt; and one &lt;code&gt;write&lt;/code&gt; per event. Both use &lt;code&gt;TCP_NODELAY&lt;/code&gt;. The client is a separate process, 4 threads each running an &lt;code&gt;epoll&lt;/code&gt; loop, pinned to 4 other CPUs of the same 8-CPU VM, over loopback. The server process is pinned to one CPU, and for &lt;code&gt;epoll&lt;/code&gt; and &lt;code&gt;io_uring&lt;/code&gt; it was saturated: it burned about 4 CPU-seconds in each 4-second run. Each cell is nine runs of 3 seconds (plus 1 s of warm-up in the rate), in alternating order of the three servers.&lt;/p&gt;
+
+      &lt;h2&gt;Round trips per second, median of nine (thousands; range in brackets)&lt;/h2&gt;
+
+      &lt;table&gt;
+        &lt;thead&gt;&lt;tr&gt;&lt;th&gt;Message&lt;/th&gt;&lt;th&gt;Connections&lt;/th&gt;&lt;th&gt;Threads&lt;/th&gt;&lt;th&gt;epoll&lt;/th&gt;&lt;th&gt;io_uring&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;
+        &lt;tbody&gt;
+          &lt;tr&gt;&lt;td&gt;64 B&lt;/td&gt;&lt;td&gt;4&lt;/td&gt;&lt;td&gt;176 [175–178]&lt;/td&gt;&lt;td&gt;183 [178–185]&lt;/td&gt;&lt;td&gt;166 [164–169]&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;64 B&lt;/td&gt;&lt;td&gt;32&lt;/td&gt;&lt;td&gt;396 [394–398]&lt;/td&gt;&lt;td&gt;612 [608–620]&lt;/td&gt;&lt;td&gt;652 [649–655]&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;64 B&lt;/td&gt;&lt;td&gt;256&lt;/td&gt;&lt;td&gt;397 [389–399]&lt;/td&gt;&lt;td&gt;629 [582–676]&lt;/td&gt;&lt;td&gt;876 [567–902]&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;64 B&lt;/td&gt;&lt;td&gt;1024&lt;/td&gt;&lt;td&gt;383 [365–386]&lt;/td&gt;&lt;td&gt;661 [607–723]&lt;/td&gt;&lt;td&gt;880 [763–917]&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;4 KB&lt;/td&gt;&lt;td&gt;4&lt;/td&gt;&lt;td&gt;171 [168–189]&lt;/td&gt;&lt;td&gt;176 [173–189]&lt;/td&gt;&lt;td&gt;155 [154–156]&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;4 KB&lt;/td&gt;&lt;td&gt;32&lt;/td&gt;&lt;td&gt;363 [361–364]&lt;/td&gt;&lt;td&gt;520 [511–524]&lt;/td&gt;&lt;td&gt;567 [561–569]&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;4 KB&lt;/td&gt;&lt;td&gt;256&lt;/td&gt;&lt;td&gt;360 [359–365]&lt;/td&gt;&lt;td&gt;554 [466–572]&lt;/td&gt;&lt;td&gt;633 [508–765]&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;4 KB&lt;/td&gt;&lt;td&gt;1024&lt;/td&gt;&lt;td&gt;319 [309–322]&lt;/td&gt;&lt;td&gt;562 [505–655]&lt;/td&gt;&lt;td&gt;625 [533–727]&lt;/td&gt;&lt;/tr&gt;
+        &lt;/tbody&gt;
+      &lt;/table&gt;
+
+      &lt;p&gt;Three things stand out. First, threads and &lt;code&gt;epoll&lt;/code&gt; are almost the same at 4 connections (176 against 183 thousand) and then threads stop growing at about 400 thousand while &lt;code&gt;epoll&lt;/code&gt; keeps climbing: my guess, which I didn't measure, is that a thread per connection pays a context switch for each message while the event loop handles several ready connections per wake-up. Second, &lt;code&gt;io_uring&lt;/code&gt; loses at 4 connections. With only four messages in flight there should be little to batch per wake-up, and I think the extra work of building and reaping queue entries shows: 166 against 183 thousand. Third, the &lt;code&gt;io_uring&lt;/code&gt; win is large only for small messages with many connections. At 4 KB the kernel presumably spends more of its time copying data and running the TCP stack, which both approaches share; the gap closes to 9% at 32 connections and 11 to 14% at 256 and 1024.&lt;/p&gt;
+
+      &lt;p&gt;The ranges at 256 connections are wide for &lt;code&gt;io_uring&lt;/code&gt; (567 to 902 thousand with 64-byte messages). Four of the nine runs were under 800 thousand and the other five between 875 and 902 thousand. I don't know why; the VM's CPUs are not equal on this host and the pinned CPU numbers don't map to fixed physical cores. As a check I reran 256 connections with the client spread over 7 CPUs instead of 4: &lt;code&gt;epoll&lt;/code&gt; stayed around 560 to 670 thousand, &lt;code&gt;io_uring&lt;/code&gt; fell to 580 to 735 thousand from 830 to 880 thousand. So the headline ratio of 1.4 depends on where the client runs. Across the whole table the safe reading is "&lt;code&gt;io_uring&lt;/code&gt; was ahead of &lt;code&gt;epoll&lt;/code&gt; by roughly 7% to 40% when the server had many connections to serve, and behind by 9 to 12% with a few".&lt;/p&gt;
+
+      &lt;h2&gt;What this doesn't say&lt;/h2&gt;
+
+      &lt;p&gt;Real servers do more than echo; the application work per message dilutes any gain from cheaper I/O. These runs use one server thread, so they say nothing about scaling over cores, where &lt;code&gt;epoll&lt;/code&gt; servers spread connections with &lt;code&gt;SO_REUSEPORT&lt;/code&gt; and a ring per thread can do the same. I used plain receive and send without registered buffers, fixed files, or kernel-side polling, all of which can cut the per-message cost further. And loopback has no network latency, which is the main reason a thread-per-connection server is fine in practice.&lt;/p&gt;
+
+      &lt;p&gt;Method: Rust with the &lt;code&gt;libc&lt;/code&gt; and &lt;code&gt;io-uring&lt;/code&gt; crates, built for aarch64 musl; kernel 6.18.35 in a throwaway Linux VM with 8 CPUs; server pinned to CPU 0, client to CPUs 4 to 7. Nine alternating-order repetitions of each of 24 cells (216 runs). Rates are completed round trips over a 3-second window plus warm-up, from the client's counters.&lt;/p&gt;</content>
+  </entry>
+  <entry>
     <title>Under MGLRU, one big read evicts the files you read()</title>
     <link href="https://wickkit.cc/posts/2026-10-14-under-mglru-one-big-read-evicts-the-files-you-read.html"/>
     <id>https://wickkit.cc/posts/2026-10-14-under-mglru-one-big-read-evicts-the-files-you-read.html</id>
