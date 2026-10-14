@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>In a VM on the M6, huge pages stop at the host's 16K — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/tools.html">tools</a>
+      <a href="/den.html">den</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+
+    <article>
+      <h1>In a VM on the M6, huge pages stop at the host's 16K</h1>
+      <div class="meta">2026-10-14 · Kit Wickham</div>
+
+      <p>Inside an arm64 Linux VM on an Apple M6 Mac, I chased random pointers through a 1 GB buffer backed by each page size the guest kernel offers. With ordinary 4 KB pages a load took 109 ns. With 2 MB pages it took 94 ns, and 32 MB or 1 GB pages were no better than 2 MB. The same code on macOS itself, with its 16 KB pages, took 87 ns. A second test that stresses only address translation shows why: however big the guest's pages are, the CPU behaves as if it caches translations at most 16 KB at a time, which is also the host's page size and, as far as I can tell, the size the hypervisor maps the guest's memory in.</p>
+
+      <h2>The setup</h2>
+
+      <p>The guest is Linux 6.18 with 4 KB base pages and no transparent huge pages, so huge pages come from <code>hugetlbfs</code> pools reserved at boot: 64 KB (16 small pages marked with the arm64 "contiguous" hint), 2 MB, 32 MB (another contiguous size) and 1 GB. A small Rust program maps a buffer with each size, fills it, links its 128-byte lines into one random cycle and follows it: every load depends on the one before, so the time per load is the full memory latency including any page-table walk. It also measures eight independent random load streams, which is closer to what a hash table under heavy load sees. The host run is the same program built for macOS.</p>
+
+      <p>This chip has fast and slow cores and the VM's single CPU moves between them. So each measurement is 40 short chunks, each with a clock check before and after, and only chunks that ran on a fast core count. Eight fresh VMs ran three shuffled rounds each, with a host run after each VM, so most cells in the first table are medians of 21 or 22.</p>
+
+      <h2>Random loads over a buffer, ns per load (median)</h2>
+
+      <table>
+        <thead><tr><th>Buffer</th><th>Guest 4 KB</th><th>64 KB</th><th>2 MB</th><th>32 MB</th><th>1 GB</th><th>Host 16 KB</th></tr></thead>
+        <tbody>
+          <tr><td>8 MB</td><td>7.1</td><td>7.1</td><td>6.8</td><td>6.7</td><td>6.8</td><td>6.6</td></tr>
+          <tr><td>64 MB</td><td>90.6</td><td>88.5</td><td>81.0</td><td>81.0</td><td>83.5</td><td>83.1</td></tr>
+          <tr><td>128 MB</td><td>94.1</td><td>93.9</td><td>89.2</td><td>89.1</td><td>89.2</td><td>84.8</td></tr>
+          <tr><td>256 MB</td><td>99.3</td><td>99.3</td><td>91.4</td><td>91.3</td><td>91.5</td><td>85.5</td></tr>
+          <tr><td>512 MB</td><td>103.2</td><td>103.3</td><td>92.6</td><td>92.7</td><td>92.8</td><td>86.3</td></tr>
+          <tr><td>1 GB</td><td>109.0</td><td>109.0</td><td>94.4</td><td>94.5</td><td>94.6</td><td>86.9</td></tr>
+          <tr><td>1 GB, 8 independent streams</td><td>5.41</td><td>5.40</td><td>4.89</td><td>4.90</td><td>4.96</td><td>4.72</td></tr>
+        </tbody>
+      </table>
+
+      <p>At 128 MB and above the quartiles of each cell are within about 2 ns of the median. At 64 MB, just past the last cache level, they spread by up to 7 ns, so read that row loosely; I left out 32 MB, where the spread was larger than the differences. Three things stand out. Going from 4 KB to 2 MB pages in the guest saves 15 ns per load at 1 GB, 13%, and 10% on the independent streams. The 64 KB contiguous pages save nothing measurable, so the core gets no benefit from that hint here. And past 2 MB nothing changes, yet even with 1 GB pages the guest stays 5% (at 128 MB) to 9% (at 1 GB) behind the host.</p>
+
+      <h2>A test of translation alone</h2>
+
+      <p>A dependent load over a gigabyte mostly measures DRAM, so the page-table part is a small slice of the total. To isolate it, I ran a second set (six fresh VMs, three rounds each, medians of 17 or 18) with the pointer chain spread thinly: one 128-byte line in every 16 KB, at a varying offset so the lines don't pile into the same cache sets. A 1 GB span then holds only 8 MB of data, which fits in cache, but it touches 65,536 different 16 KB pages. A plain chase over 8 MB costs about 6.8 ns per load on the host and with huge guest pages (7.1 ns with 4 KB guest pages), so anything above that is the cost of finding translations.</p>
+
+      <table>
+        <thead><tr><th>Span (data)</th><th>Guest 4 KB</th><th>2 MB</th><th>1 GB</th><th>Host 16 KB</th></tr></thead>
+        <tbody>
+          <tr><td>16 MB (128 KB)</td><td>2.8</td><td>2.8</td><td>2.9</td><td>2.7</td></tr>
+          <tr><td>64 MB (512 KB)</td><td>15.3</td><td>14.4</td><td>14.8</td><td>7.4</td></tr>
+          <tr><td>256 MB (2 MB)</td><td>24.4</td><td>17.5</td><td>17.9</td><td>10.6</td></tr>
+          <tr><td>1 GB (8 MB)</td><td>32.2</td><td>19.3</td><td>19.6</td><td>11.3</td></tr>
+        </tbody>
+      </table>
+
+      <p>If the guest's 1 GB page became one 1 GB translation in the CPU's TLB, the whole span would be a single entry and the cost would fall to the 6.8 ns of the plain 8 MB chase. Even 2 MB pages would need only 512 entries. Instead the guest with 1 GB pages is at 19.6 ns, well above the host's 11.3 ns with ordinary 16 KB pages. At a 64 MB span the guest's page size makes almost no difference (14.4 to 15.3 ns) while the host pays half that. The guest acts as if every translation covers at most 16 KB, and as if each miss costs about twice what it costs the host.</p>
+
+      <p>That fits how arm64 virtualization works. A guest address goes through two translations: the guest's own page tables, then the hypervisor's "stage 2" tables that map guest memory onto host memory. A cached translation can only be as large as the smaller of the two mappings. Apple's Hypervisor framework <a href="https://developer.apple.com/documentation/updates/hypervisor">now lets a VM set its memory granule down to 4 KB</a>; asking the framework for its default on this Mac (<code>hv_vm_config_get_default_ipa_granule</code>) returns 16 KB, the same as the host's own pages. Since 1 GB guest pages still behave like 16 KB, the guest's memory looks like it is mapped page by page at stage 2, not in larger blocks. I can't tell that apart from the TLB simply not keeping larger combined entries; either way the effect is the same.</p>
+
+      <p>Why do 2 MB guest pages still help, if they don't make the cached translations bigger? Because a miss is cheaper. In a VM, every step of the guest's page-table walk is itself a guest address that needs a stage-2 translation, so the walk costs many more memory references than on bare metal; for four guest levels and four host levels it can be <a href="https://par.nsf.gov/servlets/purl/10544871">up to 24</a>. A 2 MB page removes one level of the guest walk and with it a whole stage-2 lookup. Bigger pages only remove upper levels, which the walker probably has cached already; that would explain why 32 MB and 1 GB add nothing.</p>
+
+      <h2>What to take from it</h2>
+
+      <p>For memory-heavy work in a Linux VM on Apple silicon, 2 MB huge pages are worth turning on: 8 to 13% on random access over 256 MB to 1 GB buffers, and 1 GB pages add nothing over that. Don't expect the gains huge pages give on bare metal, where one 1 GB page covers a whole gigabyte with a single TLB entry. In this VM the translation limit is the host's 16 KB, and on buffers of 128 MB and up the guest stays 5 to 9% behind native whatever page size it uses. The 64 KB contiguous size bought nothing here.</p>
+
+      <p>Method: Rust with the <code>libc</code> crate, built static for aarch64; Linux 6.18.35 guest with one CPU and 6 GB of memory, a fresh VM per run; <code>hugetlbfs</code> pools via <code>/sys/kernel/mm/hugepages</code> and <code>MAP_HUGETLB</code> with the size encoded in the flags. Each value is the median over fast-core chunks of 200,000 loads; core tier by an add-chain clock check. 2,013 dense and 1,933 sparse measurements, 14 dropped for too few fast-core chunks. The stage-2 default was read with <code>hv_vm_config_get_default_ipa_granule</code>; that the VM I used keeps the default is my inference.</p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+</body>
+</html>
