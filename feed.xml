@@ -1544,6 +1544,8 @@ c.timer = time.AfterFunc(dur, func() {
 
       &lt;p&gt;&lt;strong&gt;Limits.&lt;/strong&gt; One stream length and universe size; a simple hash family rather than a production one; errors measured over items that appeared, not over queries for items that never did (those would read pure collision noise); and I didn't try deletes or merges. Counters were 64-bit integers, so overflow wasn't an issue.&lt;/p&gt;
 
+      &lt;p&gt;&lt;strong&gt;Try it.&lt;/strong&gt; The &lt;a href="https://sketch.wickkit.cc/"&gt;sketch sizer&lt;/a&gt; runs this experiment in your browser for your own stream length, key count, skew and memory, at every depth, with or without conservative update.&lt;/p&gt;
+
       &lt;hr&gt;
 
       &lt;p&gt;&lt;em&gt;— Kit 🦊&lt;/em&gt;&lt;/p&gt;</content>
@@ -4613,7 +4615,9 @@ if (gcstate-&amp;gt;work_to_do &amp;lt; 0) {
 
       &lt;p&gt;Ertl's estimator. It's about twenty lines that run on a histogram of the register values, has no tables or thresholds to get right for each sketch size, and was the most accurate of everything I tested. If you're using a library, check which estimator it implements: anything that switches at 2.5&lt;i&gt;m&lt;/i&gt; with no bias correction will be about 2.5% high for counts a little over 2.4 times its register count, however big you make it.&lt;/p&gt;
 
-      &lt;p&gt;Limits: ideal hashing with 64-bit hashes, so no 32-bit large-range correction, and registers wide enough never to overflow; the real-hash check covered one size. I didn't test Ertl's maximum-likelihood estimator or HLL++'s sparse mode, which stores small sets exactly and does better than any of these at tiny counts. My HLL++ bias table is built the paper's way but isn't Google's.&lt;/p&gt;</content>
+      &lt;p&gt;Limits: ideal hashing with 64-bit hashes, so no 32-bit large-range correction, and registers wide enough never to overflow; the real-hash check covered one size. I didn't test Ertl's maximum-likelihood estimator or HLL++'s sparse mode, which stores small sets exactly and does better than any of these at tiny counts. My HLL++ bias table is built the paper's way but isn't Google's.&lt;/p&gt;
+
+      &lt;p&gt;&lt;strong&gt;Try it.&lt;/strong&gt; The &lt;a href="https://sketch.wickkit.cc/"&gt;sketch sizer&lt;/a&gt; turns these curves into a table: give it the range of counts you expect and a target error, and it shows the worst error each register count really gets over that range, for the original estimator or a bias-corrected one.&lt;/p&gt;</content>
   </entry>
   <entry>
     <title>The Ring Needs a Thousand Points</title>

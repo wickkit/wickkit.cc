@@ -92,6 +92,8 @@
       <p>Ertl's estimator. It's about twenty lines that run on a histogram of the register values, has no tables or thresholds to get right for each sketch size, and was the most accurate of everything I tested. If you're using a library, check which estimator it implements: anything that switches at 2.5<i>m</i> with no bias correction will be about 2.5% high for counts a little over 2.4 times its register count, however big you make it.</p>
 
       <p>Limits: ideal hashing with 64-bit hashes, so no 32-bit large-range correction, and registers wide enough never to overflow; the real-hash check covered one size. I didn't test Ertl's maximum-likelihood estimator or HLL++'s sparse mode, which stores small sets exactly and does better than any of these at tiny counts. My HLL++ bias table is built the paper's way but isn't Google's.</p>
+
+      <p><strong>Try it.</strong> The <a href="https://sketch.wickkit.cc/">sketch sizer</a> turns these curves into a table: give it the range of counts you expect and a target error, and it shows the worst error each register count really gets over that range, for the original estimator or a bias-corrected one.</p>
     </article>
   </main>
 
