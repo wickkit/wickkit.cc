@@ -8,6 +8,74 @@
   <updated>2026-10-14T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
   <entry>
+    <title>SQLite's join Bloom filter waits for ANALYZE</title>
+    <link href="https://wickkit.cc/posts/2026-10-14-sqlites-join-bloom-filter-waits-for-analyze.html"/>
+    <id>https://wickkit.cc/posts/2026-10-14-sqlites-join-bloom-filter-waits-for-analyze.html</id>
+    <updated>2026-10-14T00:00:00Z</updated>
+    <summary>A star join over a 2-million-row table: on a fresh SQLite database the planner never used its join Bloom filter. After one full ANALYZE it always did, and the join ran 4.7 to 27 times faster when the WHERE kept 1% or less of the dimension table. ANALYZE on one table alone, or PRAGMA optimize, didn't trigger it.</summary>
+    <content type="html">&lt;p&gt;Since version 3.38, SQLite can put a Bloom filter in front of the inner table of a join. If a fact table's row points at a dimension row that the &lt;code&gt;WHERE&lt;/code&gt; clause throws away, the filter skips the B-tree lookup. I timed a plain star join with the filter on and off. On a fresh database it was never used: the plan was the same either way, at every size I tried. After one &lt;code&gt;ANALYZE&lt;/code&gt;, every query got it, and the join ran 4.7 to 27 times faster when the filter kept 1% or less of the dimension table. &lt;code&gt;ANALYZE&lt;/code&gt; on just one of the two tables didn't trigger it, and neither did &lt;code&gt;PRAGMA optimize&lt;/code&gt;.&lt;/p&gt;
+
+      &lt;h2&gt;The setup&lt;/h2&gt;
+
+      &lt;p&gt;Two tables: &lt;code&gt;fact&lt;/code&gt; with 2 million rows, and &lt;code&gt;dim&lt;/code&gt; with 1,000 to 1,000,000 rows. Both are keyed on &lt;code&gt;INTEGER PRIMARY KEY&lt;/code&gt;, and there are no other indexes. Each fact row points at a random dimension row. The query:&lt;/p&gt;
+
+      &lt;pre&gt;&lt;code&gt;SELECT count(*), sum(f.v)
+FROM fact f JOIN dim d ON f.d = d.id
+WHERE d.cat &amp;lt; ?&lt;/code&gt;&lt;/pre&gt;
+
+      &lt;p&gt;Here &lt;code&gt;cat&lt;/code&gt; is uniform over 0 to 9,999, so the cutoff sets the share of dimension rows that survive: 0.1%, 1%, 10%, 50% or 90%. The planner scans &lt;code&gt;fact&lt;/code&gt; and looks up &lt;code&gt;dim&lt;/code&gt; by rowid for each row. With the filter, the plan gets an extra line, &lt;code&gt;BLOOM FILTER ON d (id=?)&lt;/code&gt;, between the two.&lt;/p&gt;
+
+      &lt;p&gt;To get a baseline I turned the optimization off without rebuilding SQLite. &lt;code&gt;sqlite3_test_control(SQLITE_TESTCTRL_OPTIMIZATIONS, db, mask)&lt;/code&gt; masks the planner's BloomFilter and BloomPulldown bits on one connection. I called it through &lt;code&gt;ctypes&lt;/code&gt; on the system library, SQLite 3.46.1. Each case ran from the page cache: one warm-up, then seven timed runs. Both settings returned the same row counts in every case.&lt;/p&gt;
+
+      &lt;h2&gt;Results&lt;/h2&gt;
+
+      &lt;p&gt;Seconds per query after &lt;code&gt;ANALYZE&lt;/code&gt;, filter on and off, as the third-fastest of seven runs:&lt;/p&gt;
+
+      &lt;table&gt;
+        &lt;tr&gt;&lt;th&gt;dim rows&lt;/th&gt;&lt;th&gt;kept&lt;/th&gt;&lt;th&gt;filter on&lt;/th&gt;&lt;th&gt;filter off&lt;/th&gt;&lt;th&gt;speedup&lt;/th&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;1,000&lt;/td&gt;&lt;td&gt;0.1%&lt;/td&gt;&lt;td&gt;0.039&lt;/td&gt;&lt;td&gt;0.190&lt;/td&gt;&lt;td&gt;4.9×&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;1,000&lt;/td&gt;&lt;td&gt;10%&lt;/td&gt;&lt;td&gt;0.060&lt;/td&gt;&lt;td&gt;0.196&lt;/td&gt;&lt;td&gt;3.3×&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;1,000&lt;/td&gt;&lt;td&gt;90%&lt;/td&gt;&lt;td&gt;0.213&lt;/td&gt;&lt;td&gt;0.226&lt;/td&gt;&lt;td&gt;1.1×&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;10,000&lt;/td&gt;&lt;td&gt;0.1%&lt;/td&gt;&lt;td&gt;0.038&lt;/td&gt;&lt;td&gt;0.279&lt;/td&gt;&lt;td&gt;7.4×&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;10,000&lt;/td&gt;&lt;td&gt;10%&lt;/td&gt;&lt;td&gt;0.072&lt;/td&gt;&lt;td&gt;0.290&lt;/td&gt;&lt;td&gt;4.0×&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;10,000&lt;/td&gt;&lt;td&gt;50%&lt;/td&gt;&lt;td&gt;0.199&lt;/td&gt;&lt;td&gt;0.312&lt;/td&gt;&lt;td&gt;1.6×&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;100,000&lt;/td&gt;&lt;td&gt;0.1%&lt;/td&gt;&lt;td&gt;0.046&lt;/td&gt;&lt;td&gt;0.646&lt;/td&gt;&lt;td&gt;14×&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;100,000&lt;/td&gt;&lt;td&gt;1%&lt;/td&gt;&lt;td&gt;0.056&lt;/td&gt;&lt;td&gt;0.637&lt;/td&gt;&lt;td&gt;11×&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;100,000&lt;/td&gt;&lt;td&gt;10%&lt;/td&gt;&lt;td&gt;0.118&lt;/td&gt;&lt;td&gt;0.661&lt;/td&gt;&lt;td&gt;5.6×&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;1,000,000&lt;/td&gt;&lt;td&gt;0.1%&lt;/td&gt;&lt;td&gt;0.059&lt;/td&gt;&lt;td&gt;1.569&lt;/td&gt;&lt;td&gt;27×&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;1,000,000&lt;/td&gt;&lt;td&gt;1%&lt;/td&gt;&lt;td&gt;0.072&lt;/td&gt;&lt;td&gt;1.563&lt;/td&gt;&lt;td&gt;22×&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;1,000,000&lt;/td&gt;&lt;td&gt;10%&lt;/td&gt;&lt;td&gt;0.226&lt;/td&gt;&lt;td&gt;1.669&lt;/td&gt;&lt;td&gt;7.4×&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;1,000,000&lt;/td&gt;&lt;td&gt;50%&lt;/td&gt;&lt;td&gt;0.942&lt;/td&gt;&lt;td&gt;1.514&lt;/td&gt;&lt;td&gt;1.6×&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;1,000,000&lt;/td&gt;&lt;td&gt;90%&lt;/td&gt;&lt;td&gt;1.430&lt;/td&gt;&lt;td&gt;1.206&lt;/td&gt;&lt;td&gt;0.8×&lt;/td&gt;&lt;/tr&gt;
+      &lt;/table&gt;
+
+      &lt;p&gt;&lt;strong&gt;The bigger the dimension table, the more a skipped lookup is worth.&lt;/strong&gt; Without the filter, a probe into a 1,000-row table hits pages that are already hot, and the whole join takes 0.19 s. A probe into a million-row table walks a deeper tree over pages scattered across memory, and the join takes 1.5 s. With the filter and a selective &lt;code&gt;WHERE&lt;/code&gt;, both run in about 0.04 to 0.06 s, because almost no probe reaches the tree. What's left is the scan of &lt;code&gt;fact&lt;/code&gt;.&lt;/p&gt;
+
+      &lt;p&gt;&lt;strong&gt;When most rows survive, it is close to a wash.&lt;/strong&gt; At 90% kept, the filter cost or saved about 10% at most sizes. At a million dimension rows it came out between 0.8× and 1.1× across three separate sweeps, so I'd call that break-even, not a measured slowdown. The planner can't know in advance how much its filter will reject, and here it never chose to drop it.&lt;/p&gt;
+
+      &lt;h2&gt;Which statistics it needs&lt;/h2&gt;
+
+      &lt;p&gt;I ran each database through a few ways of getting statistics, checked the plan, and timed it again:&lt;/p&gt;
+
+      &lt;table&gt;
+        &lt;tr&gt;&lt;th&gt;before the query&lt;/th&gt;&lt;th&gt;Bloom filter in plan?&lt;/th&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;nothing&lt;/td&gt;&lt;td&gt;no&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;&lt;code&gt;ANALYZE&lt;/code&gt;&lt;/td&gt;&lt;td&gt;yes, every case&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;&lt;code&gt;ANALYZE dim&lt;/code&gt;&lt;/td&gt;&lt;td&gt;no&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;&lt;code&gt;ANALYZE fact&lt;/code&gt;&lt;/td&gt;&lt;td&gt;no&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;run the query, then &lt;code&gt;PRAGMA optimize&lt;/code&gt;&lt;/td&gt;&lt;td&gt;no&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;&lt;code&gt;PRAGMA optimize=0x10002&lt;/code&gt;&lt;/td&gt;&lt;td&gt;no&lt;/td&gt;&lt;/tr&gt;
+      &lt;/table&gt;
+
+      &lt;p&gt;That held for every size and cutoff I tried in this round (10,000 and 1,000,000 dimension rows, 1%, 50% and 90% kept). With no statistics, or only half of them, the plan was a plain scan and probe, and the timings with the filter on and off matched to within noise. &lt;code&gt;PRAGMA optimize&lt;/code&gt; is the call the SQLite docs suggest running on a schedule. On these tables it didn't add whatever the planner wanted. My guess is that's because the only index is the rowid, so it saw nothing worth analyzing, but I didn't dig into its rules.&lt;/p&gt;
+
+      &lt;h2&gt;What I'd do&lt;/h2&gt;
+
+      &lt;p&gt;If you have a reporting-style SQLite database, with a big table joined to smaller ones that you filter, run a full &lt;code&gt;ANALYZE&lt;/code&gt; once it has data and again after big loads. Then check &lt;code&gt;EXPLAIN QUERY PLAN&lt;/code&gt; for the &lt;code&gt;BLOOM FILTER ON&lt;/code&gt; line. Here that one statement turned a 1.6 s query into 0.07 s. If the plan doesn't show the filter, the optimization isn't happening, however new your SQLite is.&lt;/p&gt;
+
+      &lt;p&gt;Method: SQLite 3.46.1 (Debian build) driven from Python 3.14 via &lt;code&gt;ctypes&lt;/code&gt;, in a Linux aarch64 container with 10 cores, three cases at a time. Each case built its own fresh database file with journaling off. The table shows the last of three sweeps. The first sweep ran nine cases at a time and was visibly noisier at a million rows, which is where my early "0.65×" came from before I reran it. This is one synthetic schema with uniform keys and a single join. Skewed keys, joins over several dimension tables, or a database bigger than memory could all come out differently.&lt;/p&gt;</content>
+  </entry>
+  <entry>
     <title>glibc keeps threaded Python's memory until you trim</title>
     <link href="https://wickkit.cc/posts/2026-10-14-glibc-keeps-threaded-pythons-memory-until-you-trim.html"/>
     <id>https://wickkit.cc/posts/2026-10-14-glibc-keeps-threaded-pythons-memory-until-you-trim.html</id>

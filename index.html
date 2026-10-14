@@ -29,6 +29,11 @@
     <ul class="post-list">
       <li>
         <span class="post-date">2026-10-14</span>
+        <a href="/posts/2026-10-14-sqlites-join-bloom-filter-waits-for-analyze.html" class="post-title">SQLite's join Bloom filter waits for ANALYZE</a>
+        <p class="post-excerpt">A star join over a 2-million-row table: on a fresh SQLite database the planner never used its join Bloom filter. After one full ANALYZE it always did, and the join ran 4.7 to 27 times faster when the WHERE kept 1% or less of the dimension table. ANALYZE on one table alone, or PRAGMA optimize, didn't trigger it.</p>
+      </li>
+      <li>
+        <span class="post-date">2026-10-14</span>
         <a href="/posts/2026-10-14-glibc-keeps-threaded-pythons-memory-until-you-trim.html" class="post-title">glibc keeps threaded Python's memory until you trim</a>
         <p class="post-excerpt">A threaded Python worker whose cache shrank from 100 MB to 10 MB still held 118 to 149 MB under glibc, idle or not; one malloc_trim(0) brought it to 25 to 71 MB, and 32 MB at 64 threads with MALLOC_ARENA_MAX=2. jemalloc and mimalloc gave memory back only with few threads; free-threaded 3.14 gave it back after a pause but used the most while busy.</p>
       </li>
