@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Under MGLRU, one big read evicts the files you read() — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/tools.html">tools</a>
+      <a href="/den.html">den</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+
+    <article>
+      <h1>Under MGLRU, one big read evicts the files you read()</h1>
+      <div class="meta">2026-10-14 · Kit Wickham</div>
+
+      <p>On Linux 6.18 with a 1 GB machine, I kept a 400 MB file hot by reading random 4 KB pages from it, each page about once a minute, and then read a 3 GB file once from start to end. With the classic LRU, 41% of the hot file was still cached afterwards on average. With the multi-generational LRU (MGLRU) turned on, 0.3% was. At that rate, two more passes of the same scan never taught MGLRU to keep it. If the hot file was memory-mapped instead of read with <code>read()</code>, MGLRU kept all of it every time. And if the scanner read with <code>RWF_DONTCACHE</code>, both kept all of it.</p>
+
+      <h2>The setup</h2>
+
+      <p>Each run boots its own small Linux VM (kernel 6.18.35, 1 GB of RAM, ext4) with MGLRU switched on or off through <code>/sys/kernel/mm/lru_gen/enabled</code>. A 400 MB "hot" file is read through twice, so the classic LRU sees every page used twice and moves it to its active list. Then a thread keeps reading random 4 KB pages of it at a fixed rate, either with <code>pread()</code> or by touching a memory-mapped copy. At 2,000 reads a second each of its 102,400 pages comes up about every 51 seconds; I ran rates that put that interval at 102, 51, 20 and 5 seconds. Five seconds in, a second thread reads a 3 GB file sequentially in 1 MB chunks, three times, with ten seconds between passes. After each pass I ask <code>mincore()</code> how much of the hot file is still in the page cache. The virtual disk delivers about 1.2 GB/s, so a full-speed scan takes 2.5 seconds; I also throttled it to 250 MB/s, closer to a real disk, which makes it take 12 seconds. Five runs per setting.</p>
+
+      <figure class="fig smooth"><img src="/img/mglru.png" alt="Two panels: percent of a 400 MB hot file still cached after a 3 GB scan, against seconds between reads of each hot page (102, 51, 20, 5). With the scan throttled to 250 MB/s, classic LRU keeps 81 to 96% on average and MGLRU 21 to 70%. At full speed, classic keeps 7 to 60% with wide spread between runs, and MGLRU keeps under 1% except 11% at 5 seconds. A dashed line for memory-mapped access sits near 100% in both panels."></figure>
+
+      <h2>What survived the first pass</h2>
+
+      <table>
+        <thead><tr><th>Each hot page read every</th><th>Scan speed</th><th>Classic LRU</th><th>MGLRU</th></tr></thead>
+        <tbody>
+          <tr><td>102 s</td><td>250 MB/s</td><td>84% (65–100)</td><td>21% (1–55)</td></tr>
+          <tr><td>51 s</td><td>250 MB/s</td><td>81% (60–100)</td><td>47% (2–63)</td></tr>
+          <tr><td>20 s</td><td>250 MB/s</td><td>82% (43–100)</td><td>70% (57–78)</td></tr>
+          <tr><td>5 s</td><td>250 MB/s</td><td>96% (77–100)</td><td>62% (21–94)</td></tr>
+          <tr><td>102 s</td><td>full</td><td>30% (7–100)</td><td>0.2% (0–0)</td></tr>
+          <tr><td>51 s</td><td>full</td><td>41% (7–74)</td><td>0.3% (0–1)</td></tr>
+          <tr><td>20 s</td><td>full</td><td>60% (7–100)</td><td>0.4% (0–1)</td></tr>
+          <tr><td>5 s</td><td>full</td><td>7% (7–9)</td><td>11% (9–15)</td></tr>
+        </tbody>
+      </table>
+
+      <p>Numbers are the mean share of the hot file still cached right after the first pass, with the range over five runs. The classic LRU is erratic: the same setting kept 7% in one run and 100% in another. But it usually keeps a good part of the hot set, and with the scan at disk speed it keeps most of it. MGLRU at full scan speed lost essentially all of it whenever pages were read less often than every few seconds, in every run. While that first pass ran, 42% of the hot reads at the 51-second setting went to disk under MGLRU, against 19% under the classic LRU.</p>
+
+      <p>The one setting where the classic LRU did as badly, pages read every 5 seconds against a full-speed scan, is also the one where MGLRU learned: by the third pass it kept 67% on average and the classic LRU 29%. At 51 and 102 seconds, MGLRU kept 0.2% to 0.3% after every one of the three passes. The result held in a bigger VM too: with 2 GB of RAM, an 800 MB hot set and a 6 GB scan at the 51-second interval, the classic LRU kept 84% on average (52, 100, 100) and MGLRU 0.8%. With a smaller 200 MB hot set in 1 GB, read every 102 seconds, it was 71% (11, 100, 100) against 0.3%.</p>
+
+      <h2>read() against mmap</h2>
+
+      <p>When the hot reader touched a memory mapping instead of calling <code>pread()</code>, MGLRU kept 100% of the hot file in every run, at every rate and scan speed, after every pass. The classic LRU averaged 86% (worst run 77%) with pages read every 102 seconds against a full-speed scan, and 97% to 100% in every other setting. That split matches how MGLRU is built. It finds out that a mapped page is in use by checking the accessed bits in page tables when it ages its generations, and a page found in use moves to the youngest generation. A page read through a file descriptor only gets a reference count that puts it in a "tier", and MGLRU protects a tier only after it sees pages from that tier come back (refault) noticeably more often than pages read once. A hot page read about once a minute looks, between scans, much like a scan page read once.</p>
+
+      <p>None of this is a new complaint. In March, <a href="https://lwn.net/Articles/1060967/">LWN covered</a> reports that MGLRU reclaims file pages too aggressively, and at LSFMM in May Kairui Song <a href="https://lwn.net/Articles/1072866/">said</a> MGLRU does not adequately protect the page cache and that its feedback controller doesn't identify the working set well, with a patch set to rework it. What I haven't seen measured before is how sharp the split is: the same pages, read the same way, are fully protected through a mapping and almost wiped out through <code>read()</code>.</p>
+
+      <h2>The fix on the scanner's side</h2>
+
+      <p>If the big read is yours (a backup, a checksum pass, a log replay), tell the kernel not to keep it. Reading with <code>preadv2(..., RWF_DONTCACHE)</code>, which ext4 supports on this kernel, or calling <code>posix_fadvise(POSIX_FADV_DONTNEED)</code> on each chunk after reading it, left 100% of the hot set cached under both LRUs at the 51-second interval against a full-speed scan, reclaimed zero pages, and the 3 GB scan took about the same time. Turning off readahead for the scanner with <code>POSIX_FADV_RANDOM</code> did not reliably help: at the same 250 MB/s it moved MGLRU from 54% to 62% at one interval and from 94% to 85% at another.</p>
+
+      <p>If you can't change the scanner, the choice is coarser. A hot set you read through a mapping is safe under MGLRU; one you serve with <code>read()</code> and touch less than every few seconds isn't, against a scan that outruns it. Turning MGLRU off brings back the classic LRU, which protected this hot set better in every setting but one (pages read every 5 seconds against a full-speed scan), though not reliably from run to run.</p>
+
+      <p>Method: kernel 6.18.35 (aarch64), MGLRU built in and off by default, toggled per run; each run in a fresh 1 GB VM with 2 CPUs. Hot file 400 MB of random data, scan file 3 GB, both written, synced, and dropped from cache before the run. Residency is <code>mincore()</code> over a separate mapping of the hot file that is never touched. A hot read counts as a miss if it takes over 20 µs (cached reads take a few). Five runs per setting for the main table and the mmap runs, three for the 2 GB and 200 MB checks and the <code>RWF_DONTCACHE</code> and <code>DONTNEED</code> runs. These are single, synthetic workloads: one file hot, one file streaming, nothing else competing for memory. The range columns are there because the classic LRU in particular varied a lot between identical runs.</p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+</body>
+</html>

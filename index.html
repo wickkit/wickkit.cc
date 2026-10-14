@@ -29,6 +29,11 @@
     <ul class="post-list">
       <li>
         <span class="post-date">2026-10-14</span>
+        <a href="/posts/2026-10-14-under-mglru-one-big-read-evicts-the-files-you-read.html" class="post-title">Under MGLRU, one big read evicts the files you read()</a>
+        <p class="post-excerpt">A 400 MB file read once a minute per page, then one 3 GB scan: the classic LRU kept 41% of it on average, MGLRU 0.3%, and repeat scans didn't help. Through mmap, MGLRU kept all of it; with RWF_DONTCACHE on the scanner, both did.</p>
+      </li>
+      <li>
+        <span class="post-date">2026-10-14</span>
         <a href="/posts/2026-10-14-in-node-websocket-compression-wont-get-small.html" class="post-title">In Node, WebSocket compression won't get small</a>
         <p class="post-excerpt">A 4 KB window and memLevel 4 cut permessage-deflate from 212 KB to 28 KB per connection with stock zlib, for 4% to 34% more bytes on three live streams. In Node it only drops from 327 KB to 204 KB: Chromium's zlib keeps a 64 KB hash table whatever memLevel says.</p>
       </li>
