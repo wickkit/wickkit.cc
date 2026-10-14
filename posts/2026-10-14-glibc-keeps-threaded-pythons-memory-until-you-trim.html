@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>glibc keeps threaded Python's memory until you trim — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/tools.html">tools</a>
+      <a href="/den.html">den</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+
+    <article>
+      <h1>glibc keeps threaded Python's memory until you trim</h1>
+      <div class="meta">2026-10-14 · Kit Wickham</div>
+
+      <p>I ran a small fake web worker in Python 3.14 on Linux: threads serve requests, and some response bodies go into a shared cache. I filled the cache to 100 MB, cut it to 10 MB, and kept serving. With the default glibc allocator the process still held 118 MB with one thread and 149 MB with 64, and waiting didn't change that. One call to <code>malloc_trim(0)</code> brought it down to 25 MB and 71 MB. Setting <code>MALLOC_ARENA_MAX=2</code> plus the trim got 64 threads down to 32 MB. Swapping in jemalloc or mimalloc returned memory without being asked, but only with a few threads. And the free-threaded build, which has its own allocator for Python objects, gave memory back after an idle pause but used the most memory while busy.</p>
+
+      <figure class="fig smooth"><img src="/img/malloc.png" alt="Two panels, resident memory in MB against thread count (1, 4, 16, 64) for eight allocator setups. Left, under load with 100 MB of live data: MALLOC_ARENA_MAX=2 stays lowest, 121 to 153 MB; default glibc rises from 125 to 211; jemalloc 142 to 208; mimalloc 147 to 237; mimalloc with purge delay 0 from 130 to 196; free-threaded 3.14t highest, 149 to 294. Right, after the cache shrinks to 10 MB and 12 seconds of idle: default glibc and ARENA_MAX=2 stay at 116 to 149 MB at every thread count; with malloc_trim they drop to 25 to 71 and 26 to 32; jemalloc and mimalloc start near 43 at one thread and climb to 105 to 158 at 16 and 64 threads; mimalloc with purge delay 0 stays at 38 to 73; free-threaded stays at 42 to 60."></figure>
+
+      <h2>The setup</h2>
+
+      <p>Each request makes a random body (lognormal sizes, median about 4 KB, capped at 1 MB), round-trips a 200-item dict through <code>json</code>, and with probability 0.3 stores the body in a shared LRU cache. The first phase serves 96,000 requests with the cache capped at 100 MB, so it fills and churns. Then the cache is trimmed to 10 MB and the same number of threads serves half as many requests again. Total work is the same at every thread count. I read resident memory from <code>/proc/self/status</code> after each phase (after <code>gc.collect()</code>), again after 12 seconds of doing nothing, and, for glibc, after <code>malloc_trim(0)</code>.</p>
+
+      <p>In the regular build, Python's own allocator handles objects of 512 bytes or less and passes everything bigger to <code>malloc</code>, so most of the body bytes here go through the C allocator. Swapping that allocator is one environment variable: <code>LD_PRELOAD</code> pointing at jemalloc 5.3.0 or mimalloc 3.0.1, against glibc 2.41. The free-threaded build (3.14t) routes Python objects through its own bundled mimalloc instead.</p>
+
+      <h2>Results</h2>
+
+      <p>Resident MB, median of 5 runs. The interpreter alone starts at 14 MB with glibc and 18 to 25 MB with the others, so a perfect allocator would end near 25 to 35 MB after the shrink.</p>
+
+      <table>
+        <tr><th>allocator</th><th>threads</th><th>under load (100 MB live)</th><th>after shrink + 12 s idle (10 MB live)</th><th>+ malloc_trim(0)</th></tr>
+        <tr><td>glibc</td><td>1</td><td>125</td><td>118</td><td>25</td></tr>
+        <tr><td>glibc</td><td>64</td><td>211</td><td>149</td><td>71</td></tr>
+        <tr><td>glibc, MALLOC_ARENA_MAX=2</td><td>64</td><td>153</td><td>140</td><td>32</td></tr>
+        <tr><td>jemalloc</td><td>1</td><td>142</td><td>43</td><td></td></tr>
+        <tr><td>jemalloc</td><td>64</td><td>208</td><td>116</td><td></td></tr>
+        <tr><td>mimalloc</td><td>1</td><td>147</td><td>44</td><td></td></tr>
+        <tr><td>mimalloc</td><td>64</td><td>237</td><td>144</td><td></td></tr>
+        <tr><td>mimalloc, MIMALLOC_PURGE_DELAY=0</td><td>64</td><td>196</td><td>73</td><td></td></tr>
+        <tr><td>free-threaded 3.14t</td><td>1</td><td>149</td><td>42</td><td>44</td></tr>
+        <tr><td>free-threaded 3.14t</td><td>64</td><td>294</td><td>59</td><td>61</td></tr>
+      </table>
+
+      <p>A few things stood out.</p>
+
+      <p><strong>glibc never gives the memory back on its own.</strong> The figure 12 seconds after the last request was within 4 KB of the one right after it in every glibc run. <code>free()</code> only returns memory at the very top of the heap, and the trim call is the thing that releases free pages from the middle. It is a known fix (<a href="https://discuss.python.org/t/using-malloc-trim-to-help-with-memory-management/107682">people on discuss.python.org</a> call it after bursts of work), and here it was worth 93 MB of the 118 at one thread.</p>
+
+      <p><strong>More threads means more held memory, for every allocator.</strong> glibc gives threads their own arenas (up to eight per core by default), and each one keeps its own free space. Capping that with <code>MALLOC_ARENA_MAX=2</code>, the setting <a href="https://devcenter.heroku.com/articles/tuning-glibc-memory-behavior">Heroku recommends</a>, made it the leanest setup under load at 64 threads: 153 MB against 211. jemalloc and mimalloc keep per-thread caches too, and at 16 to 64 threads they held 105 to 158 MB after the shrink instead of about 43.</p>
+
+      <p><strong>The obvious jemalloc knob made it worse.</strong> Turning on jemalloc's background purging thread (<code>MALLOC_CONF=background_thread:true</code>) raised memory under load at 64 threads from 208 to 256 MB, and after the idle wait it still held 111. Telling mimalloc to purge immediately (<code>MIMALLOC_PURGE_DELAY=0</code>) was the best drop-in: 196 MB under load and 73 MB after, at 64 threads.</p>
+
+      <p><strong>Free-threaded Python holds more while busy and gives it back when idle.</strong> With real parallelism the first phase ran 3 to 4 times faster on 4 cores, but memory under load reached 294 MB at 64 threads (one run hit 380 MB at peak). Right after the shrink it still held 128 MB at one thread. After 12 idle seconds it was down to 42 to 60 MB at every thread count, without any call. Preloading jemalloc or mimalloc into 3.14t changed little, since Python objects there don't go through <code>malloc</code>.</p>
+
+      <p>Throughput didn't separate the allocators in the regular build: the first phase took 18 to 20 seconds for every setup, which is the GIL's limit, not the allocator's. I didn't time <code>malloc_trim</code> itself. It locks each arena while it works (the <a href="https://blog.cloudflare.com/the-effect-of-switching-to-tcmalloc-on-rocksdb-memory-use/">Cloudflare post on RocksDB and tcmalloc</a> notes that cost), so calling it after a burst is better than calling it per request.</p>
+
+      <h2>What I'd do</h2>
+
+      <p>For a threaded Python service on glibc whose memory never comes down after a busy spell: set <code>MALLOC_ARENA_MAX=2</code> and call <code>ctypes.CDLL("libc.so.6").malloc_trim(0)</code> after a burst or on a timer. That pair ended at 26 to 32 MB after the shrink at every thread count, the lowest of any setup from 4 threads up. If you'd rather not touch code, preload mimalloc with <code>MIMALLOC_PURGE_DELAY=0</code>.</p>
+
+      <p>Method: Linux 6.18 (aarch64) VMs with 4 vCPUs and 2 GB, one fresh VM per run, four runs at a time; Debian 13, CPython 3.14.8 and 3.14.8 free-threaded. 5 runs per setting, 300 runs in total over three sweeps; thread counts 1, 4, 16 and 64. The table gives medians; mimalloc at 16 and 64 threads varied most between runs (114 to 270 MB after the shrink at 64). This is one synthetic workload with one size distribution, run for under a minute; a real service with different object sizes or hours of uptime could land elsewhere.</p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+</body>
+</html>

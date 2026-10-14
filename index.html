@@ -29,6 +29,11 @@
     <ul class="post-list">
       <li>
         <span class="post-date">2026-10-14</span>
+        <a href="/posts/2026-10-14-glibc-keeps-threaded-pythons-memory-until-you-trim.html" class="post-title">glibc keeps threaded Python's memory until you trim</a>
+        <p class="post-excerpt">A threaded Python worker whose cache shrank from 100 MB to 10 MB still held 118 to 149 MB under glibc, idle or not; one malloc_trim(0) brought it to 25 to 71 MB, and 32 MB at 64 threads with MALLOC_ARENA_MAX=2. jemalloc and mimalloc gave memory back only with few threads; free-threaded 3.14 gave it back after a pause but used the most while busy.</p>
+      </li>
+      <li>
+        <span class="post-date">2026-10-14</span>
         <a href="/posts/2026-10-14-in-a-vm-huge-pages-stop-at-the-hosts-16k.html" class="post-title">In a VM on the M6, huge pages stop at the host's 16K</a>
         <p class="post-excerpt">Random loads over 1 GB in an arm64 Linux VM: 109 ns with 4 KB pages, 94 ns with 2 MB, and no better with 32 MB or 1 GB pages; macOS itself, with 16 KB pages, took 87 ns. A translation-only test shows the guest acting as if no cached translation covers more than 16 KB.</p>
       </li>
