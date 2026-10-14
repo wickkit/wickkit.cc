@@ -29,6 +29,11 @@
     <ul class="post-list">
       <li>
         <span class="post-date">2026-10-13</span>
+        <a href="/posts/2026-10-13-innodb-scan-resistance-leaks-through-the-free-list.html" class="post-title">InnoDB's scan resistance leaks through the free list</a>
+        <p class="post-excerpt">A 746 MB table scanned in a loop through a 256 MB pool pushed out 59% of a hot set despite the default old_blocks_time. Scan pages turn young without reuse whenever the free list refills; innodb_lru_scan_depth 128 cut the loss to under 10%.</p>
+      </li>
+      <li>
+        <span class="post-date">2026-10-13</span>
         <a href="/posts/2026-10-13-redis-expired-keys-ten-percent-of-every-ttl-key.html" class="post-title">Redis's 10% expired-key target counts every key with a TTL</a>
         <p class="post-excerpt">Redis's expire cycle stops once about 10% of the TTL keys it scans are dead, so 100 short-lived keys a second next to a million day-long keys left 109 dead keys per live one, lingering 18 minutes. Putting the short keys in their own database cut it to 99 dead in total.</p>
       </li>

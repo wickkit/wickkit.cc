@@ -8,6 +8,76 @@
   <updated>2026-10-13T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
   <entry>
+    <title>InnoDB's scan resistance leaks through the free list</title>
+    <link href="https://wickkit.cc/posts/2026-10-13-innodb-scan-resistance-leaks-through-the-free-list.html"/>
+    <id>https://wickkit.cc/posts/2026-10-13-innodb-scan-resistance-leaks-through-the-free-list.html</id>
+    <updated>2026-10-13T00:00:00Z</updated>
+    <summary>A 746 MB table scanned in a loop through a 256 MB pool pushed out 59% of a hot set despite the default old_blocks_time. Scan pages turn young without reuse whenever the free list refills; innodb_lru_scan_depth 128 cut the loss to under 10%.</summary>
+    <content type="html">&lt;p&gt;InnoDB is supposed to survive a big table scan without losing its hot pages. New pages enter the buffer pool's LRU list at a midpoint, in an "old" sublist, and &lt;a href="https://dev.mysql.com/doc/refman/8.4/en/innodb-performance-midpoint_insertion.html"&gt;&lt;code&gt;innodb_old_blocks_time&lt;/code&gt;&lt;/a&gt; (default 1000 ms) keeps a page there unless it's touched again at least a second after its first access. A scan reads each page for a few milliseconds and moves on, so its pages should age out of the old sublist without disturbing the rest. I tested that with a 256 MB pool, a hot set of point reads, and a 746 MB table scanned in a loop. With the scans back to back, the largest hot set lost 59% of its pages even with the default protection, against 93% with it off. Scan pages still get into the young sublist, about 35 a second. They don't get there by being reused. Whenever the page cleaner refills the free list and reads drain it again, the boundary between the two sublists slides. Once a scan page is young, every pass of the loop touches it again and moves it back to the head.&lt;/p&gt;
+
+      &lt;h2&gt;The test&lt;/h2&gt;
+
+      &lt;p&gt;Each run used a fresh &lt;code&gt;mysql:8.4&lt;/code&gt; container (8.4.11, 2 CPUs) with a 256 MB buffer pool and default settings otherwise. Two tables: &lt;code&gt;h&lt;/code&gt;, 300,000 rows with a 200-byte &lt;code&gt;char&lt;/code&gt; column (74 MB, 4,485 pages), and &lt;code&gt;b&lt;/code&gt;, 3 million rows (746 MB, three times the pool). One connection did random primary-key lookups on the first 15,000, 60,000 or 300,000 rows of &lt;code&gt;h&lt;/code&gt;, as fast as it could. That hot set fills 224, 897 or 4,485 pages. After a 60 second warm-up, a second connection ran &lt;code&gt;select sum(v) from b&lt;/code&gt; in a loop for 150 seconds, either back to back or with a 0.5 or 2 second pause between passes. A back-to-back pass took between half a second and two seconds, about one on average. Every 20 seconds I counted the hot table's pages in &lt;code&gt;information_schema.innodb_buffer_page&lt;/code&gt;. "Kept" is the average over the last 110 seconds, as a share of the pages the hot rows fill. Each cell is three runs; without a scan, all three hot sets stayed 100% resident.&lt;/p&gt;
+
+      &lt;figure class="fig smooth"&gt;&lt;img src="https://wickkit.cc/img/innodb-scan-resistance.png" alt="Hot pages still cached during a looping full scan, by pause between scans, for three hot set sizes. 224 pages: 92 to 100% in every case. 897 pages: back to back, 38% with old_blocks_time 0 and 43% with 1000; with a 2 second pause, 87% and 100%. 4,485 pages: back to back, 7% and 41%; 0.5 s pause, 20% and 55%; 2 s pause, 55% and 89%."&gt;&lt;/figure&gt;
+
+      &lt;table class="compact"&gt;
+        &lt;thead&gt;&lt;tr&gt;&lt;th&gt;Hot set&lt;/th&gt;&lt;th&gt;Pause&lt;/th&gt;&lt;th&gt;Kept, old_blocks_time 0&lt;/th&gt;&lt;th&gt;Kept, 1000 (default)&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;
+        &lt;tbody&gt;
+          &lt;tr&gt;&lt;td&gt;224 pages&lt;/td&gt;&lt;td&gt;none&lt;/td&gt;&lt;td&gt;92% (88–95)&lt;/td&gt;&lt;td&gt;97% (94–100)&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;224 pages&lt;/td&gt;&lt;td&gt;2 s&lt;/td&gt;&lt;td&gt;96% (94–99)&lt;/td&gt;&lt;td&gt;100%&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;897 pages&lt;/td&gt;&lt;td&gt;none&lt;/td&gt;&lt;td&gt;38% (30–44)&lt;/td&gt;&lt;td&gt;43% (33–60)&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;897 pages&lt;/td&gt;&lt;td&gt;0.5 s&lt;/td&gt;&lt;td&gt;64% (54–74)&lt;/td&gt;&lt;td&gt;88% (74–97)&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;897 pages&lt;/td&gt;&lt;td&gt;2 s&lt;/td&gt;&lt;td&gt;87% (78–99)&lt;/td&gt;&lt;td&gt;100%&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;4,485 pages&lt;/td&gt;&lt;td&gt;none&lt;/td&gt;&lt;td&gt;7% (6–10)&lt;/td&gt;&lt;td&gt;41% (37–45)&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;4,485 pages&lt;/td&gt;&lt;td&gt;0.5 s&lt;/td&gt;&lt;td&gt;20% (19–21)&lt;/td&gt;&lt;td&gt;55% (51–62)&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;4,485 pages&lt;/td&gt;&lt;td&gt;2 s&lt;/td&gt;&lt;td&gt;55% (32–73)&lt;/td&gt;&lt;td&gt;89% (84–93)&lt;/td&gt;&lt;/tr&gt;
+        &lt;/tbody&gt;
+      &lt;/table&gt;
+
+      &lt;p&gt;The setting does something: at every size and pause it keeps more than turning it off does. But a scan that loops without pausing still takes most of a hot set that's read about once every second or two per page. The loss feeds on itself, too. Once hot pages had to come from disk, the lookup rate fell from about 5,000 a second to 1,500, so each surviving hot page was touched less often.&lt;/p&gt;
+
+      &lt;h2&gt;How scan pages get into the young sublist&lt;/h2&gt;
+
+      &lt;p&gt;I logged which table each young and old page belonged to (&lt;code&gt;innodb_buffer_page_lru&lt;/code&gt; has an &lt;code&gt;IS_OLD&lt;/code&gt; column). With the default setting and back-to-back scans, the scanned table's young page count rose by about 35 pages a second for the whole run. To rule out leftovers from loading the table, I restarted MySQL and filled the pool from a third table before the warm-up, so the scanned table started with no young pages at all. It climbed at the same rate.&lt;/p&gt;
+
+      &lt;p&gt;The way in is &lt;a href="https://github.com/mysql/mysql-server/blob/mysql-8.4.11/storage/innobase/buf/buf0lru.cc#L1440-L1492"&gt;&lt;code&gt;buf_LRU_old_adjust_len&lt;/code&gt;&lt;/a&gt;. The old sublist is held at &lt;code&gt;innodb_old_blocks_pct&lt;/code&gt; of the LRU list's length (default 37%, give or take 20 pages), and a newly read page goes in at the head of the old sublist, right behind the boundary. When the list grows, because a read took its page from the free list instead of evicting one, the old sublist is suddenly too long. The boundary steps toward the tail one page at a time, clearing the old flag on each page it passes:&lt;/p&gt;
+
+      &lt;pre&gt;&lt;code&gt;} else if (old_len &amp;gt; new_len + BUF_LRU_OLD_TOLERANCE) {
+  buf_pool-&amp;gt;LRU_old = UT_LIST_GET_NEXT(LRU, LRU_old);
+  old_len = --buf_pool-&amp;gt;LRU_old_len;
+  buf_page_set_old(LRU_old, false);&lt;/code&gt;&lt;/pre&gt;
+
+      &lt;p&gt;The pages just behind the boundary are the newest midpoint inserts, which during a scan are scan pages. They become young after a single access. The free list is what makes the list length move. I sampled &lt;code&gt;Innodb_buffer_pool_pages_free&lt;/code&gt; 20 times a second: during the warm-up it held at about 1,000 pages, just under &lt;code&gt;innodb_lru_scan_depth&lt;/code&gt; (default 1024), the number of pages the page cleaner checks at the LRU tail each second. Once the scan started it sat at 0, except when the cleaner refilled it. In a 35-second sample I caught three refills of several hundred pages, the largest about 900, and the scan drained each one within a fraction of a second. Each refill-and-drain moves the boundary toward the tail by about 63% of the refill, so a 900-page refill turns about 550 scan pages young. Three of those in 35 seconds is roughly in line with the 35 a second I counted.&lt;/p&gt;
+
+      &lt;p&gt;Getting in is half of it. A young page that's touched again goes back to the head if it has drifted into the older three quarters of the young sublist (&lt;a href="https://github.com/mysql/mysql-server/blob/mysql-8.4.11/storage/innobase/include/buf0buf.ic#L161-L202"&gt;&lt;code&gt;buf_page_peek_if_young&lt;/code&gt;&lt;/a&gt;), and with a pass every second that's always true by the next pass. So the young sublist becomes an LRU contest. Scan pages come back about every second. In the 4,485-page runs, each hot page came back every 1.5 to 3 seconds on average, depending on the lookup rate. The scan wins. A pause between passes stretches the scan's return time, and the hot set does much better. The 224-page hot set comes back every tenth of a second or so, and nothing displaced it. The 897-page set doesn't fit this picture neatly: its pages came back every third of a second on average and it still lost more than half, so return time isn't the whole story. Pages get demoted in bulk whenever the boundary moves the other way, and I haven't traced that part.&lt;/p&gt;
+
+      &lt;p&gt;Loading the table had made about 4,800 of its pages young already. That's a big head start, and the warm and cold starts diverged. With those leftovers, the hot set was down to about 80% 40 seconds into the scan, and after 140 seconds only 7–15% of it was still cached, almost all of that in the old sublist, in all three runs. From the cold start, the filler table's young pages were pushed out first, and the hot set was still fully cached at the end of 150 seconds in all three runs. By then the filler was gone from the young sublist, and the scanned table held about 5,700 young pages.&lt;/p&gt;
+
+      &lt;p&gt;The cold start only delays it. I ran the same thing for 10 minutes of scanning: twice from the cold start, once warm. In both cold runs the filler's young pages ran out about two minutes in. The hot set then fell from 4,485 cached pages to under 400 within the next three minutes and stayed between about 100 and 1,300 for the rest of the run, the same as the warm run. The scanned table settled at about 10,150 young pages, which is nearly the whole young sublist.&lt;/p&gt;
+
+      &lt;h2&gt;The free-list target sets the leak rate&lt;/h2&gt;
+
+      &lt;p&gt;If refills are the way in, the size of the refills should set the rate. The manual describes &lt;a href="https://dev.mysql.com/doc/refman/8.4/en/innodb-parameters.html#sysvar_innodb_lru_scan_depth"&gt;&lt;code&gt;innodb_lru_scan_depth&lt;/code&gt;&lt;/a&gt; as how far the page cleaner scans down the LRU list each second, per buffer pool instance. At the default, the free list in my runs never went above 1,024 pages, so it looks like the cap on refill size too. I reran the 4,485-page, back-to-back, default-&lt;code&gt;old_blocks_time&lt;/code&gt; case with the warm start at three depths, two runs each:&lt;/p&gt;
+
+      &lt;table class="compact"&gt;
+        &lt;thead&gt;&lt;tr&gt;&lt;th&gt;&lt;code&gt;innodb_lru_scan_depth&lt;/code&gt;&lt;/th&gt;&lt;th&gt;Scan pages turned young&lt;/th&gt;&lt;th&gt;Hot set kept&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;
+        &lt;tbody&gt;
+          &lt;tr&gt;&lt;td&gt;128&lt;/td&gt;&lt;td&gt;about 9 a second&lt;/td&gt;&lt;td&gt;91%, 93%&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;1024 (default)&lt;/td&gt;&lt;td&gt;about 34 a second&lt;/td&gt;&lt;td&gt;35%, 43%&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;4096&lt;/td&gt;&lt;td&gt;about 100 a second, until the young sublist was full&lt;/td&gt;&lt;td&gt;13%, 17%&lt;/td&gt;&lt;/tr&gt;
+        &lt;/tbody&gt;
+      &lt;/table&gt;
+
+      &lt;p&gt;Same table, same scan, same setting for the old sublist; only the free-list target changed, and the leak and the loss moved with it. At 128 the hot set was still shrinking slowly at the end (3,830 pages cached after 140 seconds of scanning), so a lower depth slows the leak but doesn't plug it.&lt;/p&gt;
+
+      &lt;h2&gt;What to do about it&lt;/h2&gt;
+
+      &lt;p&gt;If a hot working set shares a pool with a job that reads a big table over and over, the default &lt;code&gt;old_blocks_time&lt;/code&gt; won't keep it safe on its own. Two things helped about equally in these runs. At 4,485 pages, a 2 second pause between passes raised the hot set kept from 41% to 89%. Dropping &lt;code&gt;innodb_lru_scan_depth&lt;/code&gt; from 1024 to 128 raised it to 91–93%. A pause needs to be longer than the hot pages' reuse gap, and a lower depth only slows the leak. The MySQL manual already says "a setting smaller than the default is generally suitable for most workloads," with the catch that a write-heavy server needs the page cleaner to keep up, so a depth too low makes queries wait on flushing. My runs were read-only, so they say nothing about that cost. Finally, the leak follows &lt;code&gt;innodb_lru_scan_depth&lt;/code&gt;, which is per pool instance, not the pool size. In a pool of many gigabytes, the same few hundred pages per refill are a much smaller share of the young sublist than in my 256 MB pool, so I'd expect big pools to hold up much longer. I didn't test that.&lt;/p&gt;
+
+      &lt;p&gt;Caveats: one pool size, one machine, small containers. Lookup rates varied between runs (1,500 to 5,000 a second), since the scan and the lookups shared two CPUs, and that changes how often a hot page is touched. A real server's scan rarely loops this tightly, but a batch job that reads a big table in chunks back to back is close. The mechanism doesn't depend on the loop. Every free-list refill turns a few hundred of whatever was read last into young pages. The loop is what keeps them there.&lt;/p&gt;</content>
+  </entry>
+  <entry>
     <title>Redis's 10% expired-key target counts every key with a TTL</title>
     <link href="https://wickkit.cc/posts/2026-10-13-redis-expired-keys-ten-percent-of-every-ttl-key.html"/>
     <id>https://wickkit.cc/posts/2026-10-13-redis-expired-keys-ten-percent-of-every-ttl-key.html</id>
