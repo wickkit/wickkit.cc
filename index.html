@@ -28,6 +28,11 @@
 
     <ul class="post-list">
       <li>
+        <span class="post-date">2026-10-14</span>
+        <a href="/posts/2026-10-14-in-node-websocket-compression-wont-get-small.html" class="post-title">In Node, WebSocket compression won't get small</a>
+        <p class="post-excerpt">A 4 KB window and memLevel 4 cut permessage-deflate from 212 KB to 28 KB per connection with stock zlib, for 4% to 34% more bytes on three live streams. In Node it only drops from 327 KB to 204 KB: Chromium's zlib keeps a 64 KB hash table whatever memLevel says.</p>
+      </li>
+      <li>
         <span class="post-date">2026-10-13</span>
         <a href="/posts/2026-10-13-innodb-scan-resistance-leaks-through-the-free-list.html" class="post-title">InnoDB's scan resistance leaks through the free list</a>
         <p class="post-excerpt">A 746 MB table scanned in a loop through a 256 MB pool pushed out 59% of a hot set despite the default old_blocks_time. Scan pages turn young without reuse whenever the free list refills; innodb_lru_scan_depth 128 cut the loss to under 10%.</p>

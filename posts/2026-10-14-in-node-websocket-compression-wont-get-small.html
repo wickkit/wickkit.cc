@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>In Node, WebSocket compression won't get small — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/tools.html">tools</a>
+      <a href="/den.html">den</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+
+    <article>
+      <h1>In Node, WebSocket compression won't get small</h1>
+      <div class="meta">2026-10-14 · Kit Wickham</div>
+
+      <p>WebSocket compression (permessage-deflate) keeps a deflate compressor alive for every connection, and with zlib's defaults that costs about 212 KB per connection. Two settings shrink it: the window size and zlib's <code>memLevel</code>. With stock zlib, a 4 KB window and memLevel 4 cut that to 28 KB, and on three live message streams the output grew by 4% to 34%. In Node, the same settings only go from 327 KB to 204 KB. Node ships Chromium's fork of zlib, which keeps a 64 KB hash table no matter what memLevel you ask for.</p>
+
+      <h2>The setup</h2>
+
+      <p>With context takeover (the normal mode), a permessage-deflate sender runs one deflate stream for the whole connection and flushes it at the end of each message, so each message can point back at earlier ones. <a href="https://www.rfc-editor.org/rfc/rfc7692">RFC 7692</a> lets the two sides agree on a smaller window, from 2<sup>8</sup> to 2<sup>15</sup> bytes, through <code>server_max_window_bits</code>. memLevel isn't part of the protocol; it's a local zlib setting (1 to 9, default 8) that sizes the hash table and the buffer deflate collects a block in.</p>
+
+      <p>I recorded three real streams, one connection each: 37,944 messages from Bluesky's <a href="https://github.com/bluesky-social/jetstream">Jetstream</a> firehose (average 634 bytes), 7,513 ticker and trade messages from Coinbase's public market feed for five coins (344 bytes), and 5,706 edit events from Wikimedia's <a href="https://stream.wikimedia.org/v2/stream/recentchange">recentchange</a> stream (1,340 bytes). Each was replayed through a compressor the way a server sends: compress the message, sync flush, drop the four trailing bytes the RFC says to drop. Ratios below are output bytes over input bytes at level 6, from Python 3.14 with stock zlib 1.3.1. Node's zlib gave ratios within 1.5% of these on the Jetstream messages I checked.</p>
+
+      <h2>What each setting buys</h2>
+
+      <table>
+        <thead><tr><th>Window, memLevel</th><th>Jetstream</th><th>Coinbase</th><th>Wikimedia</th><th>Stock zlib</th><th>Node</th></tr></thead>
+        <tbody>
+          <tr><td>32 KB, 8 (default)</td><td>0.313</td><td>0.194</td><td>0.165</td><td>212 KB</td><td>327 KB</td></tr>
+          <tr><td>32 KB, 4</td><td>0.314</td><td>0.194</td><td>0.166</td><td>140 KB</td><td>313 KB</td></tr>
+          <tr><td>8 KB, 4</td><td>0.321</td><td>0.202</td><td>0.201</td><td>44 KB</td><td>223 KB</td></tr>
+          <tr><td>4 KB, 4</td><td>0.326</td><td>0.209</td><td>0.221</td><td>28 KB</td><td>204 KB</td></tr>
+          <tr><td>2 KB, 4</td><td>0.338</td><td>0.222</td><td>0.270</td><td>20 KB</td><td>201 KB</td></tr>
+          <tr><td>1 KB, 4</td><td>0.367</td><td>0.262</td><td>0.455</td><td>16 KB</td><td>198 KB</td></tr>
+          <tr><td>no context takeover</td><td>0.583</td><td>0.652</td><td>0.476</td><td></td><td></td></tr>
+        </tbody>
+      </table>
+
+      <p>The memory columns are resident memory per connection: 1,000 compressors in one process, each fed the same 300 Jetstream messages (about 200 KB, so the whole window gets used), median of three runs on Linux. The Node column includes the stream object itself; a plain pass-through stream doing the same work cost 43 KB.</p>
+
+      <p>Two things stand out. memLevel above 4 bought nothing: on all three streams memLevel 4 matched memLevel 8 to within 0.001 at every window from 1 KB up, while saving 72 KB per connection in stock zlib. Because every message ends with a flush, deflate never fills the big block buffer memLevel 8 pays for. The window is where the trade-off lives, and where it starts to hurt follows message size. Coinbase and Jetstream messages are small, so a 4 KB window still holds six to twelve of them, and the output grows by 8% and 4% compared to the defaults. Wikimedia's messages are two to four times bigger and keep finding matches far back: at 4 KB the output is 34% bigger, at 1 KB it nearly triples, and a 512-byte window does worse than no context takeover at all.</p>
+
+      <h2>Why Node stays big</h2>
+
+      <p>In stock zlib, memory follows the documented formula: 2<sup>window bits + 2</sup> plus 2<sup>memLevel + 9</sup> bytes, plus a few KB of state. Node uses Chromium's zlib, and its <a href="https://chromium.googlesource.com/chromium/src/third_party/zlib/+/refs/heads/main/deflate.c">deflate.c</a> raises the hash table to 2<sup>15</sup> entries whenever memLevel asks for fewer (unless it's built with its older rolling hash). That's 64 KB per connection you can't turn down. memLevel still sets the block buffer, so it saves a little, but going from 32 KB to 4 KB windows saves 109 KB in Node against 112 KB in stock zlib, and in Node the rest of the floor stays.</p>
+
+      <p>The other knob that mattered in Node is the stream's output chunk size, which defaults to 16 KB. The popular <a href="https://github.com/websockets/ws">ws</a> library passes its <code>zlibDeflateOptions</code> straight to Node's zlib, and its README example sets <code>chunkSize: 1024</code>, <code>memLevel: 7</code> and level 3. With the default 32 KB window, that measured 275 KB per connection. A 4 KB window, memLevel 4 and 1 KB chunks measured 149 KB, and even a 512-byte window with memLevel 1 only reached 145 KB. That's the floor: about 43 KB of stream and about 100 KB of zlib that no setting removes.</p>
+
+      <h2>What to do</h2>
+
+      <p>Set memLevel to 4 wherever you can; it costs nothing measurable on flushed message streams. Pick the window from your message size, not from a general rule: keep it at least a few messages long, and measure on recorded traffic if your messages are over a kilobyte, because that's where small windows got expensive. Python's <a href="https://websockets.readthedocs.io/en/stable/topics/compression.html">websockets</a> library already defaults to a 4 KB window and memLevel 5 and documents the same trade-off; these numbers say it's a good default for small messages and a costly one for kilobyte-sized events. In Node, plan on roughly 150 to 200 KB per compressed connection whatever you set, so with many mostly idle connections, the choice that saves memory is whether to compress at all. ws already leaves compression off on servers by default.</p>
+
+      <p>Method: streams recorded on 14 October 2026 over 2.5, 15 and 10 minutes. Ratios from Python 3.14.8 (zlib 1.3.1), level 6; at level 9 memLevel 4 and 8 again matched within 0.4%, at level 1 within 3%. Node 26.10.0 with its bundled Chromium zlib; the Node ratio check used the first 5,000 Jetstream messages. Memory is the change in resident set size divided by 1,000 connections, one process per setting, three runs each; the three Node runs of a setting usually landed within 5 KB of each other, the worst within 60 KB. Server-to-client compression only: the receiving side's inflate memory isn't measured here. These are three streams of JSON; other traffic will land elsewhere, but the memLevel result held on all three.</p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+</body>
+</html>
