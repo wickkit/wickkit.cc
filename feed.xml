@@ -8,6 +8,42 @@
   <updated>2026-10-14T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
   <entry>
+    <title>SQLite WITHOUT ROWID saves a third until rows pass a kilobyte, then costs 3x</title>
+    <link href="https://wickkit.cc/posts/2026-10-14-without-rowid-stops-paying-at-about-a-kilobyte-per-row.html"/>
+    <id>https://wickkit.cc/posts/2026-10-14-without-rowid-stops-paying-at-about-a-kilobyte-per-row.html</id>
+    <updated>2026-10-14T00:00:00Z</updated>
+    <summary>With a UUID text key, WITHOUT ROWID cut the file by 20 to 35% for payloads up to 800 bytes. At 1000 bytes every row spilled to its own overflow page and the file was 3.3 times the ordinary table's.</summary>
+    <content type="html">&lt;p&gt;A table keyed by a UUID string normally stores its rows in a hidden rowid b-tree and keeps the key in a second index. &lt;code&gt;WITHOUT ROWID&lt;/code&gt; stores the rows in the key's own b-tree instead. The docs say it suits small rows, so I looked for where "small" ends. On a UUID-text primary key it saved 20 to 35% of the file up to about 800 bytes of payload, and at 1000 bytes the file jumped to 3.3 times the size of the ordinary table.&lt;/p&gt;
+
+      &lt;h2&gt;The test&lt;/h2&gt;
+
+      &lt;p&gt;60,000 rows, key a 36-character UUID string, value a blob of the stated size, 4096-byte pages, file vacuumed before measuring, 20,000 random point lookups. SQLite from the Python 3.14 standard library, in a Linux container.&lt;/p&gt;
+
+      &lt;table&gt;
+        &lt;tr&gt;&lt;th&gt;payload&lt;/th&gt;&lt;th&gt;rowid bytes/row&lt;/th&gt;&lt;th&gt;WITHOUT ROWID bytes/row&lt;/th&gt;&lt;th&gt;lookup µs (rowid / WITHOUT)&lt;/th&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;50&lt;/td&gt;&lt;td&gt;141&lt;/td&gt;&lt;td&gt;93&lt;/td&gt;&lt;td&gt;2.86 / 2.38&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;200&lt;/td&gt;&lt;td&gt;302&lt;/td&gt;&lt;td&gt;256&lt;/td&gt;&lt;td&gt;3.03 / 2.63&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;400&lt;/td&gt;&lt;td&gt;501&lt;/td&gt;&lt;td&gt;455&lt;/td&gt;&lt;td&gt;3.09 / 3.16&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;800&lt;/td&gt;&lt;td&gt;1072&lt;/td&gt;&lt;td&gt;1024&lt;/td&gt;&lt;td&gt;3.14 / 3.44&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;1000&lt;/td&gt;&lt;td&gt;1414&lt;/td&gt;&lt;td&gt;4608&lt;/td&gt;&lt;td&gt;3.17 / 7.09&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;2000&lt;/td&gt;&lt;td&gt;4151&lt;/td&gt;&lt;td&gt;4608&lt;/td&gt;&lt;td&gt;3.42 / 8.86&lt;/td&gt;&lt;/tr&gt;
+      &lt;/table&gt;
+
+      &lt;p&gt;The saving is the second copy of the key that the rowid table's index carries (about 45 bytes), so it shrinks in relative terms as rows grow and is gone by 500 bytes or so. Lookup is a little faster for small rows, one b-tree descent instead of two, and about even by 400 bytes.&lt;/p&gt;
+
+      &lt;h2&gt;The cliff&lt;/h2&gt;
+
+      &lt;p&gt;In a WITHOUT ROWID table the whole row lives in an index-style b-tree, and those pages cap how much of one cell stays on the page: about a quarter of the page, roughly 1000 bytes at 4096. Past that, the rest goes to an overflow page, and an overflow page is never shared. Each row then costs a leaf cell plus a whole page, which is the 4608 bytes per row in the last two lines, and a lookup reads one more page. The ordinary rowid table keeps payloads of up to about 4000 bytes on its leaf, so its 1000-byte rows stay compact.&lt;/p&gt;
+
+      &lt;p&gt;A 100,000-row run with 1000-byte payloads, inserting in random key order, took 1.3 s against 0.19 s for the rowid table, and the file came out at 461 MB against 141 MB. Same shape as the table.&lt;/p&gt;
+
+      &lt;h2&gt;So what&lt;/h2&gt;
+
+      &lt;p&gt;Use WITHOUT ROWID for a key-value table whose rows stay well under a kilobyte, and it is a free third off the file. If the value can grow, such as JSON documents or serialised objects, the rowid table is the safe default, because the penalty for crossing the line is large and silent. A larger page size moves the line up, I did not measure that.&lt;/p&gt;
+
+      &lt;p&gt;Method: one machine, one run per size, random UUID keys inserted in random order, other jobs running on the host so timings are ±10%. Sizes are file size after VACUUM divided by rows. The 1000-byte boundary is not exact: I tested 800 and 1000 and nothing between.&lt;/p&gt;</content>
+  </entry>
+  <entry>
     <title>On a Mac, a real fsync takes a whole number of milliseconds</title>
     <link href="https://wickkit.cc/posts/2026-10-14-on-a-mac-a-real-fsync-takes-a-whole-number-of-milliseconds.html"/>
     <id>https://wickkit.cc/posts/2026-10-14-on-a-mac-a-real-fsync-takes-a-whole-number-of-milliseconds.html</id>

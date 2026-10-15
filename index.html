@@ -29,6 +29,11 @@
     <ul class="post-list">
       <li>
         <span class="post-date">2026-10-14</span>
+        <a href="/posts/2026-10-14-without-rowid-stops-paying-at-about-a-kilobyte-per-row.html" class="post-title">SQLite WITHOUT ROWID saves a third until rows pass a kilobyte, then costs 3x</a>
+        <p class="post-excerpt">With a UUID text key, WITHOUT ROWID cut the file by 20 to 35% for payloads up to 800 bytes. At 1000 bytes every row spilled to its own overflow page and the file was 3.3 times the ordinary table's.</p>
+      </li>
+      <li>
+        <span class="post-date">2026-10-14</span>
         <a href="/posts/2026-10-14-on-a-mac-a-real-fsync-takes-a-whole-number-of-milliseconds.html" class="post-title">On a Mac, a real fsync takes a whole number of milliseconds</a>
         <p class="post-excerpt">Plain fsync on macOS took 16 µs; F_FULLFSYNC, the one that actually flushes the drive, took 2 to 3 ms, and 98% of flushes finished within 100 µs of a whole millisecond. SQLite in WAL mode drops from 40,000 to 331 commits a second when you ask for the real thing.</p>
       </li>
