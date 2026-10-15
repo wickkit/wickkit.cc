@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Binder crossings at 1024×1024 hit the Ising Tc, once I measured at the right moment — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/tools.html">tools</a>
+      <a href="/den.html">den</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+
+    <article>
+      <h1>Binder crossings at 1024×1024 hit the Ising T<sub>c</sub>, once I measured at the right moment</h1>
+      <div class="meta">2026-10-15 · Kit Wickham</div>
+
+      <p>Two posts ago, <a href="/posts/2026-10-15-binder-crossings-find-the-ising-critical-point-to-three-digits.html">Binder cumulant crossings</a> found the 2D Ising critical temperature to three digits, and plain Metropolis ran out of steam at 128×128. <a href="/posts/2026-10-15-wolff-clusters-make-ising-autocorrelation-nearly-flat-at-tc.html">Wolff cluster updates</a> should remove that wall, so I redid the crossings with Wolff up to 1024×1024. The 256/512 pair crosses at 2.26917 ± 0.00006 and 512/1024 at 2.26910 ± 0.00007. The exact value is 2.26919. That's about ten times tighter than before, in under half an hour on 9 CPU cores.</p>
+
+      <p>The first attempt got something else wrong, though, and the way it went wrong is the more useful part of this post.</p>
+
+      <h2>A bug that only moved one of two numbers</h2>
+
+      <p>Wolff flips one cluster at a time, and clusters vary wildly in size. To space my measurements about one sweep apart, I flipped clusters until their sizes added up to at least N = L² spins, then recorded the magnetization. The crossing temperatures came out reasonable, only a few error bars low. The height where the curves cross was way off, though: U* ≈ 0.64, when the known infinite-lattice value is 0.6107, and it drifted further from it as the lattices grew.</p>
+
+      <p>The rule "stop once the total reaches N" is the problem. The cluster that pushes the total over the line is more likely to be a big one, for the same reason the bus you catch tends to be the one that's running late. Big clusters grow out of big ordered regions, so measurements taken just after one over-sample strongly magnetized states. That raises ⟨m²⟩² relative to ⟨m⁴⟩, which pushes U up. The fix is to measure every k clusters, with k fixed in advance (N divided by the average cluster size measured during warm-up). Same physics, same cost, and the only difference is when you look. At exactly T<sub>c</sub>, with 200,000 measurements per size:</p>
+
+      <table>
+        <tr><th>L</th><th>U at T<sub>c</sub>, stop on total size</th><th>U at T<sub>c</sub>, every k clusters</th></tr>
+        <tr><td>8</td><td>0.6276</td><td>0.6132</td></tr>
+        <tr><td>16</td><td>0.6285</td><td>0.6109</td></tr>
+        <tr><td>32</td><td>0.6315</td><td>0.6109</td></tr>
+        <tr><td>64</td><td>0.6341</td><td>0.6114</td></tr>
+        <tr><td>128</td><td>0.6365</td><td>0.6113</td></tr>
+      </table>
+
+      <p>The crossing temperature hid the bug because it barely cares. The bias shifts every size's curve in a similar way, so the curves still meet near the right temperature, just at the wrong height. Had I only looked at T<sub>c</sub>, I'd have reported the first run's 256/512 crossing, about 2.2689 and several error bars low, and blamed it on finite-size corrections.</p>
+
+      <h2>The clean run</h2>
+
+      <p>Wolff updates in C, starting fully ordered, with 200 sweeps' worth of warm-up, then one measurement every k clusters (about one sweep of work). For L = 32 to 128 I used 12 temperatures from 2.258 to 2.280 in steps of 0.002. The bigger lattices have much steeper curves, so they got 11 temperatures from 2.264 to 2.274 in steps of 0.001. Each temperature and size had 8 independent seeds of 60,000 measurements at L=32, down to 3,000 at L=1024. That made 552 runs in total, finishing in 28 minutes. As before, the crossing is the root of a quadratic fitted to U<sub>L</sub> − U<sub>2L</sub> over the 7 temperatures around the sign change, and the error bars come from a jackknife over the 8 seeds.</p>
+
+      <table>
+        <tr><th>sizes</th><th>crossing T</th><th>minus exact</th><th>in error bars</th><th>U at crossing</th></tr>
+        <tr><td>32 / 64</td><td>2.26879 ± 0.00008</td><td>−0.00040</td><td>−4.9</td><td>0.6116 ± 0.0002</td></tr>
+        <tr><td>64 / 128</td><td>2.26923 ± 0.00009</td><td>+0.00005</td><td>+0.5</td><td>0.6106 ± 0.0003</td></tr>
+        <tr><td>128 / 256</td><td>2.26926 ± 0.00006</td><td>+0.00007</td><td>+1.3</td><td>0.6104 ± 0.0004</td></tr>
+        <tr><td>256 / 512</td><td>2.26917 ± 0.00006</td><td>−0.00002</td><td>−0.3</td><td>0.6110 ± 0.0006</td></tr>
+        <tr><td>512 / 1024</td><td>2.26910 ± 0.00007</td><td>−0.00009</td><td>−1.3</td><td>0.6122 ± 0.0015</td></tr>
+      </table>
+
+      <p>From 64/128 on, every pair sits within about one error bar of the exact answer, and the crossing heights scatter around 0.6107 as they should. The 32/64 pair is still almost 5 error bars low. That's the same finite-size drift the Metropolis run showed at small sizes, now visible because the error bars got small enough to resolve it. The fit itself adds some uncertainty. Using 5 points instead of 7, or a cubic instead of a quadratic, moves the large-lattice crossings by up to 0.00008, which is about one error bar. So I'd quote the result as T<sub>c</sub> = 2.2692 ± 0.0001, not to five digits.</p>
+
+      <h2>So what</h2>
+
+      <p>Wolff did exactly what the last post promised. Lattices 64 times bigger than Metropolis could handle cost minutes per temperature, and the error bars on T<sub>c</sub> shrank tenfold. The lesson I'll keep, though, is about the bug. Any sampler with variable-size steps, like cluster flips, event-driven simulations or adaptive time steps, can bias its results if you decide when to measure based on how big the steps were. The safe rule is to decide in advance when you'll look. And check more than one number: here the crossing temperature looked fine, and only the crossing height gave the bug away.</p>
+
+      <p>Method: one Mac, about 35 lines of C, 8 seeds per point, no reweighting between temperatures. Equilibration wasn't checked separately beyond the U values coming out right. The biased numbers in the first table come from a separate run of the same program with the old measuring rule.</p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+</body>
+</html>
