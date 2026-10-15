@@ -8,6 +8,53 @@
   <updated>2026-10-14T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
   <entry>
+    <title>A fixed sleep in a test is a bet on how busy the machine is</title>
+    <link href="https://wickkit.cc/posts/2026-10-14-a-fixed-sleep-in-a-test-is-a-bet-on-the-load.html"/>
+    <id>https://wickkit.cc/posts/2026-10-14-a-fixed-sleep-in-a-test-is-a-bet-on-the-load.html</id>
+    <updated>2026-10-14T00:00:00Z</updated>
+    <summary>A spawned Python server that is ready in 17 ms on an idle 4-core box takes 377 ms at the median with 16 busy processes per core; a half-second sleep before connecting would have failed 17% of the time. Poll with a deadline instead.</summary>
+    <content type="html">&lt;p&gt;A test starts a helper server, sleeps a bit, then connects. The sleep is tuned on a quiet laptop and passes every time. On a loaded CI runner, it starts failing about one run in five. I wanted to know how fast that margin disappears, so I timed how long a freshly spawned Python server takes to accept a connection while busy processes fight it for the CPU. On an idle machine it took 17 ms. With 16 busy processes per core it took 377 ms at the median and 604 ms at p99. A sleep of half a second, 30 times the idle median, guessed wrong 17% of the time.&lt;/p&gt;
+
+      &lt;h2&gt;The test&lt;/h2&gt;
+
+      &lt;p&gt;A container with 4 CPUs ran Python 3.14. Each trial spawned &lt;code&gt;python -c&lt;/code&gt; with a script that imports &lt;code&gt;http.server&lt;/code&gt;, binds a loopback port, prints it and listens. The parent then retried &lt;code&gt;connect()&lt;/code&gt; every 2 ms until it worked, and timed spawn to first connection. Before the trials began, N processes running &lt;code&gt;while True: x += 1&lt;/code&gt; were started in the same container. Each load level got 500 trials. The last three columns show how often a fixed sleep of that length would have been too short.&lt;/p&gt;
+
+      &lt;table&gt;
+        &lt;tr&gt;&lt;th&gt;busy procs&lt;/th&gt;&lt;th&gt;per core&lt;/th&gt;&lt;th&gt;p50&lt;/th&gt;&lt;th&gt;p99&lt;/th&gt;&lt;th&gt;max&lt;/th&gt;&lt;th&gt;0.1 s fails&lt;/th&gt;&lt;th&gt;0.25 s fails&lt;/th&gt;&lt;th&gt;0.5 s fails&lt;/th&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;0&lt;/td&gt;&lt;td&gt;0&lt;/td&gt;&lt;td&gt;17 ms&lt;/td&gt;&lt;td&gt;22 ms&lt;/td&gt;&lt;td&gt;56 ms&lt;/td&gt;&lt;td&gt;0%&lt;/td&gt;&lt;td&gt;0%&lt;/td&gt;&lt;td&gt;0%&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;4&lt;/td&gt;&lt;td&gt;1&lt;/td&gt;&lt;td&gt;21 ms&lt;/td&gt;&lt;td&gt;50 ms&lt;/td&gt;&lt;td&gt;52 ms&lt;/td&gt;&lt;td&gt;0%&lt;/td&gt;&lt;td&gt;0%&lt;/td&gt;&lt;td&gt;0%&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;8&lt;/td&gt;&lt;td&gt;2&lt;/td&gt;&lt;td&gt;65 ms&lt;/td&gt;&lt;td&gt;103 ms&lt;/td&gt;&lt;td&gt;147 ms&lt;/td&gt;&lt;td&gt;1.2%&lt;/td&gt;&lt;td&gt;0%&lt;/td&gt;&lt;td&gt;0%&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;16&lt;/td&gt;&lt;td&gt;4&lt;/td&gt;&lt;td&gt;72–93 ms&lt;/td&gt;&lt;td&gt;148–184 ms&lt;/td&gt;&lt;td&gt;187 ms&lt;/td&gt;&lt;td&gt;20%&lt;/td&gt;&lt;td&gt;0%&lt;/td&gt;&lt;td&gt;0%&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;32&lt;/td&gt;&lt;td&gt;8&lt;/td&gt;&lt;td&gt;141 ms&lt;/td&gt;&lt;td&gt;312 ms&lt;/td&gt;&lt;td&gt;382 ms&lt;/td&gt;&lt;td&gt;91%&lt;/td&gt;&lt;td&gt;6.8%&lt;/td&gt;&lt;td&gt;0%&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;48&lt;/td&gt;&lt;td&gt;12&lt;/td&gt;&lt;td&gt;272 ms&lt;/td&gt;&lt;td&gt;436 ms&lt;/td&gt;&lt;td&gt;553 ms&lt;/td&gt;&lt;td&gt;99%&lt;/td&gt;&lt;td&gt;60%&lt;/td&gt;&lt;td&gt;0.2%&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;64&lt;/td&gt;&lt;td&gt;16&lt;/td&gt;&lt;td&gt;377 ms&lt;/td&gt;&lt;td&gt;604 ms&lt;/td&gt;&lt;td&gt;711 ms&lt;/td&gt;&lt;td&gt;96%&lt;/td&gt;&lt;td&gt;76%&lt;/td&gt;&lt;td&gt;17%&lt;/td&gt;&lt;/tr&gt;
+      &lt;/table&gt;
+
+      &lt;p&gt;Until the busy processes outnumber the cores, nothing much changes: the new process finds an idle core or one that frees up soon. Past that point it gets roughly its fair share of the CPU, so startup grows by about 6 ms for each extra busy process here. The growth isn't smooth. I ran the 12- and 16-process levels three times each, and the medians moved by ±20% between runs (68–96 ms at 12, 72–93 ms at 16). The tail grows faster than the median: at 16 per core, p99 is 36 times the idle median.&lt;/p&gt;
+
+      &lt;h2&gt;Why this bites tests in particular&lt;/h2&gt;
+
+      &lt;p&gt;A test suite run in parallel is the load. With a runner that starts one job per core, and each job spawning a server, a compiler or a browser of its own, the machine is oversubscribed by design. A sleep that's 10 times the idle startup time looks generous. Under 2 to 4 jobs per core, the test that relies on it fails a few percent of the time, which is exactly the rate that gets labelled "flaky" and retried rather than fixed.&lt;/p&gt;
+
+      &lt;p&gt;Making the sleep longer only moves the line. A one-second sleep never failed in my 6,500 loaded trials, but it charges every run a full second, even on an idle machine where the server is up in 17 ms.&lt;/p&gt;
+
+      &lt;h2&gt;So what&lt;/h2&gt;
+
+      &lt;p&gt;Poll for the condition, with a deadline. Something like this:&lt;/p&gt;
+
+&lt;pre&gt;&lt;code&gt;def wait_until(check, deadline=30, every=0.01):
+    end = time.monotonic() + deadline
+    while time.monotonic() &amp;lt; end:
+        if check():
+            return
+        time.sleep(every)
+    raise TimeoutError(check)&lt;/code&gt;&lt;/pre&gt;
+
+      &lt;p&gt;On a quiet machine it returns as soon as the server is up, at most one interval late. On a loaded one it waits as long as it has to. The deadline can then be huge (30 seconds, a minute), because it only matters when something is really broken. A test that sleeps pays the worst case every time and still loses when the load passes it. A test that polls pays the actual startup time and only fails when the server never comes up.&lt;/p&gt;
+
+      &lt;p&gt;Method: one machine, a 40-line Python script, Python 3.14 in a container limited to 4 CPUs, busy loops in the same container, 500 trials per run and 7,500 in total. Readiness was a loopback &lt;code&gt;connect()&lt;/code&gt;. Servers that load more code at startup will scale the same way from a higher base.&lt;/p&gt;</content>
+  </entry>
+  <entry>
     <title>SQLite's JSONB reads 3 to 15 times faster, until you ask for the text back</title>
     <link href="https://wickkit.cc/posts/2026-10-14-sqlite-jsonb-reads-fast-and-writes-back-slow.html"/>
     <id>https://wickkit.cc/posts/2026-10-14-sqlite-jsonb-reads-fast-and-writes-back-slow.html</id>

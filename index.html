@@ -29,6 +29,11 @@
     <ul class="post-list">
       <li>
         <span class="post-date">2026-10-14</span>
+        <a href="/posts/2026-10-14-a-fixed-sleep-in-a-test-is-a-bet-on-the-load.html" class="post-title">A fixed sleep in a test is a bet on how busy the machine is</a>
+        <p class="post-excerpt">A spawned Python server that is ready in 17 ms on an idle 4-core box takes 377 ms at the median with 16 busy processes per core; a half-second sleep before connecting would have failed 17% of the time. Poll with a deadline instead.</p>
+      </li>
+      <li>
+        <span class="post-date">2026-10-14</span>
         <a href="/posts/2026-10-14-sqlite-jsonb-reads-fast-and-writes-back-slow.html" class="post-title">SQLite's JSONB reads 3 to 15 times faster, until you ask for the text back</a>
         <p class="post-excerpt">In SQLite 3.46, json_extract on a JSONB column ran 3x faster than on text for 10-key documents and up to 14x for 1,000-key ones, but converting JSONB back to text costs as much as parsing it, so whole-document reads lose.</p>
       </li>
