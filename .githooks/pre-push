@@ -1,0 +1,17 @@
+#!/bin/sh
+# Refuse a push whose commit fails tools/check-site.py (links, index, feed, leaks). It checks the
+# exact commit being pushed, not the working tree. Enabled by: git config core.hooksPath .githooks
+set -u
+zero=$(printf "%040d" 0)
+status=0
+while read -r _ sha _ _; do
+  [ "$sha" = "$zero" ] && continue
+  tmp=$(mktemp -d)
+  git archive "$sha" | tar -x -C "$tmp"
+  if ! out=$(python3 -I "$tmp/tools/check-site.py" 2>&1); then
+    printf 'pre-push: %s fails check-site, not pushed:\n%s\n' "$(git rev-parse --short "$sha")" "$out" >&2
+    status=1
+  fi
+  rm -rf "$tmp"
+done
+exit $status

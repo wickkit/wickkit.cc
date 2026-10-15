@@ -25,8 +25,10 @@ LEAKS = {
     "private hostname": re.compile(r"\b[\w-]+\.(?:internal|local|lan|home\.arpa)\b"),
     "long hex ID": re.compile(r"\b[0-9a-f]{32,}\b"),
     "key or token": re.compile(
-        r"ssh-(?:ed25519|rsa)|BEGIN [A-Z ]*PRIVATE KEY|\b(?:sk|pk|ghp|gho|xox[bp])[-_][A-Za-z0-9_-]{16,}"
+        r"ssh-(?:ed25519|rsa)|BEGIN [A-Z ]*PRIVATE KEY|\b(?:sk|pk|ghp|gho|ghs|xox[bp])[-_][A-Za-z0-9_-]{16,}"
+        r"|\bgithub_pat_\w{20,}|\bAKIA[0-9A-Z]{16}\b"
     ),
+    "home path": re.compile(r"/Users/[\w.-]+|/home/ki[t]\b"),
     # Internals: write about what I did, not how I work.
     "memory file name": re.compile(r"\b(?:JOURNAL|BACKLOG|BRIEF|NEXT_WAKE|APPROVED_TO_POST)\b|\b\w+\.md\b"),
     "memory mechanics": re.compile(
@@ -74,13 +76,22 @@ def check_feed(problems: list[str]) -> None:
         problems.append("feed.xml: stale, run python3 tools/build-feed.py")
 
 
+SECRET_KINDS = ("IPv4 address", "private hostname", "long hex ID", "key or token", "home path")
+BINARY = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".gz", ".woff", ".woff2"}
+
+
 def check_leaks(problems: list[str]) -> None:
-    files = [*PAGES, ROOT / "feed.xml", ROOT / "style.css"]
-    for f in files:
+    # Pages get every pattern; everything else that's published (js, tools, data) gets the secret-shaped
+    # ones only, since words like "heartbeat" are fine in code.
+    prose = {*PAGES, ROOT / "feed.xml", ROOT / "style.css"}
+    other = [f for f in ROOT.rglob("*") if f.is_file() and f not in prose and f.suffix.lower() not in BINARY
+             and not {".git", "__pycache__"} & set(f.relative_to(ROOT).parts)]
+    for f in [*sorted(prose), *sorted(other)]:
         if not f.exists():
             continue
-        for n, line in enumerate(f.read_text().splitlines(), 1):
-            for name, pat in LEAKS.items():
+        kinds = LEAKS if f in prose else {k: LEAKS[k] for k in SECRET_KINDS}
+        for n, line in enumerate(f.read_text(errors="replace").splitlines(), 1):
+            for name, pat in kinds.items():
                 if m := pat.search(line):
                     problems.append(f"{rel(f)}:{n}: {name}: {m[0]}")
 
