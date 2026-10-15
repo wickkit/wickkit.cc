@@ -8,6 +8,39 @@
   <updated>2026-10-14T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
   <entry>
+    <title>A Python t-string is cheap until you render it</title>
+    <link href="https://wickkit.cc/posts/2026-10-14-a-t-string-is-cheap-until-you-render-it.html"/>
+    <id>https://wickkit.cc/posts/2026-10-14-a-t-string-is-cheap-until-you-render-it.html</id>
+    <updated>2026-10-14T00:00:00Z</updated>
+    <summary>In Python 3.14, building t"{name}: {n} items, {x:.2f}" took 88 ns against 139 ns for the f-string, because nothing is formatted yet. Rendering it with a plain-Python loop took 511 ns, so you pay 3 to 4× when you need the text.</summary>
+    <content type="html">&lt;p&gt;Python 3.14 added template strings: &lt;code&gt;t"hello {name}"&lt;/code&gt; gives you a &lt;code&gt;Template&lt;/code&gt; object holding the literal parts and the values, not a finished string. I wanted to know what that costs next to an f-string. Building one is cheaper than an f-string as soon as there is a format spec, because nothing gets formatted yet. Turning it into text with a plain-Python renderer costs three to four times what the f-string did.&lt;/p&gt;
+
+      &lt;h2&gt;The test&lt;/h2&gt;
+
+      &lt;p&gt;CPython 3.14.8, &lt;code&gt;timeit&lt;/code&gt; with 200,000 calls per case, 15 rounds with the cases interleaved, median per call. Each case is a lambda, and I subtracted an empty lambda (10.8 ns). The machine had other jobs on it, so read differences under about 15% as ties.&lt;/p&gt;
+
+      &lt;table&gt;
+        &lt;tr&gt;&lt;th&gt;expression&lt;/th&gt;&lt;th&gt;f-string (ns)&lt;/th&gt;&lt;th&gt;t-string, built (ns)&lt;/th&gt;&lt;th&gt;t-string, rendered (ns)&lt;/th&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;&lt;code&gt;"hello {name}"&lt;/code&gt;&lt;/td&gt;&lt;td&gt;21&lt;/td&gt;&lt;td&gt;46&lt;/td&gt;&lt;td&gt;214&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;&lt;code&gt;"{name}: {n} items, {x:.2f}"&lt;/code&gt;&lt;/td&gt;&lt;td&gt;139&lt;/td&gt;&lt;td&gt;88&lt;/td&gt;&lt;td&gt;511&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;eight &lt;code&gt;{n}&lt;/code&gt; in a row&lt;/td&gt;&lt;td&gt;276&lt;/td&gt;&lt;td&gt;189&lt;/td&gt;&lt;td&gt;1056&lt;/td&gt;&lt;/tr&gt;
+      &lt;/table&gt;
+
+      &lt;p&gt;For scale, the three-field line was 161 ns with &lt;code&gt;str.format&lt;/code&gt; and 127 ns with &lt;code&gt;%&lt;/code&gt;.&lt;/p&gt;
+
+      &lt;h2&gt;Why it comes out this way&lt;/h2&gt;
+
+      &lt;p&gt;An f-string does all its work right away: it calls &lt;code&gt;format()&lt;/code&gt; on every value and joins the pieces. A t-string only packs the values into &lt;code&gt;Interpolation&lt;/code&gt; objects. With one plain string value, joining is nearly free, so the f-string wins (21 against 46 ns, since the template still has to allocate objects). Once there is an int or a &lt;code&gt;:.2f&lt;/code&gt; to format, the f-string does that work and the t-string puts it off, so the t-string comes out ahead.&lt;/p&gt;
+
+      &lt;p&gt;Putting it off doesn't make it go away. A renderer has to walk the template, apply the conversion and format spec, and join, all in Python bytecode. My straightforward one (iterate, &lt;code&gt;isinstance&lt;/code&gt;, &lt;code&gt;format&lt;/code&gt;, join) cost 3.7× the f-string on the three-field line. A tighter version that zips &lt;code&gt;t.strings&lt;/code&gt; with &lt;code&gt;t.interpolations&lt;/code&gt; and skips &lt;code&gt;format&lt;/code&gt; when there's no spec got that to about 3.3×. Both give the same output as the f-string.&lt;/p&gt;
+
+      &lt;h2&gt;So what&lt;/h2&gt;
+
+      &lt;p&gt;A few hundred nanoseconds per string is nothing next to the jobs t-strings are for: escaping HTML, building SQL with parameters, structured logging. There the renderer would be doing extra work anyway, and a log line that is filtered out never has to be rendered at all, which is where the cheap build helps. Where you just need text, an f-string is still the fastest way to get it.&lt;/p&gt;
+
+      &lt;p&gt;Method: one machine, a single process per run, about 60 lines of plain Python. These are per-call costs in a tight loop, not what a whole program would see.&lt;/p&gt;</content>
+  </entry>
+  <entry>
     <title>Python 3.14's experimental JIT made none of my five benchmarks faster</title>
     <link href="https://wickkit.cc/posts/2026-10-14-python-314-experimental-jit-no-gain-on-short-benchmarks.html"/>
     <id>https://wickkit.cc/posts/2026-10-14-python-314-experimental-jit-no-gain-on-short-benchmarks.html</id>

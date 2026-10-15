@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>A Python t-string is cheap until you render it — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/tools.html">tools</a>
+      <a href="/den.html">den</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+
+    <article>
+      <h1>A Python t-string is cheap until you render it</h1>
+      <div class="meta">2026-10-14 · Kit Wickham</div>
+
+      <p>Python 3.14 added template strings: <code>t"hello {name}"</code> gives you a <code>Template</code> object holding the literal parts and the values, not a finished string. I wanted to know what that costs next to an f-string. Building one is cheaper than an f-string as soon as there is a format spec, because nothing gets formatted yet. Turning it into text with a plain-Python renderer costs three to four times what the f-string did.</p>
+
+      <h2>The test</h2>
+
+      <p>CPython 3.14.8, <code>timeit</code> with 200,000 calls per case, 15 rounds with the cases interleaved, median per call. Each case is a lambda, and I subtracted an empty lambda (10.8 ns). The machine had other jobs on it, so read differences under about 15% as ties.</p>
+
+      <table>
+        <tr><th>expression</th><th>f-string (ns)</th><th>t-string, built (ns)</th><th>t-string, rendered (ns)</th></tr>
+        <tr><td><code>"hello {name}"</code></td><td>21</td><td>46</td><td>214</td></tr>
+        <tr><td><code>"{name}: {n} items, {x:.2f}"</code></td><td>139</td><td>88</td><td>511</td></tr>
+        <tr><td>eight <code>{n}</code> in a row</td><td>276</td><td>189</td><td>1056</td></tr>
+      </table>
+
+      <p>For scale, the three-field line was 161 ns with <code>str.format</code> and 127 ns with <code>%</code>.</p>
+
+      <h2>Why it comes out this way</h2>
+
+      <p>An f-string does all its work right away: it calls <code>format()</code> on every value and joins the pieces. A t-string only packs the values into <code>Interpolation</code> objects. With one plain string value, joining is nearly free, so the f-string wins (21 against 46 ns, since the template still has to allocate objects). Once there is an int or a <code>:.2f</code> to format, the f-string does that work and the t-string puts it off, so the t-string comes out ahead.</p>
+
+      <p>Putting it off doesn't make it go away. A renderer has to walk the template, apply the conversion and format spec, and join, all in Python bytecode. My straightforward one (iterate, <code>isinstance</code>, <code>format</code>, join) cost 3.7× the f-string on the three-field line. A tighter version that zips <code>t.strings</code> with <code>t.interpolations</code> and skips <code>format</code> when there's no spec got that to about 3.3×. Both give the same output as the f-string.</p>
+
+      <h2>So what</h2>
+
+      <p>A few hundred nanoseconds per string is nothing next to the jobs t-strings are for: escaping HTML, building SQL with parameters, structured logging. There the renderer would be doing extra work anyway, and a log line that is filtered out never has to be rendered at all, which is where the cheap build helps. Where you just need text, an f-string is still the fastest way to get it.</p>
+
+      <p>Method: one machine, a single process per run, about 60 lines of plain Python. These are per-call costs in a tight loop, not what a whole program would see.</p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+</body>
+</html>

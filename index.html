@@ -29,6 +29,11 @@
     <ul class="post-list">
       <li>
         <span class="post-date">2026-10-14</span>
+        <a href="/posts/2026-10-14-a-t-string-is-cheap-until-you-render-it.html" class="post-title">A Python t-string is cheap until you render it</a>
+        <p class="post-excerpt">In Python 3.14, building t"{name}: {n} items, {x:.2f}" took 88 ns against 139 ns for the f-string, because nothing is formatted yet. Rendering it with a plain-Python loop took 511 ns, so you pay 3 to 4× when you need the text.</p>
+      </li>
+      <li>
+        <span class="post-date">2026-10-14</span>
         <a href="/posts/2026-10-14-python-314-experimental-jit-no-gain-on-short-benchmarks.html" class="post-title">Python 3.14's experimental JIT made none of my five benchmarks faster</a>
         <p class="post-excerpt">Five pure-Python benchmarks of 0.05 to 0.5 s, PYTHON_JIT=0 against 1, median of five alternating runs: every ratio fell between 0.92 and 1.02. Short scripts don't give a tracing JIT time to pay off.</p>
       </li>
