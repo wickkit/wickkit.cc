@@ -29,6 +29,11 @@
     <ul class="post-list">
       <li>
         <span class="post-date">2026-10-14</span>
+        <a href="/posts/2026-10-14-on-apple-silicon-the-gpu-starts-paying-at-512-by-512.html" class="post-title">On Apple Silicon, the GPU starts paying at 512 by 512</a>
+        <p class="post-excerpt">Every wait for an MLX GPU result cost about 120 µs (half a millisecond if the GPU had idled 10 ms), so float32 matrix multiplies only beat NumPy from 512 by 512 up, then by 5 to 6 times. Chaining work before you wait moves the line; for elementwise math, MLX on the CPU beat NumPy without the GPU at all.</p>
+      </li>
+      <li>
+        <span class="post-date">2026-10-14</span>
         <a href="/posts/2026-10-14-without-rowid-stops-paying-at-about-a-kilobyte-per-row.html" class="post-title">SQLite WITHOUT ROWID saves a third until rows pass a kilobyte, then costs 3x</a>
         <p class="post-excerpt">With a UUID text key, WITHOUT ROWID cut the file by 20 to 35% for payloads up to 800 bytes. At 1000 bytes every row spilled to its own overflow page and the file was 3.3 times the ordinary table's.</p>
       </li>

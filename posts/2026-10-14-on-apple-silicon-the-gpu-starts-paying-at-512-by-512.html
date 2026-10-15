@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>On Apple Silicon, the GPU starts paying at 512 by 512 — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/tools.html">tools</a>
+      <a href="/den.html">den</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+
+    <article>
+      <h1>On Apple Silicon, the GPU starts paying at 512 by 512</h1>
+      <div class="meta">2026-10-14 · Kit Wickham</div>
+
+      <p>On a Mac the CPU and GPU share one pool of memory, so moving an array to the GPU costs no copy. That makes it tempting to send everything there. I timed float32 matrix multiplies and elementwise math three ways: NumPy on the CPU, Apple's MLX on the GPU, and MLX on the CPU. The GPU was 5 to 6 times faster on big arrays. Below 512 by 512 it lost, because every time you wait for a GPU result you pay about 120 µs, whatever the size of the work.</p>
+
+      <h2>The floor</h2>
+
+      <p>Adding 1 to a four-element array and waiting for the answer took a median of 0.2 µs in NumPy, 9 µs in MLX on the CPU and 115 to 160 µs in MLX on the GPU (three runs). That last number is the cost of a round trip: build the command, hand it to the GPU, wait for it to say it's done. The work itself is close to nothing.</p>
+
+      <h2>Matrix multiply</h2>
+
+      <p>Square float32 matrices, median time per multiply, inputs already in place:</p>
+
+      <table>
+        <tr><th>n</th><th>NumPy</th><th>MLX GPU</th><th>MLX CPU</th><th>GPU speedup</th></tr>
+        <tr><td>64</td><td>1.0 µs</td><td>148 µs</td><td>9 µs</td><td>0.01×</td></tr>
+        <tr><td>128</td><td>4.0 µs</td><td>150 µs</td><td>12 µs</td><td>0.03×</td></tr>
+        <tr><td>256</td><td>22 µs</td><td>164 µs</td><td>31 µs</td><td>0.13×</td></tr>
+        <tr><td>384</td><td>61 µs</td><td>137 µs</td><td>73 µs</td><td>0.45×</td></tr>
+        <tr><td>512</td><td>155 µs</td><td>150 µs</td><td>168 µs</td><td>1.04×</td></tr>
+        <tr><td>768</td><td>447 µs</td><td>229 µs</td><td>460 µs</td><td>1.95×</td></tr>
+        <tr><td>1024</td><td>0.99 ms</td><td>0.30 ms</td><td>1.00 ms</td><td>3.3×</td></tr>
+        <tr><td>2048</td><td>7.7 ms</td><td>1.6 ms</td><td>8.1 ms</td><td>4.9×</td></tr>
+        <tr><td>4096</td><td>64 ms</td><td>12.4 ms</td><td>64 ms</td><td>5.2×</td></tr>
+      </table>
+
+      <p>Up to 384 the GPU column barely moves: it's the floor plus a little. At 512 the two are even. The other two runs gave 0.92× and 0.72× there, so call 512 the tie and 768 the first clear win, about 2× in every run. From 1536 up the GPU did 7 to 12 TFLOPS depending on the run, against NumPy's steady 2.0 to 2.2.</p>
+
+      <p>NumPy and MLX on the CPU are within a few percent of each other from 512 up, so they're probably calling the same Accelerate routine. Below that, MLX on the CPU carries its own 9 µs floor.</p>
+
+      <p>If your data starts and ends as NumPy arrays, the GPU path also pays for wrapping the inputs and copying the result out. That moved the 1024 case from 0.30 to 0.52 ms and the 4096 case from 12.4 to 16.4 ms. The tie point stays around 512.</p>
+
+      <h2>Elementwise</h2>
+
+      <p><code>exp(x) * 2 + 1</code> on a float32 vector:</p>
+
+      <table>
+        <tr><th>elements</th><th>NumPy</th><th>MLX GPU</th><th>MLX CPU</th></tr>
+        <tr><td>4,096</td><td>5 µs</td><td>130 µs</td><td>14 µs</td></tr>
+        <tr><td>65,536</td><td>73 µs</td><td>130 µs</td><td>42 µs</td></tr>
+        <tr><td>262,144</td><td>291 µs</td><td>140 µs</td><td>119 µs</td></tr>
+        <tr><td>1M</td><td>1.16 ms</td><td>0.24 ms</td><td>0.42 ms</td></tr>
+        <tr><td>16M</td><td>18.9 ms</td><td>3.2 ms</td><td>7.0 ms</td></tr>
+        <tr><td>64M</td><td>77 ms</td><td>12.1 ms</td><td>28 ms</td></tr>
+      </table>
+
+      <p>The GPU passes NumPy somewhere between 65,000 and 262,000 elements and ends up 6 times faster. But here MLX on the CPU is the surprise: it beats NumPy from 65,000 elements on, by 2.7 times at the top. NumPy runs this on one core and makes a temporary array for each step; MLX probably spreads it over cores and fuses the steps. At a quarter of a million elements MLX on the CPU even edges out the GPU, because it doesn't pay the floor.</p>
+
+      <h2>The floor is per wait, not per operation</h2>
+
+      <p>MLX is lazy: it builds a graph and only runs it when you ask for a result. So I chained K matrix multiplies and either waited once at the end or after each one:</p>
+
+      <table>
+        <tr><th>n</th><th>K</th><th>one wait</th><th>per multiply</th><th>wait after each</th></tr>
+        <tr><td>64</td><td>1</td><td>158 µs</td><td>158 µs</td><td>159 µs</td></tr>
+        <tr><td>64</td><td>16</td><td>191 µs</td><td>12 µs</td><td>1.90 ms</td></tr>
+        <tr><td>64</td><td>128</td><td>553 µs</td><td>4.3 µs</td><td>15.2 ms</td></tr>
+        <tr><td>256</td><td>16</td><td>373 µs</td><td>23 µs</td><td>3.0 ms</td></tr>
+        <tr><td>256</td><td>128</td><td>1.86 ms</td><td>15 µs</td><td>17.3 ms</td></tr>
+      </table>
+
+      <p>Waiting after each multiply costs about 120 µs every time, so 128 of them take 15 ms. Waiting once at the end costs the floor once, and each extra multiply adds only 4 to 15 µs. With batching, 128 multiplies at n=256 take 1.86 ms on the GPU against about 2.8 ms in NumPy, so the GPU wins at a size where it lost 7 to 1 one at a time. At n=64 it still loses: 4.3 µs a multiply against NumPy's 1 µs.</p>
+
+      <h2>An idle GPU is slower to answer</h2>
+
+      <p>The 120 µs is for a GPU that's already busy. I slept between tiny jobs and timed the next one:</p>
+
+      <table>
+        <tr><th>idle before</th><th>median round trip</th></tr>
+        <tr><td>0</td><td>113 µs</td></tr>
+        <tr><td>1 ms</td><td>153 µs</td></tr>
+        <tr><td>10 ms</td><td>510 µs</td></tr>
+        <tr><td>100 ms</td><td>641 µs</td></tr>
+        <tr><td>500 ms</td><td>536 µs</td></tr>
+      </table>
+
+      <p>After 10 ms of nothing the first job costs about half a millisecond, four to six times the busy floor. I'd guess the GPU drops into a lower power state that fast. So a program that does one small GPU job every so often, like a request handler, pays about 0.5 ms each time, not 0.12.</p>
+
+      <h2>So what</h2>
+
+      <p>On this Mac, keep matrices under 512 on the CPU unless you can line up many of them before you wait. For elementwise work on NumPy arrays, try MLX on the CPU first: it beat NumPy from 65,000 elements without any GPU cost. Go to the GPU for big arrays and long chains, and count your waits, not your operations. Each <code>eval</code>, <code>.item()</code> or conversion back to NumPy is a round trip.</p>
+
+      <p>Method: one 12-core Apple Silicon Mac with 16 GB, MLX 0.32.4, NumPy 2.5.4, Python 3.14, float32 throughout. Each cell is the median of at least five calls and 0.4 seconds of repeats after two warm-up calls, timed with <code>perf_counter</code> around a call that waits for the result. I ran the main table three times; the speedups quoted at 512 and 768 are from all three. Other jobs were running on the machine, which mostly affects the small GPU times. I didn't look at float16 or at fused kernels written by hand.</p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+</body>
+</html>
