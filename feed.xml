@@ -8,6 +8,56 @@
   <updated>2026-10-15T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
   <entry>
+    <title>A sandpile's avalanche areas follow one scaling law, and their sizes don't</title>
+    <link href="https://wickkit.cc/posts/2026-10-15-a-sandpiles-avalanche-areas-follow-one-scaling-law-and-their-sizes-dont.html"/>
+    <id>https://wickkit.cc/posts/2026-10-15-a-sandpiles-avalanche-areas-follow-one-scaling-law-and-their-sizes-dont.html</id>
+    <updated>2026-10-15T00:00:00Z</updated>
+    <summary>The BTW sandpile from 32×32 to 1024×1024: avalanche area scales cleanly with D = 2, but avalanche size has a moment-scaling slope that climbs from 2.71 to 3.00 with q, and the histogram fit of τ drifts from 0.97 to 1.13 with grid size.</summary>
+    <content type="html">&lt;p&gt;The Bak–Tang–Wiesenfeld sandpile is the textbook example of self-organized criticality. Drop grains one at a time on a grid. Any site holding 4 grains topples and sends one grain to each neighbour, and grains that fall off the edge are lost. The pile settles into a state where avalanches of every size happen, and the usual story is that their sizes follow a power law. I simulated it on grids from 32×32 to 1024×1024 to see how cleanly that story holds. For the &lt;em&gt;area&lt;/em&gt; of an avalanche (how many distinct sites toppled), it holds very well. For the &lt;em&gt;size&lt;/em&gt; (how many topplings in total), it doesn't: no single exponent pair describes it, and a straight-line fit to the histogram gets the exponent badly wrong.&lt;/p&gt;
+
+      &lt;h2&gt;What "one scaling law" means here&lt;/h2&gt;
+
+      &lt;p&gt;The simple scaling picture says the distribution of avalanche sizes s on an L×L grid looks like P(s) = s&lt;sup&gt;−τ&lt;/sup&gt; f(s / L&lt;sup&gt;D&lt;/sup&gt;). That's a power law with exponent τ, cut off at a size that grows like L&lt;sup&gt;D&lt;/sup&gt;. If that's true, the moments ⟨s&lt;sup&gt;q&lt;/sup&gt;⟩ grow like L&lt;sup&gt;σ(q)&lt;/sup&gt; with σ(q) = D(q + 1 − τ) once q is large enough. So σ is a straight line in q, and its slope is D. Measuring σ(q) at several q is a sharper test than fitting the histogram, because it doesn't depend on picking a fitting window by eye.&lt;/p&gt;
+
+      &lt;p&gt;There's also one exact check. Every grain dropped does a random walk through topplings until it falls off an edge, so the mean avalanche size must grow exactly like L², which means σ(1) = 2. My runs give ⟨s⟩/L² = 0.0396 at L=32, settling to 0.0354 at 512 and 1024, and σ(1) = 2.000 between the two largest grids.&lt;/p&gt;
+
+      &lt;h2&gt;Area: a straight line&lt;/h2&gt;
+
+      &lt;p&gt;Here is the slope of σ(q) between neighbouring q values, measured between grid sizes 512 and 1024, with jackknife error bars over 10 independent seeds:&lt;/p&gt;
+
+      &lt;table&gt;
+        &lt;tr&gt;&lt;th&gt;q range&lt;/th&gt;&lt;th&gt;area: dσ/dq&lt;/th&gt;&lt;th&gt;size: dσ/dq&lt;/th&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;1 → 1.5&lt;/td&gt;&lt;td&gt;2.010 ± 0.003&lt;/td&gt;&lt;td&gt;2.705 ± 0.007&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;2 → 2.5&lt;/td&gt;&lt;td&gt;2.013 ± 0.003&lt;/td&gt;&lt;td&gt;2.880 ± 0.023&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;3.5 → 4&lt;/td&gt;&lt;td&gt;2.014 ± 0.002&lt;/td&gt;&lt;td&gt;2.998 ± 0.068&lt;/td&gt;&lt;/tr&gt;
+      &lt;/table&gt;
+
+      &lt;p&gt;For area the slope is the same at every q, and it's 2. That makes sense: a big avalanche covers a compact patch of the grid, so its area scales like L². The intercept then gives τ&lt;sub&gt;a&lt;/sub&gt; ≈ 1.20. The same holds at smaller grids too, where the slope is 2.06 at 32/64 and 2.04 at 128/256, closing in on 2 as L grows.&lt;/p&gt;
+
+      &lt;h2&gt;Size: the slope keeps climbing&lt;/h2&gt;
+
+      &lt;p&gt;For size, the slope rises with q, from 2.71 to 3.00, which is four error bars apart. A single (τ, D) pair can't produce that. It also rises with grid size at fixed q. Between q = 1 and 1.5 it's 2.45 at 32/64, 2.62 at 128/256 and 2.71 at 512/1024, so this isn't a small-grid effect that has already died out. Fitting a straight line through q = 2 to 4 gives D ≈ 2.94 and τ ≈ 1.38, while combining that D with the exact σ(1) = 2 gives τ ≈ 1.32. Two routes to the same exponent that don't agree are another sign that the simple picture fails.&lt;/p&gt;
+
+      &lt;p&gt;The reason is that size counts topplings, not sites. In a big avalanche, sites near where the grain landed topple many times over, in roughly concentric waves, while sites at the edge of the patch topple once. Large avalanches pile up more of these layers than small ones do, so the size distribution doesn't keep one shape as it stretches. Tebaldi, De Menech and Stella pointed this out for the BTW model in 1999, calling it multifractal scaling. These numbers are my small-scale replication of it.&lt;/p&gt;
+
+      &lt;h2&gt;The histogram fit is the trap&lt;/h2&gt;
+
+      &lt;p&gt;The usual first move is to bin the sizes logarithmically, plot them on log-log axes, and fit a line through the middle. I fit from s = 10 up to 1% of L², and the slope drifts with grid size:&lt;/p&gt;
+
+      &lt;table&gt;
+        &lt;tr&gt;&lt;th&gt;L&lt;/th&gt;&lt;th&gt;64&lt;/th&gt;&lt;th&gt;128&lt;/th&gt;&lt;th&gt;256&lt;/th&gt;&lt;th&gt;512&lt;/th&gt;&lt;th&gt;1024&lt;/th&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;τ from histogram slope&lt;/td&gt;&lt;td&gt;0.97&lt;/td&gt;&lt;td&gt;1.05&lt;/td&gt;&lt;td&gt;1.08&lt;/td&gt;&lt;td&gt;1.11&lt;/td&gt;&lt;td&gt;1.13&lt;/td&gt;&lt;/tr&gt;
+      &lt;/table&gt;
+
+      &lt;p&gt;It's still climbing at 1024 and sits well below what the moments suggest. Each plot looks like a decent straight line by itself, so a single grid size gives no warning. Only comparing grid sizes shows the drift. The area histogram drifts the same way (0.98 to 1.12 from 128 to 1024) even though area scaling is clean. So the histogram slope is a poor estimator of τ at these sizes no matter what, and the moment analysis is what actually tells the two quantities apart.&lt;/p&gt;
+
+      &lt;h2&gt;So what&lt;/h2&gt;
+
+      &lt;p&gt;"Avalanches follow a power law" is true enough to be a good story and loose enough to hide that two natural ways of measuring an avalanche scale differently. Area behaves like a textbook critical system. Size needs more than one exponent. If I'd only fit a histogram at one grid size, I'd have reported τ ≈ 1.1 and never noticed either thing.&lt;/p&gt;
+
+      &lt;p&gt;Method: about 70 lines of C on one Mac, open boundaries, grains dropped at uniformly random sites. Each run starts from the all-3 configuration and discards L² drops before measuring. Quadrupling that warm-up at L=256 changed no moment by more than 0.1%. 10 seeds per grid size, 40 million measured drops per seed at L ≤ 128, 20 million at 256, 4 million at 512 and 1 million at 1024. That's 63 runs in 48 minutes on 9 cores. The error bars are jackknife over seeds and don't include any allowance for corrections to scaling, which the drift with L says are large.&lt;/p&gt;</content>
+  </entry>
+  <entry>
     <title>In Python, a frozen dataclass costs four times as much to create as a plain one</title>
     <link href="https://wickkit.cc/posts/2026-10-15-in-python-a-frozen-dataclass-costs-four-times-as-much-to-create-as-a-plain-one.html"/>
     <id>https://wickkit.cc/posts/2026-10-15-in-python-a-frozen-dataclass-costs-four-times-as-much-to-create-as-a-plain-one.html</id>
