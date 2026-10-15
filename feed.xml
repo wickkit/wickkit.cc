@@ -8,6 +8,52 @@
   <updated>2026-10-15T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
   <entry>
+    <title>Capping each server's load costs a hash ring almost nothing, until the cap gets within 5%</title>
+    <link href="https://wickkit.cc/posts/2026-10-15-capping-each-servers-load-costs-a-hash-ring-almost-nothing-until-the-cap-gets-within-5-percent.html"/>
+    <id>https://wickkit.cc/posts/2026-10-15-capping-each-servers-load-costs-a-hash-ring-almost-nothing-until-the-cap-gets-within-5-percent.html</id>
+    <updated>2026-10-15T00:00:00Z</updated>
+    <summary>Capping every server at (1+ε) of its fair load on a consistent-hash ring displaced 0.01% of keys at ε = 0.25 and 4% at ε = 0.01 with 160 points per server and 1,000 keys each. With one point per server a 25% cap displaced 35% of keys and moved 6.5 times the minimum on an add.</summary>
+    <content type="html">&lt;p&gt;A consistent-hash ring with 160 points per server leaves the busiest of 100 servers about 20 to 25% over its share. The fix from Mirrokni, Thorup and Zadimoghaddam (2016) is "consistent hashing with bounded loads": pick ε, cap every server at ⌈(1+ε)·&lt;i&gt;K&lt;/i&gt;/&lt;i&gt;N&lt;/i&gt;⌉ keys, and when a key's clockwise successor is full, keep walking the ring until you find a server with room. The busiest server can then never exceed 1+ε. What I wanted to know is the price: how many keys end up somewhere other than their ring owner, and how much does the cap add to the churn when a server joins or leaves?&lt;/p&gt;
+
+      &lt;h2&gt;The run&lt;/h2&gt;
+
+      &lt;p&gt;Random 64-bit keys and ring points. 50 and 200 servers, 10, 100 and 1,000 keys per server, 1, 16 and 160 points per server, ε from 0.01 to 1, six seeds each: 648 runs. Keys are placed in a fixed order, each walking to the first server under the cap. To measure churn I re-place all keys, in the same order, after adding one server or removing one, and count keys whose server changed. That is a pessimistic model, since an incremental system would only move what it has to, but it shows the cascade the cap can cause. Numbers below are means over seeds at 200 servers. "Churn" is keys moved as a multiple of the ideal 1/(&lt;i&gt;N&lt;/i&gt;+1) on an add.&lt;/p&gt;
+
+      &lt;h2&gt;With 160 points the cap is nearly free&lt;/h2&gt;
+
+      &lt;table&gt;
+        &lt;tr&gt;&lt;th&gt;ε&lt;/th&gt;&lt;th&gt;busiest (100 keys/server)&lt;/th&gt;&lt;th&gt;keys displaced&lt;/th&gt;&lt;th&gt;churn on add&lt;/th&gt;&lt;th&gt;busiest (1,000 keys/server)&lt;/th&gt;&lt;th&gt;keys displaced&lt;/th&gt;&lt;th&gt;churn on add&lt;/th&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;none&lt;/td&gt;&lt;td&gt;1.38&lt;/td&gt;&lt;td&gt;0&lt;/td&gt;&lt;td&gt;0.98×&lt;/td&gt;&lt;td&gt;1.26&lt;/td&gt;&lt;td&gt;0&lt;/td&gt;&lt;td&gt;0.99×&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;0.25&lt;/td&gt;&lt;td&gt;1.25&lt;/td&gt;&lt;td&gt;0.18%&lt;/td&gt;&lt;td&gt;1.01×&lt;/td&gt;&lt;td&gt;1.246&lt;/td&gt;&lt;td&gt;0.01%&lt;/td&gt;&lt;td&gt;0.99×&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;0.10&lt;/td&gt;&lt;td&gt;1.10&lt;/td&gt;&lt;td&gt;1.9%&lt;/td&gt;&lt;td&gt;1.32×&lt;/td&gt;&lt;td&gt;1.10&lt;/td&gt;&lt;td&gt;0.6%&lt;/td&gt;&lt;td&gt;1.17×&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;0.05&lt;/td&gt;&lt;td&gt;1.05&lt;/td&gt;&lt;td&gt;3.7%&lt;/td&gt;&lt;td&gt;1.68×&lt;/td&gt;&lt;td&gt;1.05&lt;/td&gt;&lt;td&gt;1.9%&lt;/td&gt;&lt;td&gt;1.43×&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;0.01&lt;/td&gt;&lt;td&gt;1.01&lt;/td&gt;&lt;td&gt;6.2%&lt;/td&gt;&lt;td&gt;2.5×&lt;/td&gt;&lt;td&gt;1.01&lt;/td&gt;&lt;td&gt;4.0%&lt;/td&gt;&lt;td&gt;1.9×&lt;/td&gt;&lt;/tr&gt;
+      &lt;/table&gt;
+
+      &lt;p&gt;The "none" row is the plain ring at 160 points (the ε = 1 runs, where the cap never binds). A cap of 25% over fair does almost nothing at 1,000 keys per server, because the ring was already inside it: only 1 key in 10,000 was displaced. Tightening to 10% fixes the hot server at the cost of moving under 1% of keys off their ring owner. Pushing to 1% means every server is within a couple of keys of perfect, 4% of keys are displaced, and adding a server moves about twice the minimum. Removing a server costs about the same (2.0× at ε = 0.01, 1.15× at 0.10).&lt;/p&gt;
+
+      &lt;h2&gt;With few points the cap is a crutch, and an expensive one&lt;/h2&gt;
+
+      &lt;table&gt;
+        &lt;tr&gt;&lt;th&gt;points per server&lt;/th&gt;&lt;th&gt;ε&lt;/th&gt;&lt;th&gt;keys displaced&lt;/th&gt;&lt;th&gt;churn on add&lt;/th&gt;&lt;th&gt;churn on remove&lt;/th&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;1&lt;/td&gt;&lt;td&gt;0.25&lt;/td&gt;&lt;td&gt;35%&lt;/td&gt;&lt;td&gt;6.5×&lt;/td&gt;&lt;td&gt;7.0×&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;1&lt;/td&gt;&lt;td&gt;1.0&lt;/td&gt;&lt;td&gt;16%&lt;/td&gt;&lt;td&gt;1.4×&lt;/td&gt;&lt;td&gt;1.6×&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;16&lt;/td&gt;&lt;td&gt;0.25&lt;/td&gt;&lt;td&gt;2.5%&lt;/td&gt;&lt;td&gt;1.4×&lt;/td&gt;&lt;td&gt;1.4×&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;16&lt;/td&gt;&lt;td&gt;0.05&lt;/td&gt;&lt;td&gt;9.7%&lt;/td&gt;&lt;td&gt;2.4×&lt;/td&gt;&lt;td&gt;2.5×&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;160&lt;/td&gt;&lt;td&gt;0.05&lt;/td&gt;&lt;td&gt;1.9%&lt;/td&gt;&lt;td&gt;1.4×&lt;/td&gt;&lt;td&gt;1.4×&lt;/td&gt;&lt;/tr&gt;
+      &lt;/table&gt;
+
+      &lt;p&gt;(1,000 keys per server.) With one point per server the arcs are so uneven that a cap of 1.25 sends 35% of keys down the ring to someone else, and then adding a server moves 6.5 times the minimum, because the full servers shift their overflow like dominoes. The cap does guarantee the load, but you've paid for the ring's missing evenness in movement. Points and the cap trade off: 16 points at ε = 0.25 displaces 2.5% of keys, where 160 points displaces 0.01%.&lt;/p&gt;
+
+      &lt;h2&gt;Small clusters are rougher&lt;/h2&gt;
+
+      &lt;p&gt;At only 10 keys per server the cap is ⌈(1+ε)·10⌉, so ε = 0.01, 0.05 and 0.10 all round to a cap of 11 and give identical results: a busiest server of 1.10 even when you asked for 1.01. With 160 points that still displaced 11% of keys and moved 1.8× the minimum on an add; removing a server at ε = 0.1 moved 12× the minimum, since a full server's keys land on neighbours that are also exactly full and push their own keys onward. If your per-server key count is small, round the cap yourself and expect the guarantee to be coarse.&lt;/p&gt;
+
+      &lt;h2&gt;So&lt;/h2&gt;
+
+      &lt;p&gt;The rule that came out: the ring's own overload at your point count is the number below which a cap starts costing anything. With 160 points and many keys per server that's about 1.25, so a cap of 1.25 is free, 1.10 costs under 1% of keys, and 1.05 costs 2 to 4%. If you want a tight cap, buy it with more points first; a cap on a thin ring turns into a lot of data movement. And in a real system the cap should be applied incrementally rather than by re-placing everything, which will move fewer keys than my numbers; treat the churn columns as the worst case.&lt;/p&gt;</content>
+  </entry>
+  <entry>
     <title>A hash ring with 160 points per server still overloads the busiest by a fifth</title>
     <link href="https://wickkit.cc/posts/2026-10-15-a-hash-ring-with-160-points-per-server-still-overloads-the-busiest-by-a-fifth.html"/>
     <id>https://wickkit.cc/posts/2026-10-15-a-hash-ring-with-160-points-per-server-still-overloads-the-busiest-by-a-fifth.html</id>
