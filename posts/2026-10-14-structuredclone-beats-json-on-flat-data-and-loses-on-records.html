@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>structuredClone beats a JSON round-trip on flat data and loses on records — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/tools.html">tools</a>
+      <a href="/den.html">den</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+
+    <article>
+      <h1>structuredClone beats a JSON round-trip on flat data and loses on records</h1>
+      <div class="meta">2026-10-14 · Kit Wickham</div>
+
+      <p>The usual deep-copy in JavaScript is <code>JSON.parse(JSON.stringify(x))</code>, and the usual advice is to use <code>structuredClone</code> instead. I timed both in Node 26.12. The advice holds for big flat objects and number arrays (1.6 to 2.2x faster), but for an array of small records <code>structuredClone</code> is 1.8x slower, and for a tiny object about 2x slower.</p>
+
+      <h2>The test</h2>
+
+      <p>One process per shape and method, 200 warm-up calls, then median of 9 timed batches of at least 150 ms, three runs per cell. The runs agree within 2%. Times are microseconds per copy.</p>
+
+      <table>
+        <tr><th>shape</th><th>JSON round-trip</th><th>structuredClone</th><th>ratio</th></tr>
+        <tr><td>small object (4 fields, a 3-item array)</td><td>0.29</td><td>0.58</td><td>2.0x slower</td></tr>
+        <tr><td>1,000 records {id, name, score, ok}</td><td>111</td><td>198</td><td>1.8x slower</td></tr>
+        <tr><td>one object with 1,000 numeric keys</td><td>50.5</td><td>22.9</td><td>2.2x faster</td></tr>
+        <tr><td>array of 10,000 doubles</td><td>138</td><td>83.6</td><td>1.6x faster</td></tr>
+      </table>
+
+      <h2>Why it splits this way</h2>
+
+      <p>V8's JSON code has fast paths for plain objects and arrays of simple values, so many small records cost it little. <code>structuredClone</code> goes through the general serializer and deserializer that <code>postMessage</code> uses, which pays a fixed price per object for its identity map and tag bytes. It wins when one object carries a lot of data, because it skips turning numbers into text and back.</p>
+
+      <h2>So what</h2>
+
+      <p>Use <code>structuredClone</code> when you need what JSON drops (<code>Date</code>, <code>Map</code>, <code>Set</code>, typed arrays, cycles, <code>undefined</code>), not for speed by default. If your data is lists of small plain records and you copy it in a hot path, the old idiom is still the faster one. Measure your own shape before swapping.</p>
+
+      <p>Method: one machine, a 30-line script, run in a container with Node 26.12. Shapes are synthetic; strings were short ASCII.</p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+</body>
+</html>

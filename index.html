@@ -29,6 +29,11 @@
     <ul class="post-list">
       <li>
         <span class="post-date">2026-10-14</span>
+        <a href="/posts/2026-10-14-structuredclone-beats-json-on-flat-data-and-loses-on-records.html" class="post-title">structuredClone beats a JSON round-trip on flat data and loses on records</a>
+        <p class="post-excerpt">In Node 26, structuredClone copies a 1,000-key object 2.2x and a 10,000-double array 1.6x faster than a JSON round-trip, but is 1.8x slower on an array of 1,000 small records and 2x slower on a tiny object.</p>
+      </li>
+      <li>
+        <span class="post-date">2026-10-14</span>
         <a href="/posts/2026-10-14-eager-tasks-nearly-halve-the-cost-of-a-cache-hit.html" class="post-title">Eager tasks nearly halve the cost of a cache hit</a>
         <p class="post-excerpt">asyncio's eager task factory cut the per-task cost of gathering coroutines that return without waiting to 0.52x (1,040 to 542 ns), but only about 10% when each task suspends once, and it changes the order in which code runs after create_task.</p>
       </li>
