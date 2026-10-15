@@ -8,6 +8,46 @@
   <updated>2026-10-14T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
   <entry>
+    <title>SQLite's JSONB reads 3 to 15 times faster, until you ask for the text back</title>
+    <link href="https://wickkit.cc/posts/2026-10-14-sqlite-jsonb-reads-fast-and-writes-back-slow.html"/>
+    <id>https://wickkit.cc/posts/2026-10-14-sqlite-jsonb-reads-fast-and-writes-back-slow.html</id>
+    <updated>2026-10-14T00:00:00Z</updated>
+    <summary>In SQLite 3.46, json_extract on a JSONB column ran 3x faster than on text for 10-key documents and up to 14x for 1,000-key ones, but converting JSONB back to text costs as much as parsing it, so whole-document reads lose.</summary>
+    <content type="html">&lt;p&gt;Since 3.45, SQLite can store JSON in a binary form, JSONB, and every &lt;code&gt;json_*&lt;/code&gt; function accepts it. I stored the same documents both ways in SQLite 3.46.1 and timed &lt;code&gt;json_extract&lt;/code&gt; on a single key. JSONB was 3x faster on small documents and up to 15x faster on big ones. Its speed also depended on where the key sits in the document, which the text form's speed did not. Getting a whole document back out as text costs as much as parsing it in the first place, so JSONB only pays when you query inside documents more than you return them whole.&lt;/p&gt;
+
+      &lt;h2&gt;The test&lt;/h2&gt;
+
+      &lt;p&gt;Flat objects with 10, 100 or 1,000 keys, two thirds integers and one third short strings, about 2 million keys per table in total. Everything ran in an in-memory database, so the numbers measure CPU only, not I/O. Each query summed one key over every row, best of 5. I ran it 3 times; the ratio ranges below cover all three runs. Times are nanoseconds per row, from one run.&lt;/p&gt;
+
+      &lt;table&gt;
+        &lt;tr&gt;&lt;th&gt;keys per doc&lt;/th&gt;&lt;th&gt;key read&lt;/th&gt;&lt;th&gt;text&lt;/th&gt;&lt;th&gt;JSONB&lt;/th&gt;&lt;th&gt;ratio (3 runs)&lt;/th&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;10&lt;/td&gt;&lt;td&gt;first&lt;/td&gt;&lt;td&gt;593&lt;/td&gt;&lt;td&gt;107&lt;/td&gt;&lt;td&gt;2.2–5.5x&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;10&lt;/td&gt;&lt;td&gt;last&lt;/td&gt;&lt;td&gt;534&lt;/td&gt;&lt;td&gt;166&lt;/td&gt;&lt;td&gt;3.2–3.6x&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;100&lt;/td&gt;&lt;td&gt;first&lt;/td&gt;&lt;td&gt;3,438&lt;/td&gt;&lt;td&gt;493&lt;/td&gt;&lt;td&gt;5.2–7.0x&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;100&lt;/td&gt;&lt;td&gt;middle&lt;/td&gt;&lt;td&gt;3,383&lt;/td&gt;&lt;td&gt;962&lt;/td&gt;&lt;td&gt;3.5–4.7x&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;100&lt;/td&gt;&lt;td&gt;last&lt;/td&gt;&lt;td&gt;3,911&lt;/td&gt;&lt;td&gt;1,087&lt;/td&gt;&lt;td&gt;3.2–3.6x&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;1,000&lt;/td&gt;&lt;td&gt;first&lt;/td&gt;&lt;td&gt;29,344&lt;/td&gt;&lt;td&gt;2,062&lt;/td&gt;&lt;td&gt;10–14x&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;1,000&lt;/td&gt;&lt;td&gt;middle&lt;/td&gt;&lt;td&gt;28,726&lt;/td&gt;&lt;td&gt;5,202&lt;/td&gt;&lt;td&gt;5.5–6.5x&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;1,000&lt;/td&gt;&lt;td&gt;last&lt;/td&gt;&lt;td&gt;34,424&lt;/td&gt;&lt;td&gt;6,494&lt;/td&gt;&lt;td&gt;4.5–5.5x&lt;/td&gt;&lt;/tr&gt;
+      &lt;/table&gt;
+
+      &lt;p&gt;On the text column the key's position barely matters, because SQLite parses the whole document before it looks anything up. JSONB skips that parse, but finding a key is still a walk past the keys that come before it, since there's no index inside an object. In the 1,000-key documents the last key costs about 3x what the first key does. If one or two fields are what you filter on, put them first when you build the document.&lt;/p&gt;
+
+      &lt;p&gt;Updates gain more than reads. &lt;code&gt;jsonb_set&lt;/code&gt; on one key was 5x faster than &lt;code&gt;json_set&lt;/code&gt; at 10 keys and 13–16x faster at 1,000 keys, because the text version parses the document and then writes out the whole thing as text again.&lt;/p&gt;
+
+      &lt;h2&gt;The catch&lt;/h2&gt;
+
+      &lt;p&gt;Your application almost certainly wants text. Turning a JSONB value back into text with &lt;code&gt;json()&lt;/code&gt; took 298 ns per row at 10 keys and 21 µs at 1,000 keys. That's about what &lt;code&gt;jsonb()&lt;/code&gt; takes to parse the text in the first place (506 ns and 26 µs). If most of your queries look like &lt;code&gt;SELECT doc FROM t WHERE id = ?&lt;/code&gt;, a JSONB column makes every read pay that conversion, and the parse it saves happens nowhere, because a plain text column is returned as it is stored.&lt;/p&gt;
+
+      &lt;p&gt;JSONB also took up 23% less space here (141 vs 183 bytes at 10 keys, 15.2 vs 19.5 KB at 1,000). The saving comes from numbers and punctuation; long strings would shrink it.&lt;/p&gt;
+
+      &lt;h2&gt;So what&lt;/h2&gt;
+
+      &lt;p&gt;If you filter, aggregate or patch inside documents in SQL, store JSONB: it's several times faster and a bit smaller. If you mostly store documents and hand them back whole, keep text. Converting is cheap to try: &lt;code&gt;UPDATE t SET doc = jsonb(doc)&lt;/code&gt;, and the same queries keep working.&lt;/p&gt;
+
+      &lt;p&gt;Method: one machine, a 40-line Python script, SQLite 3.46.1 in a container, 2 CPUs per run. Documents are synthetic and flat; nested paths would add a walk per level.&lt;/p&gt;</content>
+  </entry>
+  <entry>
     <title>structuredClone beats a JSON round-trip on flat data and loses on records</title>
     <link href="https://wickkit.cc/posts/2026-10-14-structuredclone-beats-json-on-flat-data-and-loses-on-records.html"/>
     <id>https://wickkit.cc/posts/2026-10-14-structuredclone-beats-json-on-flat-data-and-loses-on-records.html</id>
