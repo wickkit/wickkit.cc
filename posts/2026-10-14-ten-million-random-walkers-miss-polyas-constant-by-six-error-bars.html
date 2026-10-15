@@ -54,6 +54,40 @@
 
       <p>Adding the formula back fixes it. The last column flattens out by about 1,000 steps and stays at 0.34074 ± 0.00015, which is within 1.3 error bars of the true 0.340537, the same lucky +1.3 as before. Applied to the exact column, the same correction gives 0.340537 to six places.</p>
 
+      <h2>Try it</h2>
+
+      <p>The same walk runs below, in your browser. Each walker either comes home or gets cut off at the step limit. The blue line is the share back by each step, with a band of two error bars. The dashed line is the true chance of ever coming back. In 3D, the orange line adds the 0.287/√<i>n</i> tail back on. Leave it running and watch the error bars shrink while the gap stays put. Then cut the step limit and watch the gap grow.</p>
+
+      <div class="viz" id="pw">
+        <div class="viz-presets" role="group" aria-label="Dimension and run">
+          <button type="button" data-d="1" aria-pressed="false">1D</button>
+          <button type="button" data-d="2" aria-pressed="false">2D</button>
+          <button type="button" data-d="3" aria-pressed="true">3D</button>
+          <button type="button" data-d="4" aria-pressed="false">4D</button>
+          <button type="button" data-d="5" aria-pressed="false">5D</button>
+          <button type="button" id="pw-reset">restart</button>
+          <button type="button" id="pw-pause" aria-pressed="false">pause</button>
+        </div>
+        <div class="viz-controls">
+          <label>step limit per walker <output id="pw-cap-out">4,096</output>
+            <input type="range" id="pw-cap" min="6" max="16" step="1" value="12"></label>
+        </div>
+        <div class="viz-chart">
+          <div class="viz-legend"><span style="--c: var(--s1)">simulated, back by step <i>n</i></span><span id="pw-tail-key" style="--c: var(--s2)">simulated + 0.287/√<i>n</i></span><span style="--c: var(--s1); opacity: .7">true value (dashed)</span></div>
+          <svg id="pw-chart" role="img" aria-label="Share of walkers back at the origin by each step, log scale in steps, against the true return probability"></svg>
+        </div>
+        <div class="viz-stats">
+          <div><b id="pw-n">0</b>walkers finished</div>
+          <div><b id="pw-p">–</b>back by the step limit</div>
+          <div><b id="pw-true">–</b>true chance of ever coming back</div>
+          <div><b id="pw-gap">–</b>gap, in error bars</div>
+        </div>
+        <p class="note">3D, limit + tail: <b id="pw-fix">–</b></p>
+        <noscript><p class="note">The simulation needs JavaScript.</p></noscript>
+      </div>
+
+      <p>1D and 2D come back for sure, but 2D takes its time: with 65,536 steps only about 77% of walkers are home. The missing share there falls like 1/log <i>n</i>, so no step limit you could afford gets close.</p>
+
       <h2>So what</h2>
 
       <p>In a Monte Carlo run, the error bar only covers the luck of the draw. It says nothing about stopping each walker early, and here that cut was the bigger error by a factor of seven. Adding more walkers would have shrunk the error bar around the wrong number. If you know how the tail falls off, add it back. If you don't, at least plot the estimate against the cutoff and see whether it has stopped moving. Here it hadn't, even at 65,536 steps.</p>
@@ -63,5 +97,7 @@
   </main>
 
   <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+  <script src="/js/polya.js"></script>
+  <script src="/js/polya-ui.js"></script>
 </body>
 </html>
