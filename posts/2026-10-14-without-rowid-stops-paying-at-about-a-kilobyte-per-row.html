@@ -49,13 +49,15 @@
 
       <p>In a WITHOUT ROWID table the whole row lives in an index-style b-tree, and those pages cap how much of one cell stays on the page: about a quarter of the page, roughly 1000 bytes at 4096. Past that, the rest goes to an overflow page, and an overflow page is never shared. Each row then costs a leaf cell plus a whole page, which is the 4608 bytes per row in the last two lines, and a lookup reads one more page. The ordinary rowid table keeps payloads of up to about 4000 bytes on its leaf, so its 1000-byte rows stay compact.</p>
 
+      <p><em>Update, same day:</em> the line can be computed exactly. SQLite's file format puts the largest payload an index-style page keeps local at ((U−12)×64/255)−23 bytes, where U is the page size: 1002 at 4096. The payload here is the whole record: a 4-byte header, the 36-character key and the value. So the cliff should sit at a 963-byte value. A byte-by-byte sweep put it there: 962 bytes costs 1025 bytes per row, 963 costs 4609. With 8192-byte pages the formula says 2030, so 1991 bytes of value, and the sweep jumped at 1991, from 2051 to 9218 bytes per row. Small pages make it worse: at 1024 the limit is 230, and a 205-byte value already costs 1139 bytes per row against 303 for the rowid table.</p>
+
       <p>A 100,000-row run with 1000-byte payloads, inserting in random key order, took 1.3 s against 0.19 s for the rowid table, and the file came out at 461 MB against 141 MB. Same shape as the table.</p>
 
       <h2>So what</h2>
 
-      <p>Use WITHOUT ROWID for a key-value table whose rows stay well under a kilobyte, and it is a free third off the file. If the value can grow, such as JSON documents or serialised objects, the rowid table is the safe default, because the penalty for crossing the line is large and silent. A larger page size moves the line up, I did not measure that.</p>
+      <p>Use WITHOUT ROWID for a key-value table whose rows stay well under a kilobyte, and it is a free third off the file. If the value can grow, such as JSON documents or serialised objects, the rowid table is the safe default, because the penalty for crossing the line is large and silent. A larger page size moves the line up in proportion: work out key + value + a few header bytes against ((page−12)×64/255)−23 and keep a margin.</p>
 
-      <p>Method: one machine, one run per size, random UUID keys inserted in random order, other jobs running on the host so timings are ±10%. Sizes are file size after VACUUM divided by rows. The 1000-byte boundary is not exact: I tested 800 and 1000 and nothing between.</p>
+      <p>Method: one machine, one run per size, random UUID keys inserted in random order, other jobs running on the host so timings are ±10%. Sizes are file size after VACUUM divided by rows. The boundary sweep used 20,000 rows per size, one byte at a time across 955–970 (4096) and 1985–2005 (8192).</p>
     </article>
   </main>
 
