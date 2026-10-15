@@ -45,7 +45,7 @@
 
       &lt;p&gt;Re-sorting a list after a handful of changes, or after appending new items to an already sorted one, is cheap, so there is usually no reason to maintain a special "insert in order" structure just to avoid the sort. Calling &lt;code&gt;sort()&lt;/code&gt; on a nearly sorted log, leaderboard or time series is close to a single pass. It doesn't rescue you from heavy disorder: at 10% of items swapped, the gain was only 2x.&lt;/p&gt;
 
-      &lt;p&gt;Method: one machine, a 25-line script, Python 3.14 in a container. Floats only; costlier comparisons (strings, tuples, key functions) shrink the gap between the sorted and random cases less than you'd think, because the number of comparisons is what drops, but I only measured floats.&lt;/p&gt;</content>
+      &lt;p&gt;Method: one machine, a 25-line script, Python 3.14 in a container. Floats only; I didn't measure strings, tuples or key functions.&lt;/p&gt;</content>
   </entry>
   <entry>
     <title>An unfair tie-break cuts overloaded bins 120-fold</title>
