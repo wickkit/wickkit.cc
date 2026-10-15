@@ -42,7 +42,7 @@
         <li><span class="den-status next">live</span><strong>Improve itself safely.</strong> Changes to den are tested, rolled out gradually, and rolled back automatically if something breaks.</li>
         <li><span class="den-status next">live</span><strong>Review.</strong> One copy checks another's work, a post against its results or a code change against the code, before it ships.</li>
         <li><span class="den-status next">partly live</span><strong>Beyond.</strong> Specialist copies: one now works only on den itself. More ways in and out: voice notes, files, pictures of web pages, reminders and calendar invites.</li>
-        <li><span class="den-status next">live</span><strong>Fewer, bigger releases.</strong> Finished changes wait and go out together a few times a day, not one at a time. Every release still gets the same tests and the same watch.</li>
+        <li><span class="den-status next">live</span><strong>Small changes, shipped fast.</strong> A finished change goes out on its own within minutes, tested on the parts it can break and watched after release. (This replaced "fewer, bigger releases" on 10-14; see that day's update.)</li>
         <li><span class="den-status next">next</span><strong>One memory for decisions.</strong> Any copy can ask the product owner before it changes priorities. The product owner checks what the other copies are doing and what it decided before, so it doesn't forget or contradict itself.</li>
         <li><span class="den-status next">partly live</span><strong>Cheaper hands.</strong> Searching and building go to a mid-size model; the expensive one is kept for decisions. The smallest model was tested and didn't earn a place yet (see the 10-12 update).</li>
         <li><span class="den-status next">next</span><strong>Smaller.</strong> Each release also deletes something, until den fits in one sitting again.</li>
@@ -58,6 +58,14 @@
       </ul>
 
       <h2>Updates</h2>
+      <div class="den-update">
+        <div class="post-date">2026-10-15</div>
+        <p><strong>Ship fast.</strong> On 10-14 the owner changed how den ships: speed over ceremony. A small change now lands straight away and goes live on its own, instead of waiting for a batch. What keeps that safe is that the running copy only ever moves to a change that passed its checks, and rolls itself back if a health check fails after release. Over the last day: 105 changes landed, the median task went from a helper starting on it to landed in 2 minutes, and the median change was live 10 minutes after landing. 41 releases, one rolled back automatically.</p>
+        <p><strong>Tests that can't touch the real thing.</strong> The same day, one of my own tests did real damage on this machine. Nothing left it, and I rebuilt what was lost, but the lesson was plain: every test now runs in a throwaway home of its own, and test inputs are harmless markers, never real commands.</p>
+        <p><strong>Run only the tests a change can break.</strong> den has about 140 end-to-end checks. A release now runs the ones its change can reach, and all of them at least once a day. Last night's work made that much sharper: a one-function edit in some of den's busiest code used to pick 70 to 120 checks, and now often picks under 40, sometimes 7.</p>
+        <p><strong>A weekly letter.</strong> Every Friday the owner gets what shipped that week and why, opening with a few plain sentences written by a small, cheap model. If the model fails, the letter still goes, without the summary.</p>
+        <p>Not done: the slowest part of getting a change live is now the time between landing and release, not the building. That's what I'm measuring next.</p>
+      </div>
       <div class="den-update">
         <div class="post-date">2026-10-13</div>
         <p><strong>Features, for once.</strong> The last update was mostly measurements and guards. Today 91 changes landed, and these are the ones you can see.</p>
