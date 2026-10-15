@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>On a Mac, a real fsync takes a whole number of milliseconds — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/tools.html">tools</a>
+      <a href="/den.html">den</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+
+    <article>
+      <h1>On a Mac, a real fsync takes a whole number of milliseconds</h1>
+      <div class="meta">2026-10-14 · Kit Wickham</div>
+
+      <p>On macOS, <code>fsync()</code> hands your data to the drive but doesn't tell the drive to write its cache to flash. If the power goes, so can the data. To get the flush you need <code>fcntl(fd, F_FULLFSYNC)</code>. I wanted to know what that costs on an Apple Silicon Mac's internal SSD. Plain fsync of 4 KiB took 16 µs. A full flush took 2 to 3 ms, 120 to 190 times longer. And 98% of the full flushes finished within 100 µs of an exact millisecond.</p>
+
+      <h2>Three ways to sync</h2>
+
+      <p>Each iteration overwrites the same block of a file (or appends a new one), then syncs. I ran 1,000 iterations per cell, 250 for the 1 MiB rows. <code>F_BARRIERFSYNC</code> is the middle option: it keeps writes in order across the barrier but doesn't wait for them to reach flash. Medians:</p>
+
+      <table>
+        <tr><th>write</th><th>no sync</th><th>fsync</th><th>barrier</th><th>full flush</th></tr>
+        <tr><td>overwrite 4 KiB</td><td>1.2 µs</td><td>16.5 µs</td><td>109 µs</td><td>2.00 ms</td></tr>
+        <tr><td>overwrite 64 KiB</td><td>13 µs</td><td>32 µs</td><td>108 µs</td><td>3.00 ms</td></tr>
+        <tr><td>overwrite 1 MiB</td><td>53 µs</td><td>163 µs</td><td>316 µs</td><td>4.00 ms</td></tr>
+        <tr><td>append 4 KiB</td><td>3.4 µs</td><td>24 µs</td><td>404 µs</td><td>2.99 ms</td></tr>
+        <tr><td>append 64 KiB</td><td>18 µs</td><td>43 µs</td><td>438 µs</td><td>3.00 ms</td></tr>
+        <tr><td>append 1 MiB</td><td>131 µs</td><td>174 µs</td><td>691 µs</td><td>2.98 ms</td></tr>
+      </table>
+
+      <p>Look at the last column. The medians come out at 2.00, 3.00, 4.00 ms, not 2.3 or 3.7.</p>
+
+      <h2>A one-millisecond staircase</h2>
+
+      <p>To check, I timed 3,000 back-to-back 4 KiB overwrites with a full flush each. 92% took 3 ms, rounded to the nearest millisecond, and 8% took 4 ms. A handful took 5 to 8 ms. Measured against the nearest whole millisecond, the middle 80% landed between 45 µs early and 34 µs late. If the times were spread evenly, only 20% would fall within 100 µs of a whole millisecond. 97.7% did. The barrier sync, timed the same way, came to 5.2%, which is chance.</p>
+
+      <p>So the flush is done, or at least reported as done, on a 1 ms tick. My guess is something in the storage stack checks for flush completion once a millisecond rather than taking an interrupt. I can't see that from user space. Either way, the practical floor is about 2 ms per durable write, and you pay it in whole steps.</p>
+
+      <h2>What it does to SQLite</h2>
+
+      <p>SQLite has <code>PRAGMA fullfsync</code> for this, and it is off by default (it was off here: Python 3.14.8, SQLite 3.53.1). I inserted 2,000 small rows, one commit each:</p>
+
+      <table>
+        <tr><th>journal</th><th>synchronous</th><th>fullfsync=0</th><th>fullfsync=1</th></tr>
+        <tr><td>WAL</td><td>NORMAL</td><td>143,769 /s</td><td>58,850 /s</td></tr>
+        <tr><td>WAL</td><td>FULL</td><td>40,742 /s</td><td>331 /s</td></tr>
+        <tr><td>rollback</td><td>FULL</td><td>6,655 /s</td><td>100 /s</td></tr>
+      </table>
+
+      <p>WAL with <code>synchronous=FULL</code> looks like 40,000 durable commits a second. With the real flush it is 331, one every 3.0 ms, which is the staircase again. Rollback journal mode needs about three flushes per commit, so it gets 100 a second. <code>synchronous=NORMAL</code> in WAL mode doesn't sync on commit at all, only at checkpoints, so it stays fast either way. It can lose the most recent commits on power loss but won't corrupt the file.</p>
+
+      <h2>Inside a Linux VM on the same Mac</h2>
+
+      <p>I ran the same test in a Linux VM on the same machine, writing to a folder shared from the host. fsync there took 64 µs and WAL <code>synchronous=FULL</code> did 7,090 commits a second. That is far below the 2 ms flush floor, so the guest's fsync is not reaching flash either. If you run a database in a VM or container on a Mac and believe its fsync, you are getting the same promise as plain macOS fsync: your data is ordered and handed off, not stored.</p>
+
+      <h2>So what</h2>
+
+      <p>On a Mac, "durable" costs about 3 ms per commit and comes in whole milliseconds, so group commits: one flush for a hundred rows costs the same as one flush for one row. If you can lose the last second of writes after a power cut, WAL with <code>synchronous=NORMAL</code> is about 400 times faster than a full flush per commit. If you can't, turn on <code>fullfsync</code> and batch. Plain <code>fsync</code> is the one you probably shouldn't trust. It's fast because it doesn't do the flush.</p>
+
+      <p>Method: one Mac, internal SSD, APFS, Python <code>os.pwrite</code> plus <code>os.fsync</code> or <code>fcntl</code> with codes 51 (F_FULLFSYNC) and 85 (F_BARRIERFSYNC), timed with <code>perf_counter_ns</code>. Other jobs were running on the machine, which mostly shows up in the tails. I didn't pull the power to check what actually survives. These are latencies, not a crash test.</p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+</body>
+</html>

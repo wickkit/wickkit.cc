@@ -8,6 +8,59 @@
   <updated>2026-10-14T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
   <entry>
+    <title>On a Mac, a real fsync takes a whole number of milliseconds</title>
+    <link href="https://wickkit.cc/posts/2026-10-14-on-a-mac-a-real-fsync-takes-a-whole-number-of-milliseconds.html"/>
+    <id>https://wickkit.cc/posts/2026-10-14-on-a-mac-a-real-fsync-takes-a-whole-number-of-milliseconds.html</id>
+    <updated>2026-10-14T00:00:00Z</updated>
+    <summary>Plain fsync on macOS took 16 µs; F_FULLFSYNC, the one that actually flushes the drive, took 2 to 3 ms, and 98% of flushes finished within 100 µs of a whole millisecond. SQLite in WAL mode drops from 40,000 to 331 commits a second when you ask for the real thing.</summary>
+    <content type="html">&lt;p&gt;On macOS, &lt;code&gt;fsync()&lt;/code&gt; hands your data to the drive but doesn't tell the drive to write its cache to flash. If the power goes, so can the data. To get the flush you need &lt;code&gt;fcntl(fd, F_FULLFSYNC)&lt;/code&gt;. I wanted to know what that costs on an Apple Silicon Mac's internal SSD. Plain fsync of 4 KiB took 16 µs. A full flush took 2 to 3 ms, 120 to 190 times longer. And 98% of the full flushes finished within 100 µs of an exact millisecond.&lt;/p&gt;
+
+      &lt;h2&gt;Three ways to sync&lt;/h2&gt;
+
+      &lt;p&gt;Each iteration overwrites the same block of a file (or appends a new one), then syncs. I ran 1,000 iterations per cell, 250 for the 1 MiB rows. &lt;code&gt;F_BARRIERFSYNC&lt;/code&gt; is the middle option: it keeps writes in order across the barrier but doesn't wait for them to reach flash. Medians:&lt;/p&gt;
+
+      &lt;table&gt;
+        &lt;tr&gt;&lt;th&gt;write&lt;/th&gt;&lt;th&gt;no sync&lt;/th&gt;&lt;th&gt;fsync&lt;/th&gt;&lt;th&gt;barrier&lt;/th&gt;&lt;th&gt;full flush&lt;/th&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;overwrite 4 KiB&lt;/td&gt;&lt;td&gt;1.2 µs&lt;/td&gt;&lt;td&gt;16.5 µs&lt;/td&gt;&lt;td&gt;109 µs&lt;/td&gt;&lt;td&gt;2.00 ms&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;overwrite 64 KiB&lt;/td&gt;&lt;td&gt;13 µs&lt;/td&gt;&lt;td&gt;32 µs&lt;/td&gt;&lt;td&gt;108 µs&lt;/td&gt;&lt;td&gt;3.00 ms&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;overwrite 1 MiB&lt;/td&gt;&lt;td&gt;53 µs&lt;/td&gt;&lt;td&gt;163 µs&lt;/td&gt;&lt;td&gt;316 µs&lt;/td&gt;&lt;td&gt;4.00 ms&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;append 4 KiB&lt;/td&gt;&lt;td&gt;3.4 µs&lt;/td&gt;&lt;td&gt;24 µs&lt;/td&gt;&lt;td&gt;404 µs&lt;/td&gt;&lt;td&gt;2.99 ms&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;append 64 KiB&lt;/td&gt;&lt;td&gt;18 µs&lt;/td&gt;&lt;td&gt;43 µs&lt;/td&gt;&lt;td&gt;438 µs&lt;/td&gt;&lt;td&gt;3.00 ms&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;append 1 MiB&lt;/td&gt;&lt;td&gt;131 µs&lt;/td&gt;&lt;td&gt;174 µs&lt;/td&gt;&lt;td&gt;691 µs&lt;/td&gt;&lt;td&gt;2.98 ms&lt;/td&gt;&lt;/tr&gt;
+      &lt;/table&gt;
+
+      &lt;p&gt;Look at the last column. The medians come out at 2.00, 3.00, 4.00 ms, not 2.3 or 3.7.&lt;/p&gt;
+
+      &lt;h2&gt;A one-millisecond staircase&lt;/h2&gt;
+
+      &lt;p&gt;To check, I timed 3,000 back-to-back 4 KiB overwrites with a full flush each. 92% took 3 ms, rounded to the nearest millisecond, and 8% took 4 ms. A handful took 5 to 8 ms. Measured against the nearest whole millisecond, the middle 80% landed between 45 µs early and 34 µs late. If the times were spread evenly, only 20% would fall within 100 µs of a whole millisecond. 97.7% did. The barrier sync, timed the same way, came to 5.2%, which is chance.&lt;/p&gt;
+
+      &lt;p&gt;So the flush is done, or at least reported as done, on a 1 ms tick. My guess is something in the storage stack checks for flush completion once a millisecond rather than taking an interrupt. I can't see that from user space. Either way, the practical floor is about 2 ms per durable write, and you pay it in whole steps.&lt;/p&gt;
+
+      &lt;h2&gt;What it does to SQLite&lt;/h2&gt;
+
+      &lt;p&gt;SQLite has &lt;code&gt;PRAGMA fullfsync&lt;/code&gt; for this, and it is off by default (it was off here: Python 3.14.8, SQLite 3.53.1). I inserted 2,000 small rows, one commit each:&lt;/p&gt;
+
+      &lt;table&gt;
+        &lt;tr&gt;&lt;th&gt;journal&lt;/th&gt;&lt;th&gt;synchronous&lt;/th&gt;&lt;th&gt;fullfsync=0&lt;/th&gt;&lt;th&gt;fullfsync=1&lt;/th&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;WAL&lt;/td&gt;&lt;td&gt;NORMAL&lt;/td&gt;&lt;td&gt;143,769 /s&lt;/td&gt;&lt;td&gt;58,850 /s&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;WAL&lt;/td&gt;&lt;td&gt;FULL&lt;/td&gt;&lt;td&gt;40,742 /s&lt;/td&gt;&lt;td&gt;331 /s&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;rollback&lt;/td&gt;&lt;td&gt;FULL&lt;/td&gt;&lt;td&gt;6,655 /s&lt;/td&gt;&lt;td&gt;100 /s&lt;/td&gt;&lt;/tr&gt;
+      &lt;/table&gt;
+
+      &lt;p&gt;WAL with &lt;code&gt;synchronous=FULL&lt;/code&gt; looks like 40,000 durable commits a second. With the real flush it is 331, one every 3.0 ms, which is the staircase again. Rollback journal mode needs about three flushes per commit, so it gets 100 a second. &lt;code&gt;synchronous=NORMAL&lt;/code&gt; in WAL mode doesn't sync on commit at all, only at checkpoints, so it stays fast either way. It can lose the most recent commits on power loss but won't corrupt the file.&lt;/p&gt;
+
+      &lt;h2&gt;Inside a Linux VM on the same Mac&lt;/h2&gt;
+
+      &lt;p&gt;I ran the same test in a Linux VM on the same machine, writing to a folder shared from the host. fsync there took 64 µs and WAL &lt;code&gt;synchronous=FULL&lt;/code&gt; did 7,090 commits a second. That is far below the 2 ms flush floor, so the guest's fsync is not reaching flash either. If you run a database in a VM or container on a Mac and believe its fsync, you are getting the same promise as plain macOS fsync: your data is ordered and handed off, not stored.&lt;/p&gt;
+
+      &lt;h2&gt;So what&lt;/h2&gt;
+
+      &lt;p&gt;On a Mac, "durable" costs about 3 ms per commit and comes in whole milliseconds, so group commits: one flush for a hundred rows costs the same as one flush for one row. If you can lose the last second of writes after a power cut, WAL with &lt;code&gt;synchronous=NORMAL&lt;/code&gt; is about 400 times faster than a full flush per commit. If you can't, turn on &lt;code&gt;fullfsync&lt;/code&gt; and batch. Plain &lt;code&gt;fsync&lt;/code&gt; is the one you probably shouldn't trust. It's fast because it doesn't do the flush.&lt;/p&gt;
+
+      &lt;p&gt;Method: one Mac, internal SSD, APFS, Python &lt;code&gt;os.pwrite&lt;/code&gt; plus &lt;code&gt;os.fsync&lt;/code&gt; or &lt;code&gt;fcntl&lt;/code&gt; with codes 51 (F_FULLFSYNC) and 85 (F_BARRIERFSYNC), timed with &lt;code&gt;perf_counter_ns&lt;/code&gt;. Other jobs were running on the machine, which mostly shows up in the tails. I didn't pull the power to check what actually survives. These are latencies, not a crash test.&lt;/p&gt;</content>
+  </entry>
+  <entry>
     <title>A full Python GC pass costs 46 ns per object, and gc.freeze() makes it free</title>
     <link href="https://wickkit.cc/posts/2026-10-14-a-full-python-gc-pass-costs-46-ns-per-object.html"/>
     <id>https://wickkit.cc/posts/2026-10-14-a-full-python-gc-pass-costs-46-ns-per-object.html</id>
