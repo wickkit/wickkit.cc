@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>When skill drifts, the best Elo K is set by how fast it drifts — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/tools.html">tools</a>
+      <a href="/den.html">den</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+
+    <article>
+      <h1>When skill drifts, the best Elo K is set by how fast it drifts</h1>
+      <div class="meta">2026-10-15 · Kit Wickham</div>
+
+      <p>In the <a href="/posts/2026-10-15-a-fixed-elo-k-factor-stops-learning-at-a-noise-floor-you-can-predict.html">last post</a> players never changed, so a fixed K only had a cost. This time each player's true strength wanders a little after every game they play. A K that shrinks with games played, which was nearly ideal before, now freezes the ratings and loses badly: with skill wandering about 25 Elo points per 100 games, its error was 80 points against 32 for the best fixed K. The best fixed K grew in step with the drift, at about 2.4 times the per-game drift, as a one-line formula predicts. Missing it by a factor of two cost 7 to 17%.</p>
+
+      <h2>The test</h2>
+
+      <p>Same league as before: 16 players, true ratings with a standard deviation of 200, random pairings, no draws, everyone starting at 0. Now, each time a player plays, their true rating takes a random step with standard deviation G, plus a slight pull toward the middle so that the field keeps its spread of 200 instead of fanning out. Over 100 games a player's skill wanders about 10·G points. Each league plays 24,000 games (3,000 per player), and I measure the error over the last two thirds, once the ratings have caught up from the start. Error is again the root-mean-square gap between rating and truth, both centred on zero. 1,200 leagues per setting; standard errors are under 0.6 points.</p>
+
+      <table>
+        <tr><th>drift per 100 games</th><th>K=8</th><th>K=16</th><th>K=32</th><th>K=64</th><th>best fixed K</th><th>shrinking K</th></tr>
+        <tr><td>0</td><td>26</td><td>37</td><td>53</td><td>79</td><td>22 (K=6)</td><td>41</td></tr>
+        <tr><td>25</td><td>32</td><td>39</td><td>54</td><td>79</td><td>32 (K=6)</td><td>80</td></tr>
+        <tr><td>50</td><td>46</td><td>45</td><td>56</td><td>80</td><td>44 (K=12)</td><td>127</td></tr>
+        <tr><td>100</td><td>74</td><td>63</td><td>65</td><td>83</td><td>62 (K=24)</td><td>178</td></tr>
+        <tr><td>200</td><td>118</td><td>98</td><td>86</td><td>92</td><td>86 (K=32)</td><td>194</td></tr>
+        <tr><td>400</td><td>160</td><td>142</td><td>125</td><td>117</td><td>117 (K=64)</td><td>194</td></tr>
+      </table>
+
+      <p>The shrinking K is 400/(games + 10). By game 1,000 its K is below 0.4, so the ratings barely move, and once drift is fast its error approaches 200, about what you'd get by rating everyone at zero. A floor fixes that: the same rule with K never allowed below 16 scored exactly like a fixed K=16 in every row, because after 15 games the floor is all that's left.</p>
+
+      <p>Ordering suffers too. At the best K, the share of neighbouring players in the right order went from 80% with no drift to 71% at 50 points per 100 games and 59% at 400, not much better than a coin flip.</p>
+
+      <h2>Why the best K tracks the drift</h2>
+
+      <p>The last post's argument gives the noise half: game-to-game luck keeps a rating's variance at about 87·K. Drift adds a lag half. Each game pulls the rating toward the truth by a fraction a = K·(ln 10/400)·p(1−p) of its error, so the rating trails a moving target, and the trailing adds a variance of G²/(2a). A bigger K shrinks the lag and grows the noise. The sum is smallest at</p>
+
+      <p style="text-align:center">K* = G / √(p(1−p))</p>
+
+      <p>where p(1−p) is the average over games of win chance times loss chance, 0.17 in this league. That makes K* ≈ 2.4·G, or about a quarter of how far a player's skill wanders in 100 games.</p>
+
+      <table>
+        <tr><th>drift per 100 games</th><th>predicted K*</th><th>best K measured</th><th>predicted error at K*</th><th>measured</th></tr>
+        <tr><td>25</td><td>6</td><td>6</td><td>32.5</td><td>31.5</td></tr>
+        <tr><td>50</td><td>12</td><td>12</td><td>46</td><td>44</td></tr>
+        <tr><td>100</td><td>24</td><td>24</td><td>65</td><td>62</td></tr>
+        <tr><td>200</td><td>49</td><td>32–48</td><td>92</td><td>86</td></tr>
+        <tr><td>400</td><td>97</td><td>64</td><td>130</td><td>117</td></tr>
+      </table>
+
+      <p>The formula holds up to 100 points per 100 games, then overshoots. It treats the drift as an unbounded random walk, while here the pull toward the middle keeps every true rating within a few hundred points of zero. At 400 points per 100 games, a player's skill loses most of its memory within about 50 games, so lag matters less than the formula assumes, and a smaller K than predicted wins.</p>
+
+      <p>The error curve is flat near its bottom. At 100 points of drift, K=12 and K=48 (half and double the best) were 7% and 17% worse than K=24. Getting the drift rate roughly right is enough.</p>
+
+      <h2>So what</h2>
+
+      <p>A fixed K is a bet on how fast skill changes. Estimate how far a typical player's real strength moves over 100 games, divide by four, and use that as K. Common defaults like K=32 suit fast-changing players, about 130 points per 100 games. For players whose skill moves 40 points or less per 100 games, K=10 or below would rate more accurately, at the cost of following real changes more slowly.</p>
+
+      <p>If you shrink K with experience, as you should for players who aren't changing, floor it at the K your drift calls for. Without a floor, a veteran's rating stops responding just when their game changes.</p>
+
+      <p>Method: NumPy, vectorised over 400 leagues per run, three runs per setting, on one machine. The drift is a per-game autoregressive step: true rating ← ρ·true rating + G·noise, with ρ = √(1 − (G/200)²) so the spread stays at 200. Only the two players in a game drift at that game. Measured p(1−p) was 0.169 to 0.171 across all settings.</p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+</body>
+</html>
