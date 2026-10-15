@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Past six riffles, each shuffle halves what a card guesser can win — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/tools.html">tools</a>
+      <a href="/den.html">den</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+
+    <article>
+      <h1>Past six riffles, each shuffle halves what a card guesser can win</h1>
+      <div class="meta">2026-10-15 · Kit Wickham</div>
+
+      <p>"Seven riffle shuffles" is the famous answer to how much shuffling a deck needs (Bayer and Diaconis, 1992). It comes from total variation distance, which is a strict yardstick and hard to picture. I wanted a concrete one. Start from a new-deck order, shuffle <i>k</i> times, then deal the cards face up one at a time. Before each card, a guesser names it. They know how the deck was shuffled and they see every card as it's dealt. How many more cards do they get right than someone guessing at random among the cards still unseen? That baseline is 1 + 1/2 + … + 1/52 ≈ 4.54 correct out of 52.</p>
+
+      <h2>An exact guesser for riffles</h2>
+
+      <p>The Gilbert–Shannon–Reeds model of a riffle (cut binomially, drop cards from each half in proportion to its size) has a useful property: <i>k</i> riffles are exactly one "2<sup><i>k</i></sup>-shuffle". Give every card an independent random digit from 0 to 2<sup><i>k</i></sup>−1, then sort the deck by digit, keeping the original order within a digit. Given the cards dealt so far, the digits are uniform over the assignments that agree with what you've seen, and the probability of each possible next card can be computed exactly in a few thousand operations. So the best possible guesser is computable. I checked it against brute-force enumeration of every digit assignment for 6- and 7-card decks: it matched to three decimals. I also scored it two ways, by its actual hits and by the sum of its own confidence, which should agree if the probabilities are right. They did.</p>
+
+      <table>
+        <tr><th>riffles</th><th>1</th><th>2</th><th>3</th><th>4</th><th>5</th><th>6</th><th>7</th><th>8</th><th>9</th><th>10</th><th>12</th></tr>
+        <tr><td>extra correct guesses (best possible)</td><td>34.2</td><td>22.1</td><td>12.6</td><td>6.3</td><td>2.9</td><td>1.35</td><td>0.65</td><td>0.32</td><td>0.16</td><td>0.078</td><td>0.019</td></tr>
+        <tr><td>extra correct (simple learned guesser)</td><td>34.1</td><td>21.9</td><td>12.3</td><td>5.9</td><td>2.5</td><td>1.0</td><td>0.44</td><td>0.20</td><td>0.09</td><td>0.04</td><td>0.01</td></tr>
+      </table>
+
+      <p>3,000 deals per row for the exact guesser (standard error 0.001 at 7 and below 0.04 everywhere), 100,000 for the learned one (±0.006). After seven riffles a perfect guesser still gets two-thirds of a card more than chance over a full deal. From six riffles on, every extra riffle halves the edge almost exactly: the ratios of neighbouring columns are 2.08, 2.04, 2.03, 2.01, 2.00, 2.05. That matches the structure of the 2<sup><i>a</i></sup>-shuffle, where what's left of the original order shrinks like 1/<i>a</i>. To get the edge under a tenth of a card you need ten riffles, and under a hundredth, about thirteen.</p>
+
+      <p>The "simple learned guesser" knows nothing about riffles. It is trained on 200,000 shuffled decks and keeps two tables: how often the next card's original position is <i>d</i> after the last card's, and how often position <i>t</i> holds each card. It guesses from one table or their product, whichever scores better. It gets about 70% of the best possible edge at seven riffles. That matters for the next part, because for the overhand shuffle this generic guesser is the only one I have.</p>
+
+      <h2>Overhand shuffles</h2>
+
+      <p>For the overhand shuffle I used Pemantle's model. Every gap between neighbouring cards is a break with probability <i>p</i>, and the packets come off the top onto a new pile, so packet order reverses and order within a packet stays. <i>p</i> = 0.2 means packets of about five cards, and <i>p</i> = 0.5 means packets of about two.</p>
+
+      <table>
+        <tr><th>packet size (1/<i>p</i>)</th><th>10 shuffles</th><th>20</th><th>30</th><th>50</th><th>100</th><th>200</th><th>300</th><th>edge under 0.1 card by</th></tr>
+        <tr><td>20 (<i>p</i> = 0.05)</td><td>28.2</td><td>16.9</td><td>10.2</td><td>3.7</td><td>0.29</td><td>0.00</td><td>0.00</td><td>~120</td></tr>
+        <tr><td>10 (<i>p</i> = 0.1)</td><td>16.4</td><td>5.7</td><td>2.0</td><td>0.23</td><td>0.00</td><td>0.01</td><td>0.01</td><td>~60</td></tr>
+        <tr><td>5 (<i>p</i> = 0.2)</td><td>6.0</td><td>0.95</td><td>0.19</td><td>0.02</td><td>0.00</td><td>0.01</td><td>0.01</td><td>~35</td></tr>
+        <tr><td>3.3 (<i>p</i> = 0.3)</td><td>3.5</td><td>0.93</td><td>0.49</td><td>0.22</td><td>0.04</td><td>0.00</td><td>0.00</td><td>~75</td></tr>
+        <tr><td>2 (<i>p</i> = 0.5)</td><td>4.4</td><td>2.4</td><td>1.6</td><td>1.05</td><td>0.55</td><td>0.22</td><td>0.08</td><td>~300</td></tr>
+      </table>
+
+      <p>Extra correct guesses for the learned guesser, 100,000 test deals each, ±0.005. Matching the bar the same guesser reaches at nine riffles (0.09), five-card packets need about 35 overhand shuffles, roughly four times as many. Both big and small packets are slower, for different reasons, and the guesser's two tables show which. Big packets keep neighbours together: at <i>p</i> = 0.05 nearly all the edge comes from "the next card is the one that followed the last". Small packets turn each shuffle into an almost exact reversal of the deck, so two shuffles nearly undo each other. A card's position barely wanders, and at <i>p</i> = 0.5 the edge past 30 shuffles comes almost entirely from the position table. You can see the same thing exactly by following one card. Its position is a Markov chain on 52 places, and the total variation from uniform for the worst starting card falls below 0.1 after 7 riffles, 7 overhands with ten-card packets, 27 with five-card packets, and 255 with two-card packets. Ten-card packets scatter a single card as fast as a riffle does, but they leave its neighbours next to it.</p>
+
+      <h2>So</h2>
+
+      <p>For a guesser who knows the shuffle, seven riffles leave about 0.65 of a card on the table across a whole deal, and each further riffle halves it. If what you care about is someone predicting the next card, eight or nine riffles costs little and cuts that to a quarter. For overhand shuffles the numbers above are a floor, not an answer. My guesser only looks at neighbours and positions, and theory (Pemantle 1989; Jonasson 2006) says the overhand shuffle needs on the order of <i>n</i>² log <i>n</i> shuffles to mix fully, which is why figures in the thousands get quoted for a 52-card deck. A smarter adversary than mine could probably find structure past 35 shuffles. What the measurement does show is the packet size. Medium packets of about five cards beat both big chunks and fine dribbles, and dribbling two cards at a time needs about eight times as many shuffles as five-card packets before a simple guesser stops noticing.</p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+</body>
+</html>
