@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>A hash ring with 160 points per server still overloads the busiest by a fifth — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/tools.html">tools</a>
+      <a href="/den.html">den</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+
+    <article>
+      <h1>A hash ring with 160 points per server still overloads the busiest by a fifth</h1>
+      <div class="meta">2026-10-15 · Kit Wickham</div>
+
+      <p>Consistent hashing spreads keys over servers so that adding or removing one server only moves about 1/<i>N</i> of the keys. The classic version is a ring: hash each server to a point on a circle, hash each key, and give the key to the next server clockwise. With one point per server the arcs are wildly uneven, so every implementation puts many "virtual" points per server on the ring. The memcached client ketama uses 160. Other libraries pick 100, 200 or whatever someone guessed.</p>
+
+      <p>I wanted to know what a given number of points actually buys, and how the ring compares with the two newer schemes that need no ring at all: jump hash (Lamping and Veach, 2014) and rendezvous hashing.</p>
+
+      <h2>The run</h2>
+
+      <p>For the ring I skipped keys entirely and measured each server's exact share of the circle, which is the load it would get with infinitely many keys. Points were placed uniformly at random, standing in for a good hash. I ran 10, 100 and 1,000 servers with 1 to 1,024 points each, 400 rings per setting. Standard errors on the means below are 0.003 or less. Then, as a check with real keys, I hashed a million string keys through actual implementations of all three schemes.</p>
+
+      <h2>The busiest server</h2>
+
+      <p>Load of the busiest server, as a multiple of a fair share (1.00 is perfect), averaged over rings:</p>
+
+      <table>
+        <tr><th>points per server</th><th>10 servers</th><th>100 servers</th><th>1,000 servers</th></tr>
+        <tr><td>1</td><td>2.85</td><td>5.21</td><td>7.51</td></tr>
+        <tr><td>16</td><td>1.42</td><td>1.74</td><td>2.02</td></tr>
+        <tr><td>100</td><td>1.15</td><td>1.26</td><td>1.36</td></tr>
+        <tr><td>160</td><td>1.12</td><td>1.21</td><td>1.28</td></tr>
+        <tr><td>256</td><td>1.10</td><td>1.17</td><td>1.22</td></tr>
+        <tr><td>1,024</td><td>1.05</td><td>1.08</td><td>1.10</td></tr>
+      </table>
+
+      <p>At ketama's 160, the busiest of 100 servers carries 21% more than its share, and the busiest of 1,000 carries 28% more. One ring in twenty is worse than that: the 95th percentile is 1.28 at 100 servers and 1.34 at 1,000. If you size servers for the average, the hottest one runs out of room first, and it's the same one every time, because the ring doesn't change until you change the server set.</p>
+
+      <p>The theory is simple and it holds. A server's share is the sum of <i>v</i> arcs that are each roughly exponential, so it's roughly a gamma variable with a relative spread of 1/√<i>v</i>. The measured spread times √<i>v</i> came out between 0.98 and 1.00 at 100 and 1,000 servers (0.93 at 10, which is just the small-sample standard deviation). Drawing <i>N</i> independent gamma variables and taking the largest reproduced the busiest-server column to within 0.03 everywhere, which says the arcs are close enough to independent to ignore.</p>
+
+      <p>The busiest server's excess shrinks only as 1/√<i>v</i>, so halving it costs four times the points. As a rule of thumb, keeping the busiest within a fraction ε of fair takes about 2 ln <i>N</i> / ε² points per server. That's a slight overestimate (it asks for 1,280 points where 1,024 already gives 10% at 1,000 servers), which makes it a safe one. Going by the measured 1/√<i>v</i> scaling, getting 1,000 servers to within 5% means about 4,000 points each and a 4-million-entry ring.</p>
+
+      <h2>When a server leaves</h2>
+
+      <p>Points also decide who catches a departing server's keys. With one point per server, the next server clockwise inherits all of them and its load doubles. With <i>v</i> points, the keys scatter over up to <i>v</i> neighbours. The single biggest catcher gets, as a fraction of a fair share: 0.99 at 1 point, 0.22 at 16, and 0.05 at 160 (100 servers). So even modest point counts fix the cascading-failure problem. It's the steady-state imbalance that needs the big numbers.</p>
+
+      <h2>Against jump and rendezvous</h2>
+
+      <p>Jump hash and rendezvous hashing give every server exactly 1/<i>N</i> of the key space in expectation, with no structural imbalance at all. All that's left is the randomness of which keys you happen to have. With a million real keys:</p>
+
+      <table>
+        <tr><th>scheme</th><th>busiest, 100 servers</th><th>busiest, 1,000 servers</th><th>spread, 1,000 servers</th><th>keys moved adding one server (1,000)</th></tr>
+        <tr><td>ring, 1 point</td><td>5.00</td><td>5.99</td><td>0.95</td><td>0.15%</td></tr>
+        <tr><td>ring, 160 points</td><td>1.18</td><td>1.25</td><td>0.084</td><td>0.08%</td></tr>
+        <tr><td>ring, 1,024 points</td><td>1.13</td><td>1.14</td><td>0.044</td><td>0.10%</td></tr>
+        <tr><td>jump hash</td><td>1.03</td><td>1.09</td><td>0.031</td><td>0.10%</td></tr>
+        <tr><td>rendezvous</td><td>1.02</td><td>–</td><td>–</td><td>0.11%</td></tr>
+      </table>
+
+      <p>A million keys over 1,000 servers is 1,000 keys each, and pure chance then gives a spread of 1/√1000 = 0.032. Jump hash sits right on that floor. The ring adds its own 1/√<i>v</i> on top: at 1,024 points the two combine to √(1/1024 + 1/1000) = 0.044, exactly what it measured. That gives a clean way to think about it. <b>A ring is as even as jump hash only once its points per server match the keys per server.</b> Below that, the ring is the bigger source of imbalance. All three moved about the ideal 1/(<i>N</i>+1) of keys when a server was added; the ring with 160 points moved 0.08% where 0.10% was ideal, because the newcomer's own share is random too. (I ran rendezvous at 1,000 servers on only 100,000 keys because it's slow, so its spread there is mostly key noise and I've left it out.)</p>
+
+      <p>Speed is the ring's case. In pure Python, where the ring's binary search runs in C, a lookup on a 160-point ring ran 3.6 million times a second at 1,000 servers, jump hash 1.0 million and rendezvous 6,000, since rendezvous hashes the key against every server. Compiled, jump hash's handful of multiply-and-divide steps would close most of that gap, and it needs no memory, where a 1,024-point ring for 1,000 servers is a million entries. Jump hash's catch is that it only handles servers numbered 0 to <i>N</i>−1, so it suits adding and removing at the end, not losing an arbitrary server out of the middle. Rendezvous handles arbitrary sets and weights, and it's fine when <i>N</i> is small.</p>
+
+      <h2>So</h2>
+
+      <p>Pick the number of ring points from the imbalance you can tolerate, not from habit: 160 points means planning for the hottest server at 1.2 to 1.3 times average. If you can number your servers, jump hash is even for free. If you need arbitrary membership and many servers, a ring with points in the thousands, or a bounded-load variant that caps each server and spills over, is the way to keep the hot one from running away.</p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+</body>
+</html>
