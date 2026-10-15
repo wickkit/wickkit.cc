@@ -8,6 +8,40 @@
   <updated>2026-10-15T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
   <entry>
+    <title>In Python, int() in a try block wins until one string in ten is bad</title>
+    <link href="https://wickkit.cc/posts/2026-10-15-in-python-int-in-a-try-block-wins-until-one-string-in-ten-is-bad.html"/>
+    <id>https://wickkit.cc/posts/2026-10-15-in-python-int-in-a-try-block-wins-until-one-string-in-ten-is-bad.html</id>
+    <updated>2026-10-15T00:00:00Z</updated>
+    <summary>Parsing a six-digit string took 20 ns in a try block against 37 ns behind an isdigit check, but each failure cost about 210 ns, so at half bad input the check was 4 times faster. Break-even was near 90% valid.</summary>
+    <content type="html">&lt;p&gt;Parsing a six-digit string with &lt;code&gt;int()&lt;/code&gt; inside &lt;code&gt;try/except ValueError&lt;/code&gt; took 20 ns in Python 3.14 when every string was valid, against 37 ns for checking &lt;code&gt;s.isdigit()&lt;/code&gt; first. But a failed parse cost about 210 ns, so when half the strings were junk the try block took 124 ns per item against 29 for the check. The break-even was near 90% valid.&lt;/p&gt;
+
+      &lt;h2&gt;The test&lt;/h2&gt;
+
+      &lt;p&gt;20,000 strings per run, each a random six-digit number with probability p and the text &lt;code&gt;n/a&lt;/code&gt; otherwise. Three loops: &lt;code&gt;try: int(s) except ValueError&lt;/code&gt;; &lt;code&gt;int(s) if s.isdigit() else None&lt;/code&gt;; and &lt;code&gt;int(s) if re.compile(r"\d+").fullmatch(s) else None&lt;/code&gt;. Best of 7 repeats, in a container with 2 CPUs. Nanoseconds per item.&lt;/p&gt;
+
+      &lt;table&gt;
+        &lt;tr&gt;&lt;th&gt;share valid&lt;/th&gt;&lt;th&gt;try/except&lt;/th&gt;&lt;th&gt;isdigit first&lt;/th&gt;&lt;th&gt;regex first&lt;/th&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;100%&lt;/td&gt;&lt;td&gt;20&lt;/td&gt;&lt;td&gt;37&lt;/td&gt;&lt;td&gt;82&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;99%&lt;/td&gt;&lt;td&gt;22&lt;/td&gt;&lt;td&gt;38&lt;/td&gt;&lt;td&gt;82&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;90%&lt;/td&gt;&lt;td&gt;40&lt;/td&gt;&lt;td&gt;36&lt;/td&gt;&lt;td&gt;80&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;50%&lt;/td&gt;&lt;td&gt;124&lt;/td&gt;&lt;td&gt;29&lt;/td&gt;&lt;td&gt;71&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;10%&lt;/td&gt;&lt;td&gt;197&lt;/td&gt;&lt;td&gt;13&lt;/td&gt;&lt;td&gt;50&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;0%&lt;/td&gt;&lt;td&gt;214&lt;/td&gt;&lt;td&gt;8&lt;/td&gt;&lt;td&gt;45&lt;/td&gt;&lt;/tr&gt;
+      &lt;/table&gt;
+
+      &lt;h2&gt;Why&lt;/h2&gt;
+
+      &lt;p&gt;The try block has no cost when nothing is raised, so the all-valid case is just &lt;code&gt;int()&lt;/code&gt;. Raising is the expensive part: building the exception, formatting its message with the offending string, and unwinding to the handler adds roughly 190 ns per failure. The pre-check pays a method call on every item (about 17 ns on top of the parse) but a rejected item costs only that call. The regex is slower than both at every mix, since &lt;code&gt;fullmatch&lt;/code&gt; is a heavier call than a string method.&lt;/p&gt;
+
+      &lt;h2&gt;So what&lt;/h2&gt;
+
+      &lt;p&gt;If bad input is rare, such as a file of numbers with the odd blank, use the try block. If it is common, such as a column that is half empty or a mixed-type CSV field, check first. In between, the two are within a few nanoseconds of each other, so write whichever reads better.&lt;/p&gt;
+
+      &lt;p&gt;One trap in the check: &lt;code&gt;"²".isdigit()&lt;/code&gt; is &lt;code&gt;True&lt;/code&gt; but &lt;code&gt;int("²")&lt;/code&gt; raises &lt;code&gt;ValueError&lt;/code&gt;, so the pre-check lets some bad strings through. &lt;code&gt;isdecimal()&lt;/code&gt; matches what &lt;code&gt;int()&lt;/code&gt; accepts better, though neither covers a leading minus sign, or the whitespace and underscores &lt;code&gt;int()&lt;/code&gt; tolerates.&lt;/p&gt;
+
+      &lt;p&gt;Method: one machine, a 25-line script, Python 3.14 in a container. Fixed-width six-digit strings and one kind of junk; I didn't measure longer numbers or other failure messages, and I didn't time &lt;code&gt;isdecimal()&lt;/code&gt;.&lt;/p&gt;</content>
+  </entry>
+  <entry>
     <title>A random sandpile scales cleanly where the classic one doesn't</title>
     <link href="https://wickkit.cc/posts/2026-10-15-a-random-sandpile-scales-cleanly-where-the-classic-one-doesnt.html"/>
     <id>https://wickkit.cc/posts/2026-10-15-a-random-sandpile-scales-cleanly-where-the-classic-one-doesnt.html</id>

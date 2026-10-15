@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>In Python, int() in a try block wins until one string in ten is bad — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/tools.html">tools</a>
+      <a href="/den.html">den</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+
+    <article>
+      <h1>In Python, int() in a try block wins until one string in ten is bad</h1>
+      <div class="meta">2026-10-15 · Kit Wickham</div>
+
+      <p>Parsing a six-digit string with <code>int()</code> inside <code>try/except ValueError</code> took 20 ns in Python 3.14 when every string was valid, against 37 ns for checking <code>s.isdigit()</code> first. But a failed parse cost about 210 ns, so when half the strings were junk the try block took 124 ns per item against 29 for the check. The break-even was near 90% valid.</p>
+
+      <h2>The test</h2>
+
+      <p>20,000 strings per run, each a random six-digit number with probability p and the text <code>n/a</code> otherwise. Three loops: <code>try: int(s) except ValueError</code>; <code>int(s) if s.isdigit() else None</code>; and <code>int(s) if re.compile(r"\d+").fullmatch(s) else None</code>. Best of 7 repeats, in a container with 2 CPUs. Nanoseconds per item.</p>
+
+      <table>
+        <tr><th>share valid</th><th>try/except</th><th>isdigit first</th><th>regex first</th></tr>
+        <tr><td>100%</td><td>20</td><td>37</td><td>82</td></tr>
+        <tr><td>99%</td><td>22</td><td>38</td><td>82</td></tr>
+        <tr><td>90%</td><td>40</td><td>36</td><td>80</td></tr>
+        <tr><td>50%</td><td>124</td><td>29</td><td>71</td></tr>
+        <tr><td>10%</td><td>197</td><td>13</td><td>50</td></tr>
+        <tr><td>0%</td><td>214</td><td>8</td><td>45</td></tr>
+      </table>
+
+      <h2>Why</h2>
+
+      <p>The try block has no cost when nothing is raised, so the all-valid case is just <code>int()</code>. Raising is the expensive part: building the exception, formatting its message with the offending string, and unwinding to the handler adds roughly 190 ns per failure. The pre-check pays a method call on every item (about 17 ns on top of the parse) but a rejected item costs only that call. The regex is slower than both at every mix, since <code>fullmatch</code> is a heavier call than a string method.</p>
+
+      <h2>So what</h2>
+
+      <p>If bad input is rare, such as a file of numbers with the odd blank, use the try block. If it is common, such as a column that is half empty or a mixed-type CSV field, check first. In between, the two are within a few nanoseconds of each other, so write whichever reads better.</p>
+
+      <p>One trap in the check: <code>"²".isdigit()</code> is <code>True</code> but <code>int("²")</code> raises <code>ValueError</code>, so the pre-check lets some bad strings through. <code>isdecimal()</code> matches what <code>int()</code> accepts better, though neither covers a leading minus sign, or the whitespace and underscores <code>int()</code> tolerates.</p>
+
+      <p>Method: one machine, a 25-line script, Python 3.14 in a container. Fixed-width six-digit strings and one kind of junk; I didn't measure longer numbers or other failure messages, and I didn't time <code>isdecimal()</code>.</p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+</body>
+</html>
