@@ -8,6 +8,55 @@
   <updated>2026-10-15T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
   <entry>
+    <title>In Python, a set literal beats a tuple for "in" from two items up</title>
+    <link href="https://wickkit.cc/posts/2026-10-15-in-python-a-set-literal-beats-a-tuple-from-two-items-up.html"/>
+    <id>https://wickkit.cc/posts/2026-10-15-in-python-a-set-literal-beats-a-tuple-from-two-items-up.html</id>
+    <updated>2026-10-15T00:00:00Z</updated>
+    <summary>A set literal compiles to a frozenset constant and costs 4 to 6 ns at any size. A tuple pays about 4 ns per item and only wins when the value is the same object as its first item, which parsed strings never are.</summary>
+    <content type="html">&lt;p&gt;People write &lt;code&gt;if method in ("GET", "HEAD"):&lt;/code&gt; because a tuple of two feels too small to need a set. In Python 3.14, &lt;code&gt;method in {"GET", "HEAD"}&lt;/code&gt; was as fast or faster in almost every case I measured. The tuple won only when the value was the very same object as the tuple's first item, which strings parsed from input never are.&lt;/p&gt;
+
+      &lt;h2&gt;The set costs nothing to build&lt;/h2&gt;
+
+      &lt;p&gt;The compiler turns a set literal of constants on the right of &lt;code&gt;in&lt;/code&gt; into a frozenset constant. &lt;code&gt;dis&lt;/code&gt; shows &lt;code&gt;LOAD_CONST frozenset({'a', 'b'})&lt;/code&gt;, so no set is built per call. The tuple is a constant too. What's left to compare is one hash lookup against a left-to-right scan.&lt;/p&gt;
+
+      &lt;h2&gt;The test&lt;/h2&gt;
+
+      &lt;p&gt;Literal tuples and sets of 1 to 32 constants, looked up with &lt;code&gt;timeit&lt;/code&gt; (2 million calls, best of 9, minus the cost of loading the variable alone), the median of 4 separate runs one after another, in Python 3.14.8 in a container pinned to one CPU. I tested three kinds of key. &lt;b&gt;int&lt;/b&gt;: small ints, which Python caches, so the probe is the same object as the constant. &lt;b&gt;same str&lt;/b&gt;: an interned string, the same object as the literal (as with an identifier or another literal). &lt;b&gt;equal str&lt;/b&gt;: an equal string built at runtime, as from parsing a request or a file. Each was probed for the first item, the last item and a miss. Times are nanoseconds per test.&lt;/p&gt;
+
+      &lt;table&gt;
+        &lt;tr&gt;&lt;th&gt;key&lt;/th&gt;&lt;th&gt;items&lt;/th&gt;&lt;th&gt;tuple, first&lt;/th&gt;&lt;th&gt;tuple, last&lt;/th&gt;&lt;th&gt;tuple, miss&lt;/th&gt;&lt;th&gt;set, any&lt;/th&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;int&lt;/td&gt;&lt;td&gt;1&lt;/td&gt;&lt;td&gt;2.2&lt;/td&gt;&lt;td&gt;2.3&lt;/td&gt;&lt;td&gt;5.6&lt;/td&gt;&lt;td&gt;4.6–5.0&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;int&lt;/td&gt;&lt;td&gt;2&lt;/td&gt;&lt;td&gt;2.3&lt;/td&gt;&lt;td&gt;5.8&lt;/td&gt;&lt;td&gt;9.1&lt;/td&gt;&lt;td&gt;4.6–4.9&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;int&lt;/td&gt;&lt;td&gt;4&lt;/td&gt;&lt;td&gt;2.3&lt;/td&gt;&lt;td&gt;13.1&lt;/td&gt;&lt;td&gt;16.5&lt;/td&gt;&lt;td&gt;4.6–5.0&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;int&lt;/td&gt;&lt;td&gt;8&lt;/td&gt;&lt;td&gt;2.3&lt;/td&gt;&lt;td&gt;26.7&lt;/td&gt;&lt;td&gt;30.2&lt;/td&gt;&lt;td&gt;4.9–5.1&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;int&lt;/td&gt;&lt;td&gt;32&lt;/td&gt;&lt;td&gt;2.3&lt;/td&gt;&lt;td&gt;116&lt;/td&gt;&lt;td&gt;118&lt;/td&gt;&lt;td&gt;4.6–5.0&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;same str&lt;/td&gt;&lt;td&gt;1&lt;/td&gt;&lt;td&gt;2.2&lt;/td&gt;&lt;td&gt;2.2&lt;/td&gt;&lt;td&gt;5.4&lt;/td&gt;&lt;td&gt;3.7–3.9&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;same str&lt;/td&gt;&lt;td&gt;2&lt;/td&gt;&lt;td&gt;2.2&lt;/td&gt;&lt;td&gt;6.3&lt;/td&gt;&lt;td&gt;8.2&lt;/td&gt;&lt;td&gt;3.7–3.8&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;same str&lt;/td&gt;&lt;td&gt;4&lt;/td&gt;&lt;td&gt;2.1&lt;/td&gt;&lt;td&gt;15.0&lt;/td&gt;&lt;td&gt;14.5&lt;/td&gt;&lt;td&gt;3.8–3.9&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;same str&lt;/td&gt;&lt;td&gt;8&lt;/td&gt;&lt;td&gt;2.2&lt;/td&gt;&lt;td&gt;32.0&lt;/td&gt;&lt;td&gt;26.5&lt;/td&gt;&lt;td&gt;3.6–3.9&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;same str&lt;/td&gt;&lt;td&gt;32&lt;/td&gt;&lt;td&gt;2.1&lt;/td&gt;&lt;td&gt;125&lt;/td&gt;&lt;td&gt;128&lt;/td&gt;&lt;td&gt;3.8–4.0&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;equal str&lt;/td&gt;&lt;td&gt;1&lt;/td&gt;&lt;td&gt;6.5&lt;/td&gt;&lt;td&gt;6.5&lt;/td&gt;&lt;td&gt;5.4&lt;/td&gt;&lt;td&gt;4.1–5.7&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;equal str&lt;/td&gt;&lt;td&gt;2&lt;/td&gt;&lt;td&gt;6.7&lt;/td&gt;&lt;td&gt;10.6&lt;/td&gt;&lt;td&gt;8.4&lt;/td&gt;&lt;td&gt;3.7–5.8&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;equal str&lt;/td&gt;&lt;td&gt;4&lt;/td&gt;&lt;td&gt;6.6&lt;/td&gt;&lt;td&gt;19.0&lt;/td&gt;&lt;td&gt;14.5&lt;/td&gt;&lt;td&gt;3.8–5.8&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;equal str&lt;/td&gt;&lt;td&gt;8&lt;/td&gt;&lt;td&gt;6.5&lt;/td&gt;&lt;td&gt;35.7&lt;/td&gt;&lt;td&gt;26.5&lt;/td&gt;&lt;td&gt;3.6–5.7&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;equal str&lt;/td&gt;&lt;td&gt;32&lt;/td&gt;&lt;td&gt;6.5&lt;/td&gt;&lt;td&gt;131&lt;/td&gt;&lt;td&gt;128&lt;/td&gt;&lt;td&gt;3.9–5.8&lt;/td&gt;&lt;/tr&gt;
+      &lt;/table&gt;
+
+      &lt;p&gt;Run-to-run spread was at most 1.5 ns in any cell.&lt;/p&gt;
+
+      &lt;h2&gt;What it shows&lt;/h2&gt;
+
+      &lt;p&gt;The set is flat: 3.6 to 5.8 ns at every size. A miss is the cheapest case, since the probe's hash lands on an empty slot. A hit on an equal but different string costs about 2 ns more than a hit on the same object, because the set has to compare the characters after the identity check fails.&lt;/p&gt;
+
+      &lt;p&gt;The tuple costs about 3.5 to 4 ns for each item it passes. Its one win is a hit on the first item when the probe is that same object: 2.2 ns, against the set's 3.7 to 5. Python's comparison checks identity before calling &lt;code&gt;==&lt;/code&gt;, so that case is a pointer compare. Move the hit to the second of two items, or miss, and the tuple is already slower. With strings built at runtime even the first-item hit loses (6.5 against 5.7), because the identity check fails and a full string compare follows.&lt;/p&gt;
+
+      &lt;h2&gt;So what&lt;/h2&gt;
+
+      &lt;p&gt;Write &lt;code&gt;x in {"a", "b"}&lt;/code&gt; for membership tests against constants, even short ones. The tuple only pays off for a value you know arrives as the identical object and almost always matches the first item, and then it saves 1.5 to 3 ns. The bigger point: at 2 or 3 items none of this is worth a code review comment. It starts to add up with longer lists: at 8 items a tuple miss costs about 7 times a set lookup, and at 32 about 30 times.&lt;/p&gt;
+
+      &lt;p&gt;Method: one machine, a 40-line &lt;code&gt;timeit&lt;/code&gt; script, CPython 3.14.8 (default build, no JIT) in a container. Constant literals only. A set built from a variable at runtime is a different question, since building it costs far more than any of these lookups.&lt;/p&gt;</content>
+  </entry>
+  <entry>
     <title>A little noise gets Langton's ant to its highway up to five times sooner</title>
     <link href="https://wickkit.cc/posts/2026-10-15-a-little-noise-gets-langtons-ant-to-its-highway-up-to-five-times-sooner.html"/>
     <id>https://wickkit.cc/posts/2026-10-15-a-little-noise-gets-langtons-ant-to-its-highway-up-to-five-times-sooner.html</id>

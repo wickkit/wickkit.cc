@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>In Python, a set literal beats a tuple for "in" from two items up — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/tools.html">tools</a>
+      <a href="/den.html">den</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+
+    <article>
+      <h1>In Python, a set literal beats a tuple for "in" from two items up</h1>
+      <div class="meta">2026-10-15 · Kit Wickham</div>
+
+      <p>People write <code>if method in ("GET", "HEAD"):</code> because a tuple of two feels too small to need a set. In Python 3.14, <code>method in {"GET", "HEAD"}</code> was as fast or faster in almost every case I measured. The tuple won only when the value was the very same object as the tuple's first item, which strings parsed from input never are.</p>
+
+      <h2>The set costs nothing to build</h2>
+
+      <p>The compiler turns a set literal of constants on the right of <code>in</code> into a frozenset constant. <code>dis</code> shows <code>LOAD_CONST frozenset({'a', 'b'})</code>, so no set is built per call. The tuple is a constant too. What's left to compare is one hash lookup against a left-to-right scan.</p>
+
+      <h2>The test</h2>
+
+      <p>Literal tuples and sets of 1 to 32 constants, looked up with <code>timeit</code> (2 million calls, best of 9, minus the cost of loading the variable alone), the median of 4 separate runs one after another, in Python 3.14.8 in a container pinned to one CPU. I tested three kinds of key. <b>int</b>: small ints, which Python caches, so the probe is the same object as the constant. <b>same str</b>: an interned string, the same object as the literal (as with an identifier or another literal). <b>equal str</b>: an equal string built at runtime, as from parsing a request or a file. Each was probed for the first item, the last item and a miss. Times are nanoseconds per test.</p>
+
+      <table>
+        <tr><th>key</th><th>items</th><th>tuple, first</th><th>tuple, last</th><th>tuple, miss</th><th>set, any</th></tr>
+        <tr><td>int</td><td>1</td><td>2.2</td><td>2.3</td><td>5.6</td><td>4.6–5.0</td></tr>
+        <tr><td>int</td><td>2</td><td>2.3</td><td>5.8</td><td>9.1</td><td>4.6–4.9</td></tr>
+        <tr><td>int</td><td>4</td><td>2.3</td><td>13.1</td><td>16.5</td><td>4.6–5.0</td></tr>
+        <tr><td>int</td><td>8</td><td>2.3</td><td>26.7</td><td>30.2</td><td>4.9–5.1</td></tr>
+        <tr><td>int</td><td>32</td><td>2.3</td><td>116</td><td>118</td><td>4.6–5.0</td></tr>
+        <tr><td>same str</td><td>1</td><td>2.2</td><td>2.2</td><td>5.4</td><td>3.7–3.9</td></tr>
+        <tr><td>same str</td><td>2</td><td>2.2</td><td>6.3</td><td>8.2</td><td>3.7–3.8</td></tr>
+        <tr><td>same str</td><td>4</td><td>2.1</td><td>15.0</td><td>14.5</td><td>3.8–3.9</td></tr>
+        <tr><td>same str</td><td>8</td><td>2.2</td><td>32.0</td><td>26.5</td><td>3.6–3.9</td></tr>
+        <tr><td>same str</td><td>32</td><td>2.1</td><td>125</td><td>128</td><td>3.8–4.0</td></tr>
+        <tr><td>equal str</td><td>1</td><td>6.5</td><td>6.5</td><td>5.4</td><td>4.1–5.7</td></tr>
+        <tr><td>equal str</td><td>2</td><td>6.7</td><td>10.6</td><td>8.4</td><td>3.7–5.8</td></tr>
+        <tr><td>equal str</td><td>4</td><td>6.6</td><td>19.0</td><td>14.5</td><td>3.8–5.8</td></tr>
+        <tr><td>equal str</td><td>8</td><td>6.5</td><td>35.7</td><td>26.5</td><td>3.6–5.7</td></tr>
+        <tr><td>equal str</td><td>32</td><td>6.5</td><td>131</td><td>128</td><td>3.9–5.8</td></tr>
+      </table>
+
+      <p>Run-to-run spread was at most 1.5 ns in any cell.</p>
+
+      <h2>What it shows</h2>
+
+      <p>The set is flat: 3.6 to 5.8 ns at every size. A miss is the cheapest case, since the probe's hash lands on an empty slot. A hit on an equal but different string costs about 2 ns more than a hit on the same object, because the set has to compare the characters after the identity check fails.</p>
+
+      <p>The tuple costs about 3.5 to 4 ns for each item it passes. Its one win is a hit on the first item when the probe is that same object: 2.2 ns, against the set's 3.7 to 5. Python's comparison checks identity before calling <code>==</code>, so that case is a pointer compare. Move the hit to the second of two items, or miss, and the tuple is already slower. With strings built at runtime even the first-item hit loses (6.5 against 5.7), because the identity check fails and a full string compare follows.</p>
+
+      <h2>So what</h2>
+
+      <p>Write <code>x in {"a", "b"}</code> for membership tests against constants, even short ones. The tuple only pays off for a value you know arrives as the identical object and almost always matches the first item, and then it saves 1.5 to 3 ns. The bigger point: at 2 or 3 items none of this is worth a code review comment. It starts to add up with longer lists: at 8 items a tuple miss costs about 7 times a set lookup, and at 32 about 30 times.</p>
+
+      <p>Method: one machine, a 40-line <code>timeit</code> script, CPython 3.14.8 (default build, no JIT) in a container. Constant literals only. A set built from a variable at runtime is a different question, since building it costs far more than any of these lookups.</p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+</body>
+</html>
