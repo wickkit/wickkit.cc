@@ -8,6 +8,61 @@
   <updated>2026-10-15T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
   <entry>
+    <title>A noisy judge breaks the 37% rule, and no cutoff fixes it</title>
+    <link href="https://wickkit.cc/posts/2026-10-15-a-noisy-judge-breaks-the-37-percent-rule-and-no-cutoff-fixes-it.html"/>
+    <id>https://wickkit.cc/posts/2026-10-15-a-noisy-judge-breaks-the-37-percent-rule-and-no-cutoff-fixes-it.html</id>
+    <updated>2026-10-15T00:00:00Z</updated>
+    <summary>In the secretary problem, judging candidates with a 0.96 correlation to the truth cut the odds of picking the best from 37% to 24% at 1,000 candidates, and retuning the cutoff won back under half a point. Scoring by quality instead, a cutoff near √n beat 37% by a wide margin.</summary>
+    <content type="html">&lt;p&gt;The secretary problem: &lt;i&gt;n&lt;/i&gt; candidates arrive in random order, you see them one at a time, and you must accept or reject each on the spot. If you want the single best one, the classic answer is to reject the first 37% (1/&lt;i&gt;e&lt;/i&gt;), then take the first candidate who beats everyone so far. That gets the best with probability about 1/&lt;i&gt;e&lt;/i&gt;, whatever &lt;i&gt;n&lt;/i&gt; is.&lt;/p&gt;
+
+      &lt;p&gt;The proof assumes you rank candidates perfectly. Real judgements are noisy: an interview, a flat viewing, a tasting. I wanted to know how much noise costs, and whether a different cutoff wins some of it back.&lt;/p&gt;
+
+      &lt;h2&gt;The run&lt;/h2&gt;
+
+      &lt;p&gt;Each candidate has a true quality drawn from a standard normal. You see the quality plus normal noise with standard deviation σ, so σ = 1 means the noise is as large as the real spread between candidates. You apply the rule to what you see. I ran pools of 10, 30, 100, 300 and 1,000 candidates at ten noise levels from 0 to 3, with 1 to 4 million trials per setting, and scored every possible cutoff in each trial. Standard errors on the probabilities below are 0.0006 or less.&lt;/p&gt;
+
+      &lt;p&gt;Two checks came out right. With no noise, the best cutoff for 10 candidates is 3 or 4 (39.9%), and for 1,000 it's 37% (36.7%), matching the textbook values. And at every noise level the rule picks the candidate who &lt;i&gt;looked&lt;/i&gt; best 36.7–37.1% of the time. Noise doesn't affect how the rule behaves, only whether the one who looked best really is.&lt;/p&gt;
+
+      &lt;h2&gt;The odds fall fast&lt;/h2&gt;
+
+      &lt;p&gt;Chance of ending up with the truly best candidate, using the 37% cutoff, then using the best cutoff for that noise level. The second column is the correlation between what you see and the truth.&lt;/p&gt;
+
+      &lt;table&gt;
+        &lt;tr&gt;&lt;th&gt;noise σ&lt;/th&gt;&lt;th&gt;correlation&lt;/th&gt;&lt;th&gt;100 candidates, 37%&lt;/th&gt;&lt;th&gt;best cutoff&lt;/th&gt;&lt;th&gt;1,000 candidates, 37%&lt;/th&gt;&lt;th&gt;best cutoff&lt;/th&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;0&lt;/td&gt;&lt;td&gt;1.00&lt;/td&gt;&lt;td&gt;37.1%&lt;/td&gt;&lt;td&gt;37.1% at 37%&lt;/td&gt;&lt;td&gt;36.7%&lt;/td&gt;&lt;td&gt;36.7% at 37%&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;0.1&lt;/td&gt;&lt;td&gt;0.995&lt;/td&gt;&lt;td&gt;33.8%&lt;/td&gt;&lt;td&gt;33.8% at 36%&lt;/td&gt;&lt;td&gt;32.3%&lt;/td&gt;&lt;td&gt;32.4% at 34%&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;0.3&lt;/td&gt;&lt;td&gt;0.96&lt;/td&gt;&lt;td&gt;27.0%&lt;/td&gt;&lt;td&gt;27.2% at 32%&lt;/td&gt;&lt;td&gt;23.6%&lt;/td&gt;&lt;td&gt;23.9% at 31%&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;0.5&lt;/td&gt;&lt;td&gt;0.89&lt;/td&gt;&lt;td&gt;21.0%&lt;/td&gt;&lt;td&gt;21.3% at 31%&lt;/td&gt;&lt;td&gt;16.5%&lt;/td&gt;&lt;td&gt;16.8% at 29%&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;1&lt;/td&gt;&lt;td&gt;0.71&lt;/td&gt;&lt;td&gt;11.5%&lt;/td&gt;&lt;td&gt;11.9% at 26%&lt;/td&gt;&lt;td&gt;6.7%&lt;/td&gt;&lt;td&gt;7.0% at 25%&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;2&lt;/td&gt;&lt;td&gt;0.45&lt;/td&gt;&lt;td&gt;5.0%&lt;/td&gt;&lt;td&gt;5.3% at 22%&lt;/td&gt;&lt;td&gt;1.8%&lt;/td&gt;&lt;td&gt;2.0% at 21%&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;3&lt;/td&gt;&lt;td&gt;0.32&lt;/td&gt;&lt;td&gt;3.2%&lt;/td&gt;&lt;td&gt;3.4% at 20%&lt;/td&gt;&lt;td&gt;0.8%&lt;/td&gt;&lt;td&gt;0.9% at 19%&lt;/td&gt;&lt;/tr&gt;
+      &lt;/table&gt;
+
+      &lt;p&gt;Noise you'd hardly notice costs a lot. A correlation of 0.96 is a very good judge, and it takes the odds from 37% to 27% at 100 candidates and 24% at 1,000. Bigger pools get hurt more, because there are more near-equals who can edge past the true best on the day.&lt;/p&gt;
+
+      &lt;p&gt;The best cutoff does move earlier as noise grows, from 37% down to about 20%. But retuning gains almost nothing: at most 0.4 percentage points at 100 or more candidates, and 0.7 at 10. The curve of success against cutoff is flat near its top, so the old cutoff stays close to optimal even when the optimum has moved. If your judgement is noisy, a cleverer stopping rule won't help. Only better judgement will.&lt;/p&gt;
+
+      &lt;h2&gt;The goal matters more than the noise&lt;/h2&gt;
+
+      &lt;p&gt;"Best or nothing" is a strange goal anyway. Most people would rather end up with someone good than gamble on the very best. If you score a pick by its true quality instead, 37% is far too patient:&lt;/p&gt;
+
+      &lt;table&gt;
+        &lt;tr&gt;&lt;th&gt;what you score&lt;/th&gt;&lt;th&gt;candidates&lt;/th&gt;&lt;th&gt;at 37% cutoff&lt;/th&gt;&lt;th&gt;at best cutoff&lt;/th&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;mean quality, in standard deviations&lt;/td&gt;&lt;td&gt;100&lt;/td&gt;&lt;td&gt;1.44&lt;/td&gt;&lt;td&gt;1.72 at 14%&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;mean quality, in standard deviations&lt;/td&gt;&lt;td&gt;1,000&lt;/td&gt;&lt;td&gt;1.94&lt;/td&gt;&lt;td&gt;2.48 at 9.4%&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;mean percentile&lt;/td&gt;&lt;td&gt;100&lt;/td&gt;&lt;td&gt;81%&lt;/td&gt;&lt;td&gt;91% at 9%&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;mean percentile&lt;/td&gt;&lt;td&gt;1,000&lt;/td&gt;&lt;td&gt;82%&lt;/td&gt;&lt;td&gt;97% at 3.1%&lt;/td&gt;&lt;/tr&gt;
+      &lt;/table&gt;
+
+      &lt;p&gt;Waiting through 37% means that 37% of the time the best has already gone by, nobody beats them, and you're forced to take the last candidate, who is average. The percentile cutoff of 3.1% at 1,000 is about √&lt;i&gt;n&lt;/i&gt; candidates, which matches Bearden's 2006 result that √&lt;i&gt;n&lt;/i&gt; is the best cutoff when the payoff is the candidate's rank. Using 37% when you care about quality is a bigger mistake than any amount of noise up to σ = 0.5.&lt;/p&gt;
+
+      &lt;p&gt;For mean quality, noise has an exact effect. With normal quality and normal noise, the best estimate of the true quality is the observed score divided by 1 + σ², and the observed scores are just normal with a wider spread. So every cutoff's mean quality shrinks by the same factor, 1/√(1 + σ²), and the best cutoff doesn't move at all. The simulation agrees with that to within 0.002 at every size and noise level, which is a good check on the code. The percentile score is different. Its best cutoff rises with noise, from 3.1% to 5.5% at σ = 1 for 1,000 candidates, because an early lucky-looking candidate is less likely to be really good.&lt;/p&gt;
+
+      &lt;h2&gt;So&lt;/h2&gt;
+
+      &lt;p&gt;The 37% rule holds up under noise in a narrow sense: no other cutoff does much better at getting the very best. But noise makes "the very best" nearly unreachable in a big pool, and the rule was never the right one if you'd take "very good". Look at fewer candidates before committing, roughly the square root of the pool, and spend the effort on judging them well.&lt;/p&gt;</content>
+  </entry>
+  <entry>
     <title>When skill drifts, the best Elo K is set by how fast it drifts</title>
     <link href="https://wickkit.cc/posts/2026-10-15-when-skill-drifts-the-best-elo-k-is-set-by-how-fast-it-drifts.html"/>
     <id>https://wickkit.cc/posts/2026-10-15-when-skill-drifts-the-best-elo-k-is-set-by-how-fast-it-drifts.html</id>
