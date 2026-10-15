@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>A fixed Elo K-factor stops learning at a noise floor you can predict — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/tools.html">tools</a>
+      <a href="/den.html">den</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+
+    <article>
+      <h1>A fixed Elo K-factor stops learning at a noise floor you can predict</h1>
+      <div class="meta">2026-10-15 · Kit Wickham</div>
+
+      <p>I simulated 16 players with fixed true strengths and rated them with Elo. With K=32, the error in their ratings stopped shrinking after about 100 games each and stayed at 52 Elo points through game 1,000. A back-of-envelope formula, error ≈ 9.3·√K, predicts 53. Refitting all the games at once (a Bradley–Terry fit) kept improving the whole way, down to 13 points. After 1,000 games each, K=32 still put only 69% of neighbouring players in the right order, against 88% for the refit.</p>
+
+      <h2>The test</h2>
+
+      <p>Each trial draws 16 true ratings from a normal distribution with a standard deviation of 200 Elo points, then plays 8,000 games between random pairs, about 1,000 per player. The stronger player wins with the usual Elo logistic probability. Everyone starts at 0. I ran 20,000 trials per setting, and every setting saw the same players and the same coin flips. Error is the root-mean-square gap between the ratings and the truth, both centred on zero; standard errors are under 0.2 points.</p>
+
+      <table>
+        <tr><th>games per player</th><th>K=4</th><th>K=16</th><th>K=32</th><th>K=64</th><th>batch fit</th></tr>
+        <tr><td>25</td><td>172</td><td>132</td><td>104</td><td>87</td><td>84</td></tr>
+        <tr><td>100</td><td>130</td><td>64</td><td>55</td><td>76</td><td>41</td></tr>
+        <tr><td>400</td><td>58</td><td>36</td><td>52</td><td>77</td><td>20</td></tr>
+        <tr><td>1,000</td><td>24</td><td>36</td><td>52</td><td>78</td><td>13</td></tr>
+      </table>
+
+      <p>Large K learns fast and then stalls high; small K learns slowly and ends low. K=4 is the worst setting in the table for the first 200 or so games and the best fixed K by game 1,000. The batch fit beats every fixed K at every checkpoint.</p>
+
+      <p>Neighbouring players were about 50 points apart on average, so a 52-point error scrambles them. The share of adjacent pairs in the right order after 1,000 games per player: K=64 65%, K=32 69%, K=16 74%, K=4 83%, batch fit 88%. Those numbers had already stopped moving by game 400 for K=16 and above.</p>
+
+      <h2>Why the floor is √K</h2>
+
+      <p>After each game, Elo moves a rating by K times (score − expected score). That kick is random, with variance K²·p(1−p) where p is the win chance. Its average is a pull back toward the truth of about K·(ln 10/400)·p(1−p) times the current error. The rating settles where the kicks and the pull balance, at a variance of K²·p(1−p) divided by twice the pull. The p(1−p) cancels, leaving 400K/(2 ln 10), or about 87K: a standard deviation of 9.3·√K whoever the opponents are.</p>
+
+      <table>
+        <tr><th>K</th><th>predicted</th><th>measured at 1,000 games</th></tr>
+        <tr><td>8</td><td>26.4</td><td>25.5 (still settling)</td></tr>
+        <tr><td>16</td><td>37.3</td><td>36.2</td></tr>
+        <tr><td>32</td><td>52.7</td><td>52.4</td></tr>
+        <tr><td>64</td><td>74.6</td><td>77.6</td></tr>
+      </table>
+
+      <p>K=64 overshoots the prediction by 4%. The derivation assumes the rating moves little per game, and at K=64 a single game can move it by 30 points or more.</p>
+
+      <h2>A shrinking K nearly matches the batch fit</h2>
+
+      <p>Letting each player's K fall with the games they have played removes the floor. I first tried K = 400/(games + 10). It ordered players almost as well as the batch fit (86% of adjacent pairs) but its error was still 48. The ratings had come out squashed: a regression of rating on truth gave a slope of 0.77, because the steps had shrunk before the ratings had spread out from zero. Order doesn't care about scale; error does.</p>
+
+      <p>The best step for this kind of running estimate is one over the information gathered so far. For Elo that works out to K ≈ 400 / (ln 10 · p(1−p) · games), and with p(1−p) around 0.2 here that is about 870/games. K = 870/(games + 20) gave a slope of 0.91, an error of 26 and 87% of adjacent pairs right, within a point of the batch fit on order.</p>
+
+      <h2>So what</h2>
+
+      <p>A fixed K is a choice of noise floor. If you rate a league with K=32 and the players' skill doesn't change, every rating stays about ±50 points off forever, and no number of extra games fixes it. If you want ratings that converge, shrink K with games played (about 870/games on this scale), or refit everything in one go now and then.</p>
+
+      <p>The case for a fixed K is skill that changes. A player who improves needs ratings that can move, and a shrinking K or a refit of the whole history would be slow to follow them. None of my players changed, so this test only shows what a fixed K costs, not what it buys.</p>
+
+      <p>Method: NumPy, vectorised over trials, on one machine. 16 players, random pairings, no draws, no rating changes over time. The shrinking-K slopes come from a separate run of 2,000 trials. The batch fit is a Bradley–Terry maximum-likelihood fit with one virtual draw per player against an average opponent, so a player who has never lost still gets a finite rating.</p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+</body>
+</html>
