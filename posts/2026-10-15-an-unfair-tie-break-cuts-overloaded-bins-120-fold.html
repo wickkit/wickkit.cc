@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>An unfair tie-break cuts overloaded bins 120-fold — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/tools.html">tools</a>
+      <a href="/den.html">den</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+
+    <article>
+      <h1>An unfair tie-break cuts overloaded bins 120-fold</h1>
+      <div class="meta">2026-10-15 · Kit Wickham</div>
+
+      <p>Throw <i>n</i> balls into <i>n</i> bins, each into a random bin, and the fullest bin ends up with about ln <i>n</i> / ln ln <i>n</i> balls. Look at two random bins and use the emptier one instead, and the maximum drops to about ln ln <i>n</i> / ln 2. That's the "power of two choices" (Azar, Broder, Karlin and Upfal, 1994). Berthold Vöcking found a strange improvement in 1999: split the bins into a left half and a right half, take one choice from each, and when the two are tied, <b>always pick the left one</b>. The maximum drops again, to about ln ln <i>n</i> / (2 ln φ), where φ is the golden ratio. That's 1.04 instead of 1.44 in front of the ln ln <i>n</i>.</p>
+
+      <p>Both of those results hide a "+ O(1)", and ln ln <i>n</i> barely moves (it's 3.0 at a billion), so I wanted to see what the rule does at sizes you could actually build.</p>
+
+      <h2>The run</h2>
+
+      <p>A short JavaScript loop with one byte per bin and four rules: one random bin; two random bins with ties broken by a coin; one bin from each half with ties broken by a coin; and one bin from each half with ties going left. Sizes ran from 2<sup>12</sup> to 2<sup>30</sup> bins (a billion), with 400 seeds per rule at the small sizes and 6 at the largest. That's 9,448 runs, about 25 minutes on eight cores.</p>
+
+      <p>To check the simulation I also solved the fluid limit, the differential equations that the fraction of bins at each load follows as <i>n</i> grows. For two choices it's d<i>s<sub>i</sub></i>/d<i>t</i> = <i>s</i><sub><i>i</i>−1</sub>² − <i>s<sub>i</sub></i>², where <i>s<sub>i</sub></i> is the share of bins holding at least <i>i</i> balls. Go-left needs one such pair of equations per half. At every size, the simulated shares match the equations to three or four digits.</p>
+
+      <table>
+        <tr><th>share of bins holding</th><th>two choices, coin tie</th><th>two halves, coin tie</th><th>two halves, go left</th></tr>
+        <tr><td>≥ 2 balls</td><td>22.95%</td><td>22.95%</td><td>22.39%</td></tr>
+        <tr><td>≥ 3 balls</td><td>0.890%</td><td>0.890%</td><td>0.448%</td></tr>
+        <tr><td>≥ 4 balls</td><td>6.0 × 10<sup>−6</sup></td><td>6.0 × 10<sup>−6</sup></td><td>5.2 × 10<sup>−8</sup></td></tr>
+        <tr><td>≥ 5 balls</td><td>1.3 × 10<sup>−12</sup></td><td>1.3 × 10<sup>−12</sup></td><td>1.2 × 10<sup>−21</sup></td></tr>
+      </table>
+
+      <p>(The ≥ 5 row comes from the equations. No run got a bin to 5 under any of the two-choice rules.)</p>
+
+      <p>Splitting the bins into halves changes nothing on its own. The gain comes entirely from the tie-break: bins at 3 balls are halved, bins at 4 are 120 times rarer, and the next level falls 10<sup>9</sup>-fold.</p>
+
+      <h2>The maximum moves in steps</h2>
+
+      <p>The fullest bin can only be a whole number, so the better tail only shows up as a lower maximum at some sizes:</p>
+
+      <table>
+        <tr><th>bins</th><th>runs with max load 4, coin tie</th><th>runs with max load 4, go left</th></tr>
+        <tr><td>2<sup>16</sup> (65K)</td><td>35%</td><td>0.5%</td></tr>
+        <tr><td>2<sup>20</sup> (1M)</td><td>99.8%</td><td>4%</td></tr>
+        <tr><td>2<sup>24</sup> (16M)</td><td>100%</td><td>58%</td></tr>
+        <tr><td>2<sup>26</sup> (67M)</td><td>100%</td><td>95%</td></tr>
+        <tr><td>2<sup>28</sup> and 2<sup>30</sup></td><td>100%</td><td>100%</td></tr>
+      </table>
+
+      <p>Every other run topped out at 3. Between about a hundred thousand and ten million bins, going left buys you one ball off the maximum. At a billion bins both rules sit at 4, and the equations say they stay tied until about 10<sup>12</sup> bins, where the coin-tie rule starts to reach 5. Go-left doesn't reach 5 until around 10<sup>21</sup>. The asymptotic win is real, but at a billion bins it shows up in how many bins are near the top, not in the top itself.</p>
+
+      <h2>Where the balls go</h2>
+
+      <p>"Always left" sounds like it should pile everything onto the left half, and it does tilt: the left half ends up holding 61% of the balls (an average of 1.22 per bin against 0.78). Almost all the bins with 3 or more are on the left. But the left half's crowded tail is no worse than an ordinary two-choice table's, and the right half is nearly flat. A bin on the right only gets a ball when its partner on the left is strictly fuller, so the right half fills in where the left has already peaked. That coordination is what a fair coin throws away.</p>
+
+      <p>For a hash table or a load balancer, the rule costs nothing: same two lookups, one fewer random bit. If you do two-choice hashing, take the two choices from separate halves and break ties the same way every time.</p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+</body>
+</html>
