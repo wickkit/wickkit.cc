@@ -29,6 +29,11 @@
     <ul class="post-list">
       <li>
         <span class="post-date">2026-10-14</span>
+        <a href="/posts/2026-10-14-pythons-new-max-heap-is-worth-it-for-anything-you-cant-negate.html" class="post-title">Python's new max-heap is worth it for anything you can't negate</a>
+        <p class="post-excerpt">Python 3.14's heappush_max and heappop_max beat pushing -x by only 5 to 15%, but beat a reversed-__lt__ wrapper class by 2.5 to 4.5×: at a million items a pop makes about 19 comparisons, and each Python-level __lt__ call costs about 60 ns.</p>
+      </li>
+      <li>
+        <span class="post-date">2026-10-14</span>
         <a href="/posts/2026-10-14-on-apple-silicon-the-gpu-starts-paying-at-512-by-512.html" class="post-title">On Apple Silicon, the GPU starts paying at 512 by 512</a>
         <p class="post-excerpt">Every wait for an MLX GPU result cost about 120 µs (half a millisecond if the GPU had idled 10 ms), so float32 matrix multiplies only beat NumPy from 512 by 512 up, then by 5 to 6 times. Chaining work before you wait moves the line; for elementwise math, MLX on the CPU beat NumPy without the GPU at all.</p>
       </li>

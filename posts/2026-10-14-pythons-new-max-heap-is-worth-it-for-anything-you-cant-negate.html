@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Python's new max-heap is worth it for anything you can't negate — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/tools.html">tools</a>
+      <a href="/den.html">den</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+
+    <article>
+      <h1>Python's new max-heap is worth it for anything you can't negate</h1>
+      <div class="meta">2026-10-14 · Kit Wickham</div>
+
+      <p>Until 3.14, <code>heapq</code> only did min-heaps. If you wanted the largest item first, you either pushed <code>-x</code> or wrapped each item in a class with a reversed <code>__lt__</code>. Python 3.14 made <code>heappush_max</code>, <code>heappop_max</code>, <code>heapify_max</code> and friends public. I measured them against both old tricks. Against negation the gain is small, 5 to 15%. Against a wrapper class it is 2.5 to 4.5×, and for strings, which you can't negate, a wrapper was the only option.</p>
+
+      <h2>The test</h2>
+
+      <p>CPython 3.14.8. Push N random items one at a time, then pop them all, and check the output comes out sorted largest first. I timed ns per item (one push plus one pop), took the median of 7 to 21 runs, and ran each variant in its own fresh process, three rounds in shuffled order. The machine had other work on it, so call differences under about 15% ties.</p>
+
+      <table>
+        <tr><th>items</th><th>N</th><th><code>heappush_max</code></th><th>negate</th><th>wrapper class</th></tr>
+        <tr><td>int</td><td>1,000</td><td>94</td><td>107</td><td>408</td></tr>
+        <tr><td>int</td><td>100,000</td><td>196</td><td>218</td><td>690</td></tr>
+        <tr><td>int</td><td>1,000,000</td><td>481</td><td>511</td><td>1,742</td></tr>
+        <tr><td>str</td><td>1,000</td><td>105</td><td>—</td><td>398</td></tr>
+        <tr><td>str</td><td>100,000</td><td>230</td><td>—</td><td>715</td></tr>
+        <tr><td>str</td><td>1,000,000</td><td>601</td><td>—</td><td>2,019</td></tr>
+        <tr><td>(priority, name)</td><td>1,000</td><td>177</td><td>213</td><td>458</td></tr>
+        <tr><td>(priority, name)</td><td>100,000</td><td>339</td><td>479</td><td>882</td></tr>
+        <tr><td>(priority, name)</td><td>1,000,000</td><td>809</td><td>1,281</td><td>1,952</td></tr>
+      </table>
+
+      <p>Floats came out like ints. For the tuples, "negate" means pushing <code>(-p, name)</code> and rebuilding the tuple on the way out. That only works because the priority is a number.</p>
+
+      <h2>Why it comes out this way</h2>
+
+      <p>Negating a number is one cheap C-level operation per push and per pop, so a native max-heap only saves that. With tuples it saves more, 20 to 60%, because you build a new tuple on the way in and another on the way out.</p>
+
+      <p>The wrapper is slow because every comparison becomes a Python method call. I counted them: a push took about 2.3 comparisons, and a pop took 9 at a thousand items and 19 at a million. That's about 21 calls to <code>__lt__</code> per item at a million, so the extra 1.3 µs per item comes to roughly 60 ns per call. <code>__slots__</code> didn't help. A plain <code>@total_ordering</code> class was within about 10% of the slotted one, because the cost is the call itself, not looking up the attribute.</p>
+
+      <p>One more thing: if all the items are there up front, <code>heapify_max</code> and then popping beat pushing them one at a time by 5 to 30%, because building a heap all at once is linear.</p>
+
+      <h2>So what</h2>
+
+      <p>If you are already on 3.14 and you negate numbers, switching is a tidy-up, not a speedup. If you have a <code>ReverseOrder</code> wrapper class for strings, tuples or anything else that can't be negated, delete it: the built-in is three to four times faster on strings and about 2.5× on tuples, and your code no longer has a class just to flip a comparison. One catch: the <code>_max</code> functions only reverse the comparison. There's no <code>key=</code>, so a heap of records still needs tuples or a class.</p>
+
+      <p>Method: one machine, about 100 lines of plain Python, random data from a fixed seed. These are tight-loop costs, not what a whole program would see.</p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+</body>
+</html>

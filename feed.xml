@@ -8,6 +8,47 @@
   <updated>2026-10-14T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
   <entry>
+    <title>Python's new max-heap is worth it for anything you can't negate</title>
+    <link href="https://wickkit.cc/posts/2026-10-14-pythons-new-max-heap-is-worth-it-for-anything-you-cant-negate.html"/>
+    <id>https://wickkit.cc/posts/2026-10-14-pythons-new-max-heap-is-worth-it-for-anything-you-cant-negate.html</id>
+    <updated>2026-10-14T00:00:00Z</updated>
+    <summary>Python 3.14's heappush_max and heappop_max beat pushing -x by only 5 to 15%, but beat a reversed-__lt__ wrapper class by 2.5 to 4.5×: at a million items a pop makes about 19 comparisons, and each Python-level __lt__ call costs about 60 ns.</summary>
+    <content type="html">&lt;p&gt;Until 3.14, &lt;code&gt;heapq&lt;/code&gt; only did min-heaps. If you wanted the largest item first, you either pushed &lt;code&gt;-x&lt;/code&gt; or wrapped each item in a class with a reversed &lt;code&gt;__lt__&lt;/code&gt;. Python 3.14 made &lt;code&gt;heappush_max&lt;/code&gt;, &lt;code&gt;heappop_max&lt;/code&gt;, &lt;code&gt;heapify_max&lt;/code&gt; and friends public. I measured them against both old tricks. Against negation the gain is small, 5 to 15%. Against a wrapper class it is 2.5 to 4.5×, and for strings, which you can't negate, a wrapper was the only option.&lt;/p&gt;
+
+      &lt;h2&gt;The test&lt;/h2&gt;
+
+      &lt;p&gt;CPython 3.14.8. Push N random items one at a time, then pop them all, and check the output comes out sorted largest first. I timed ns per item (one push plus one pop), took the median of 7 to 21 runs, and ran each variant in its own fresh process, three rounds in shuffled order. The machine had other work on it, so call differences under about 15% ties.&lt;/p&gt;
+
+      &lt;table&gt;
+        &lt;tr&gt;&lt;th&gt;items&lt;/th&gt;&lt;th&gt;N&lt;/th&gt;&lt;th&gt;&lt;code&gt;heappush_max&lt;/code&gt;&lt;/th&gt;&lt;th&gt;negate&lt;/th&gt;&lt;th&gt;wrapper class&lt;/th&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;int&lt;/td&gt;&lt;td&gt;1,000&lt;/td&gt;&lt;td&gt;94&lt;/td&gt;&lt;td&gt;107&lt;/td&gt;&lt;td&gt;408&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;int&lt;/td&gt;&lt;td&gt;100,000&lt;/td&gt;&lt;td&gt;196&lt;/td&gt;&lt;td&gt;218&lt;/td&gt;&lt;td&gt;690&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;int&lt;/td&gt;&lt;td&gt;1,000,000&lt;/td&gt;&lt;td&gt;481&lt;/td&gt;&lt;td&gt;511&lt;/td&gt;&lt;td&gt;1,742&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;str&lt;/td&gt;&lt;td&gt;1,000&lt;/td&gt;&lt;td&gt;105&lt;/td&gt;&lt;td&gt;—&lt;/td&gt;&lt;td&gt;398&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;str&lt;/td&gt;&lt;td&gt;100,000&lt;/td&gt;&lt;td&gt;230&lt;/td&gt;&lt;td&gt;—&lt;/td&gt;&lt;td&gt;715&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;str&lt;/td&gt;&lt;td&gt;1,000,000&lt;/td&gt;&lt;td&gt;601&lt;/td&gt;&lt;td&gt;—&lt;/td&gt;&lt;td&gt;2,019&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;(priority, name)&lt;/td&gt;&lt;td&gt;1,000&lt;/td&gt;&lt;td&gt;177&lt;/td&gt;&lt;td&gt;213&lt;/td&gt;&lt;td&gt;458&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;(priority, name)&lt;/td&gt;&lt;td&gt;100,000&lt;/td&gt;&lt;td&gt;339&lt;/td&gt;&lt;td&gt;479&lt;/td&gt;&lt;td&gt;882&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;(priority, name)&lt;/td&gt;&lt;td&gt;1,000,000&lt;/td&gt;&lt;td&gt;809&lt;/td&gt;&lt;td&gt;1,281&lt;/td&gt;&lt;td&gt;1,952&lt;/td&gt;&lt;/tr&gt;
+      &lt;/table&gt;
+
+      &lt;p&gt;Floats came out like ints. For the tuples, "negate" means pushing &lt;code&gt;(-p, name)&lt;/code&gt; and rebuilding the tuple on the way out. That only works because the priority is a number.&lt;/p&gt;
+
+      &lt;h2&gt;Why it comes out this way&lt;/h2&gt;
+
+      &lt;p&gt;Negating a number is one cheap C-level operation per push and per pop, so a native max-heap only saves that. With tuples it saves more, 20 to 60%, because you build a new tuple on the way in and another on the way out.&lt;/p&gt;
+
+      &lt;p&gt;The wrapper is slow because every comparison becomes a Python method call. I counted them: a push took about 2.3 comparisons, and a pop took 9 at a thousand items and 19 at a million. That's about 21 calls to &lt;code&gt;__lt__&lt;/code&gt; per item at a million, so the extra 1.3 µs per item comes to roughly 60 ns per call. &lt;code&gt;__slots__&lt;/code&gt; didn't help. A plain &lt;code&gt;@total_ordering&lt;/code&gt; class was within about 10% of the slotted one, because the cost is the call itself, not looking up the attribute.&lt;/p&gt;
+
+      &lt;p&gt;One more thing: if all the items are there up front, &lt;code&gt;heapify_max&lt;/code&gt; and then popping beat pushing them one at a time by 5 to 30%, because building a heap all at once is linear.&lt;/p&gt;
+
+      &lt;h2&gt;So what&lt;/h2&gt;
+
+      &lt;p&gt;If you are already on 3.14 and you negate numbers, switching is a tidy-up, not a speedup. If you have a &lt;code&gt;ReverseOrder&lt;/code&gt; wrapper class for strings, tuples or anything else that can't be negated, delete it: the built-in is three to four times faster on strings and about 2.5× on tuples, and your code no longer has a class just to flip a comparison. One catch: the &lt;code&gt;_max&lt;/code&gt; functions only reverse the comparison. There's no &lt;code&gt;key=&lt;/code&gt;, so a heap of records still needs tuples or a class.&lt;/p&gt;
+
+      &lt;p&gt;Method: one machine, about 100 lines of plain Python, random data from a fixed seed. These are tight-loop costs, not what a whole program would see.&lt;/p&gt;</content>
+  </entry>
+  <entry>
     <title>On Apple Silicon, the GPU starts paying at 512 by 512</title>
     <link href="https://wickkit.cc/posts/2026-10-14-on-apple-silicon-the-gpu-starts-paying-at-512-by-512.html"/>
     <id>https://wickkit.cc/posts/2026-10-14-on-apple-silicon-the-gpu-starts-paying-at-512-by-512.html</id>
