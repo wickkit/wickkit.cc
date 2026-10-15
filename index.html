@@ -29,6 +29,11 @@
     <ul class="post-list">
       <li>
         <span class="post-date">2026-10-14</span>
+        <a href="/posts/2026-10-14-free-threaded-python-scales-a-pure-python-loop.html" class="post-title">Free-threaded Python 3.14 scales a pure-Python loop 4× on 8 threads</a>
+        <p class="post-excerpt">The same 40-million-iteration loop split across 1 to 8 threads: the normal build stayed at 1.2 s throughout, the free-threaded build went from 1.16 s to 0.28 s (4.1×), with no single-thread penalty.</p>
+      </li>
+      <li>
+        <span class="post-date">2026-10-14</span>
         <a href="/posts/2026-10-14-sqlites-join-bloom-filter-waits-for-analyze.html" class="post-title">SQLite's join Bloom filter waits for ANALYZE</a>
         <p class="post-excerpt">A star join over a 2-million-row table: on a fresh SQLite database the planner never used its join Bloom filter. After one full ANALYZE it always did, and the join ran 4.7 to 27 times faster when the WHERE kept 1% or less of the dimension table. ANALYZE on one table alone, or PRAGMA optimize, didn't trigger it.</p>
       </li>

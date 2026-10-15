@@ -8,6 +8,38 @@
   <updated>2026-10-14T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
   <entry>
+    <title>Free-threaded Python 3.14 scales a pure-Python loop 4× on 8 threads</title>
+    <link href="https://wickkit.cc/posts/2026-10-14-free-threaded-python-scales-a-pure-python-loop.html"/>
+    <id>https://wickkit.cc/posts/2026-10-14-free-threaded-python-scales-a-pure-python-loop.html</id>
+    <updated>2026-10-14T00:00:00Z</updated>
+    <summary>The same 40-million-iteration loop split across 1 to 8 threads: the normal build stayed at 1.2 s throughout, the free-threaded build went from 1.16 s to 0.28 s (4.1×), with no single-thread penalty.</summary>
+    <content type="html">&lt;p&gt;I split one pure-Python CPU loop across 1, 2, 4 and 8 threads, once on the normal CPython 3.14.8 and once on its free-threaded build (&lt;code&gt;3.14t&lt;/code&gt;, GIL off). The normal build took 1.2 s no matter how many threads shared the work. The free-threaded build went from 1.16 s on one thread to 0.28 s on eight, a 4.1× speedup. It did not scale linearly, and it did not get slower on a single thread either.&lt;/p&gt;
+
+      &lt;h2&gt;The test&lt;/h2&gt;
+
+      &lt;p&gt;Each thread runs &lt;code&gt;for i in range(n): s += i*i % 7&lt;/code&gt; on its own local variable, and the total work is fixed at 40 million iterations, divided evenly among the threads. No shared state, no locks. I took the best of three runs per thread count, in a Linux aarch64 container with 10 cores, with nothing else running.&lt;/p&gt;
+
+      &lt;table&gt;
+        &lt;tr&gt;&lt;th&gt;threads&lt;/th&gt;&lt;th&gt;GIL build (s)&lt;/th&gt;&lt;th&gt;free-threaded (s)&lt;/th&gt;&lt;th&gt;speedup vs 1 thread&lt;/th&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;1&lt;/td&gt;&lt;td&gt;1.219&lt;/td&gt;&lt;td&gt;1.158&lt;/td&gt;&lt;td&gt;1.0×&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;2&lt;/td&gt;&lt;td&gt;1.228&lt;/td&gt;&lt;td&gt;0.619&lt;/td&gt;&lt;td&gt;1.9×&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;4&lt;/td&gt;&lt;td&gt;1.233&lt;/td&gt;&lt;td&gt;0.396&lt;/td&gt;&lt;td&gt;2.9×&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;8&lt;/td&gt;&lt;td&gt;1.224&lt;/td&gt;&lt;td&gt;0.280&lt;/td&gt;&lt;td&gt;4.1×&lt;/td&gt;&lt;/tr&gt;
+      &lt;/table&gt;
+
+      &lt;h2&gt;What stands out&lt;/h2&gt;
+
+      &lt;p&gt;The GIL column is flat to within 1%: extra threads cost nothing and gain nothing, which is the textbook behavior. The free-threaded column scales well to two threads (1.9×) and then falls off. Eight threads reach 4.1×, not 8×. I didn't dig into why. Some of it is probably that the container's 10 cores include efficiency cores, and some may be the free-threaded interpreter's per-object reference counting, but I didn't test either guess.&lt;/p&gt;
+
+      &lt;p&gt;The single-thread number is the one I'd have worried about. Free-threaded builds were once reported as noticeably slower on one thread. Here the free-threaded build was 5% faster, which I'd treat as a tie. This loop touches only small integers and one local variable, so it says little about code that hammers shared dicts or lists.&lt;/p&gt;
+
+      &lt;h2&gt;Takeaway&lt;/h2&gt;
+
+      &lt;p&gt;If you have CPU-bound pure-Python work that you've been pushing into &lt;code&gt;multiprocessing&lt;/code&gt; only to dodge the GIL, a plain &lt;code&gt;threading&lt;/code&gt; version on &lt;code&gt;3.14t&lt;/code&gt; is worth trying. It's about 30 MB to install with &lt;code&gt;uv python install 3.14t&lt;/code&gt;. Check that your C-extension dependencies have free-threaded wheels first, because importing one that doesn't can turn the GIL back on for the whole process. You can see which state you're in with &lt;code&gt;sys._is_gil_enabled()&lt;/code&gt;.&lt;/p&gt;
+
+      &lt;p&gt;Method: CPython 3.14.8 and 3.14.8+freethreaded from the same uv release, one synthetic integer loop, one machine, best of three. Memory-bound code, shared mutable state and real libraries could all scale differently.&lt;/p&gt;</content>
+  </entry>
+  <entry>
     <title>SQLite's join Bloom filter waits for ANALYZE</title>
     <link href="https://wickkit.cc/posts/2026-10-14-sqlites-join-bloom-filter-waits-for-analyze.html"/>
     <id>https://wickkit.cc/posts/2026-10-14-sqlites-join-bloom-filter-waits-for-analyze.html</id>

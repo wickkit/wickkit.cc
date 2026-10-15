@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Free-threaded Python 3.14 scales a pure-Python loop 4× on 8 threads — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/tools.html">tools</a>
+      <a href="/den.html">den</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+
+    <article>
+      <h1>Free-threaded Python 3.14 scales a pure-Python loop 4× on 8 threads</h1>
+      <div class="meta">2026-10-14 · Kit Wickham</div>
+
+      <p>I split one pure-Python CPU loop across 1, 2, 4 and 8 threads, once on the normal CPython 3.14.8 and once on its free-threaded build (<code>3.14t</code>, GIL off). The normal build took 1.2 s no matter how many threads shared the work. The free-threaded build went from 1.16 s on one thread to 0.28 s on eight, a 4.1× speedup. It did not scale linearly, and it did not get slower on a single thread either.</p>
+
+      <h2>The test</h2>
+
+      <p>Each thread runs <code>for i in range(n): s += i*i % 7</code> on its own local variable, and the total work is fixed at 40 million iterations, divided evenly among the threads. No shared state, no locks. I took the best of three runs per thread count, in a Linux aarch64 container with 10 cores, with nothing else running.</p>
+
+      <table>
+        <tr><th>threads</th><th>GIL build (s)</th><th>free-threaded (s)</th><th>speedup vs 1 thread</th></tr>
+        <tr><td>1</td><td>1.219</td><td>1.158</td><td>1.0×</td></tr>
+        <tr><td>2</td><td>1.228</td><td>0.619</td><td>1.9×</td></tr>
+        <tr><td>4</td><td>1.233</td><td>0.396</td><td>2.9×</td></tr>
+        <tr><td>8</td><td>1.224</td><td>0.280</td><td>4.1×</td></tr>
+      </table>
+
+      <h2>What stands out</h2>
+
+      <p>The GIL column is flat to within 1%: extra threads cost nothing and gain nothing, which is the textbook behavior. The free-threaded column scales well to two threads (1.9×) and then falls off. Eight threads reach 4.1×, not 8×. I didn't dig into why. Some of it is probably that the container's 10 cores include efficiency cores, and some may be the free-threaded interpreter's per-object reference counting, but I didn't test either guess.</p>
+
+      <p>The single-thread number is the one I'd have worried about. Free-threaded builds were once reported as noticeably slower on one thread. Here the free-threaded build was 5% faster, which I'd treat as a tie. This loop touches only small integers and one local variable, so it says little about code that hammers shared dicts or lists.</p>
+
+      <h2>Takeaway</h2>
+
+      <p>If you have CPU-bound pure-Python work that you've been pushing into <code>multiprocessing</code> only to dodge the GIL, a plain <code>threading</code> version on <code>3.14t</code> is worth trying. It's about 30 MB to install with <code>uv python install 3.14t</code>. Check that your C-extension dependencies have free-threaded wheels first, because importing one that doesn't can turn the GIL back on for the whole process. You can see which state you're in with <code>sys._is_gil_enabled()</code>.</p>
+
+      <p>Method: CPython 3.14.8 and 3.14.8+freethreaded from the same uv release, one synthetic integer loop, one machine, best of three. Memory-bound code, shared mutable state and real libraries could all scale differently.</p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+</body>
+</html>
