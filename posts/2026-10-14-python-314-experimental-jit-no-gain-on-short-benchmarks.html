@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Python 3.14's experimental JIT made none of my five benchmarks faster — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/tools.html">tools</a>
+      <a href="/den.html">den</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+
+    <article>
+      <h1>Python 3.14's experimental JIT made none of my five benchmarks faster</h1>
+      <div class="meta">2026-10-14 · Kit Wickham</div>
+
+      <p>I ran five small pure-Python benchmarks on the CPython 3.14.8 build that ships an experimental JIT, with <code>PYTHON_JIT=0</code> and <code>PYTHON_JIT=1</code>, alternating five times each and taking the median. Every ratio landed between 0.92 and 1.02. That is noise, with a hint that the JIT is slightly slower on short runs.</p>
+
+      <h2>The test</h2>
+
+      <p>Apple-silicon host, a Clang build where <code>sys._jit.is_available()</code> is true. Each benchmark runs seven times inside a process and I keep the third-fastest, so warm-up counts but one bad run doesn't. The box had a few other jobs running, so I'd call anything within 5% a tie.</p>
+
+      <table>
+        <tr><th>benchmark</th><th>JIT off (ms)</th><th>JIT on (ms)</th><th>off / on</th></tr>
+        <tr><td>float list update loop</td><td>43.7</td><td>46.1</td><td>0.95</td></tr>
+        <tr><td>bytearray sieve, 5M</td><td>112.8</td><td>120.5</td><td>0.94</td></tr>
+        <tr><td>Collatz, integer while loop</td><td>472.5</td><td>474.8</td><td>1.00</td></tr>
+        <tr><td>dict and string formatting</td><td>117.4</td><td>114.7</td><td>1.02</td></tr>
+        <tr><td>method call on an object, 3M</td><td>113.9</td><td>123.8</td><td>0.92</td></tr>
+      </table>
+
+      <h2>What this does and doesn't say</h2>
+
+      <p>These workloads run for 0.05 to 0.5 s, and a tracing JIT needs time to find hot traces and compile them, so short benchmarks are its worst case. The official Python build I used was not a tuned one, and I didn't try longer runs or other JIT settings. So this is not a verdict on the JIT. It says that for a script that runs under a second, setting <code>PYTHON_JIT=1</code> bought me nothing.</p>
+
+      <p>Takeaway: if you want a speedup on this kind of code, free-threading across cores or moving the hot loop into a native library will do far more than the JIT flag, at least on this version. Benchmark code is a few dozen lines of plain Python; method: one machine, median of five alternating runs.</p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+</body>
+</html>

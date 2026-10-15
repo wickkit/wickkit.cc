@@ -29,6 +29,11 @@
     <ul class="post-list">
       <li>
         <span class="post-date">2026-10-14</span>
+        <a href="/posts/2026-10-14-python-314-experimental-jit-no-gain-on-short-benchmarks.html" class="post-title">Python 3.14's experimental JIT made none of my five benchmarks faster</a>
+        <p class="post-excerpt">Five pure-Python benchmarks of 0.05 to 0.5 s, PYTHON_JIT=0 against 1, median of five alternating runs: every ratio fell between 0.92 and 1.02. Short scripts don't give a tracing JIT time to pay off.</p>
+      </li>
+      <li>
+        <span class="post-date">2026-10-14</span>
         <a href="/posts/2026-10-14-pythons-zstd-threads-sit-idle-above-level-3.html" class="post-title">Python's zstd threads sit idle above level 3</a>
         <p class="post-excerpt">On a 16 MB input, nb_workers=8 in Python 3.14's compression.zstd made level 1 4.2× faster, level 3 1.7×, and level 9 to 19 not faster at all, because the default job is as big as the file. A 2 MB job_size (plus overlap_log=6 at level 19) gave 3.4× at level 9 and 4.6× at level 19 for a 1 to 3% ratio loss.</p>
       </li>

@@ -8,6 +8,33 @@
   <updated>2026-10-14T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
   <entry>
+    <title>Python 3.14's experimental JIT made none of my five benchmarks faster</title>
+    <link href="https://wickkit.cc/posts/2026-10-14-python-314-experimental-jit-no-gain-on-short-benchmarks.html"/>
+    <id>https://wickkit.cc/posts/2026-10-14-python-314-experimental-jit-no-gain-on-short-benchmarks.html</id>
+    <updated>2026-10-14T00:00:00Z</updated>
+    <summary>Five pure-Python benchmarks of 0.05 to 0.5 s, PYTHON_JIT=0 against 1, median of five alternating runs: every ratio fell between 0.92 and 1.02. Short scripts don't give a tracing JIT time to pay off.</summary>
+    <content type="html">&lt;p&gt;I ran five small pure-Python benchmarks on the CPython 3.14.8 build that ships an experimental JIT, with &lt;code&gt;PYTHON_JIT=0&lt;/code&gt; and &lt;code&gt;PYTHON_JIT=1&lt;/code&gt;, alternating five times each and taking the median. Every ratio landed between 0.92 and 1.02. That is noise, with a hint that the JIT is slightly slower on short runs.&lt;/p&gt;
+
+      &lt;h2&gt;The test&lt;/h2&gt;
+
+      &lt;p&gt;Apple-silicon host, a Clang build where &lt;code&gt;sys._jit.is_available()&lt;/code&gt; is true. Each benchmark runs seven times inside a process and I keep the third-fastest, so warm-up counts but one bad run doesn't. The box had a few other jobs running, so I'd call anything within 5% a tie.&lt;/p&gt;
+
+      &lt;table&gt;
+        &lt;tr&gt;&lt;th&gt;benchmark&lt;/th&gt;&lt;th&gt;JIT off (ms)&lt;/th&gt;&lt;th&gt;JIT on (ms)&lt;/th&gt;&lt;th&gt;off / on&lt;/th&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;float list update loop&lt;/td&gt;&lt;td&gt;43.7&lt;/td&gt;&lt;td&gt;46.1&lt;/td&gt;&lt;td&gt;0.95&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;bytearray sieve, 5M&lt;/td&gt;&lt;td&gt;112.8&lt;/td&gt;&lt;td&gt;120.5&lt;/td&gt;&lt;td&gt;0.94&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;Collatz, integer while loop&lt;/td&gt;&lt;td&gt;472.5&lt;/td&gt;&lt;td&gt;474.8&lt;/td&gt;&lt;td&gt;1.00&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;dict and string formatting&lt;/td&gt;&lt;td&gt;117.4&lt;/td&gt;&lt;td&gt;114.7&lt;/td&gt;&lt;td&gt;1.02&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;method call on an object, 3M&lt;/td&gt;&lt;td&gt;113.9&lt;/td&gt;&lt;td&gt;123.8&lt;/td&gt;&lt;td&gt;0.92&lt;/td&gt;&lt;/tr&gt;
+      &lt;/table&gt;
+
+      &lt;h2&gt;What this does and doesn't say&lt;/h2&gt;
+
+      &lt;p&gt;These workloads run for 0.05 to 0.5 s, and a tracing JIT needs time to find hot traces and compile them, so short benchmarks are its worst case. The official Python build I used was not a tuned one, and I didn't try longer runs or other JIT settings. So this is not a verdict on the JIT. It says that for a script that runs under a second, setting &lt;code&gt;PYTHON_JIT=1&lt;/code&gt; bought me nothing.&lt;/p&gt;
+
+      &lt;p&gt;Takeaway: if you want a speedup on this kind of code, free-threading across cores or moving the hot loop into a native library will do far more than the JIT flag, at least on this version. Benchmark code is a few dozen lines of plain Python; method: one machine, median of five alternating runs.&lt;/p&gt;</content>
+  </entry>
+  <entry>
     <title>Python's zstd threads sit idle above level 3</title>
     <link href="https://wickkit.cc/posts/2026-10-14-pythons-zstd-threads-sit-idle-above-level-3.html"/>
     <id>https://wickkit.cc/posts/2026-10-14-pythons-zstd-threads-sit-idle-above-level-3.html</id>
