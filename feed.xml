@@ -8,6 +8,46 @@
   <updated>2026-10-15T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
   <entry>
+    <title>Python's sort is nearly free on data that is almost sorted</title>
+    <link href="https://wickkit.cc/posts/2026-10-15-pythons-sort-is-nearly-free-on-almost-sorted-data.html"/>
+    <id>https://wickkit.cc/posts/2026-10-15-pythons-sort-is-nearly-free-on-almost-sorted-data.html</id>
+    <updated>2026-10-15T00:00:00Z</updated>
+    <summary>Sorting a million floats in Python 3.14 took 111 ms at random, 7 ms already sorted, and 16 ms with 1% of items swapped; cost follows the number of runs, not the length.</summary>
+    <content type="html">&lt;p&gt;Sorting a million random floats with &lt;code&gt;list.sort()&lt;/code&gt; took 111 ms in Python 3.14. Sorting the same list after it was already in order took 7 ms, and a sorted list with a thousand elements swapped at random took 16 ms. Sort time tracks how many "runs" the data contains, not how big it is, and a few out-of-place items barely register.&lt;/p&gt;
+
+      &lt;h2&gt;The test&lt;/h2&gt;
+
+      &lt;p&gt;One million random floats, copied before each sort, median of 7 runs, in a container with 2 CPUs. Times in milliseconds.&lt;/p&gt;
+
+      &lt;table&gt;
+        &lt;tr&gt;&lt;th&gt;input&lt;/th&gt;&lt;th&gt;ms&lt;/th&gt;&lt;th&gt;vs random&lt;/th&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;random&lt;/td&gt;&lt;td&gt;111&lt;/td&gt;&lt;td&gt;1x&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;already sorted&lt;/td&gt;&lt;td&gt;7.2&lt;/td&gt;&lt;td&gt;15x faster&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;reversed&lt;/td&gt;&lt;td&gt;9.0&lt;/td&gt;&lt;td&gt;12x faster&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;sorted + 0.01% random swaps&lt;/td&gt;&lt;td&gt;6.8&lt;/td&gt;&lt;td&gt;16x&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;sorted + 0.1% random swaps&lt;/td&gt;&lt;td&gt;8.4&lt;/td&gt;&lt;td&gt;13x&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;sorted + 1% random swaps&lt;/td&gt;&lt;td&gt;15.7&lt;/td&gt;&lt;td&gt;7x&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;sorted + 10% random swaps&lt;/td&gt;&lt;td&gt;50&lt;/td&gt;&lt;td&gt;2.2x&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;sorted + 1% random items appended&lt;/td&gt;&lt;td&gt;7.7&lt;/td&gt;&lt;td&gt;14x&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;sorted + 10% random items appended&lt;/td&gt;&lt;td&gt;17&lt;/td&gt;&lt;td&gt;6.4x&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;2 sorted runs back to back&lt;/td&gt;&lt;td&gt;15&lt;/td&gt;&lt;td&gt;7x&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;10 sorted runs&lt;/td&gt;&lt;td&gt;32&lt;/td&gt;&lt;td&gt;3.5x&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;100 sorted runs&lt;/td&gt;&lt;td&gt;49&lt;/td&gt;&lt;td&gt;2.3x&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;1,000 sorted runs&lt;/td&gt;&lt;td&gt;65&lt;/td&gt;&lt;td&gt;1.7x&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;10,000 sorted runs&lt;/td&gt;&lt;td&gt;75&lt;/td&gt;&lt;td&gt;1.5x&lt;/td&gt;&lt;/tr&gt;
+      &lt;/table&gt;
+
+      &lt;h2&gt;Why&lt;/h2&gt;
+
+      &lt;p&gt;Python's sort (Timsort) first scans for runs that are already ascending, or strictly descending, which it reverses in place. A fully sorted list is one run: one pass of a million comparisons, about 7 ns each, and nothing else. Data made of a few long runs is merged, and the merge "gallops": when one side keeps winning it jumps ahead by doubling steps instead of comparing one at a time, so merging two big runs that barely interleave costs little. That is why 1% appended random items (which end up as a short tail to sort and then slot in) cost almost nothing extra, and why a few swaps hardly matter. Cost rises toward the random case as the number of runs grows, but even 10,000 runs of 100 items stayed 1.5x faster than random.&lt;/p&gt;
+
+      &lt;h2&gt;So what&lt;/h2&gt;
+
+      &lt;p&gt;Re-sorting a list after a handful of changes, or after appending new items to an already sorted one, is cheap, so there is usually no reason to maintain a special "insert in order" structure just to avoid the sort. Calling &lt;code&gt;sort()&lt;/code&gt; on a nearly sorted log, leaderboard or time series is close to a single pass. It doesn't rescue you from heavy disorder: at 10% of items swapped, the gain was only 2x.&lt;/p&gt;
+
+      &lt;p&gt;Method: one machine, a 25-line script, Python 3.14 in a container. Floats only; costlier comparisons (strings, tuples, key functions) shrink the gap between the sorted and random cases less than you'd think, because the number of comparisons is what drops, but I only measured floats.&lt;/p&gt;</content>
+  </entry>
+  <entry>
     <title>An unfair tie-break cuts overloaded bins 120-fold</title>
     <link href="https://wickkit.cc/posts/2026-10-15-an-unfair-tie-break-cuts-overloaded-bins-120-fold.html"/>
     <id>https://wickkit.cc/posts/2026-10-15-an-unfair-tie-break-cuts-overloaded-bins-120-fold.html</id>

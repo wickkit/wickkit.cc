@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Python's sort is nearly free on data that is almost sorted — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/tools.html">tools</a>
+      <a href="/den.html">den</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+
+    <article>
+      <h1>Python's sort is nearly free on data that is almost sorted</h1>
+      <div class="meta">2026-10-15 · Kit Wickham</div>
+
+      <p>Sorting a million random floats with <code>list.sort()</code> took 111 ms in Python 3.14. Sorting the same list after it was already in order took 7 ms, and a sorted list with a thousand elements swapped at random took 16 ms. Sort time tracks how many "runs" the data contains, not how big it is, and a few out-of-place items barely register.</p>
+
+      <h2>The test</h2>
+
+      <p>One million random floats, copied before each sort, median of 7 runs, in a container with 2 CPUs. Times in milliseconds.</p>
+
+      <table>
+        <tr><th>input</th><th>ms</th><th>vs random</th></tr>
+        <tr><td>random</td><td>111</td><td>1x</td></tr>
+        <tr><td>already sorted</td><td>7.2</td><td>15x faster</td></tr>
+        <tr><td>reversed</td><td>9.0</td><td>12x faster</td></tr>
+        <tr><td>sorted + 0.01% random swaps</td><td>6.8</td><td>16x</td></tr>
+        <tr><td>sorted + 0.1% random swaps</td><td>8.4</td><td>13x</td></tr>
+        <tr><td>sorted + 1% random swaps</td><td>15.7</td><td>7x</td></tr>
+        <tr><td>sorted + 10% random swaps</td><td>50</td><td>2.2x</td></tr>
+        <tr><td>sorted + 1% random items appended</td><td>7.7</td><td>14x</td></tr>
+        <tr><td>sorted + 10% random items appended</td><td>17</td><td>6.4x</td></tr>
+        <tr><td>2 sorted runs back to back</td><td>15</td><td>7x</td></tr>
+        <tr><td>10 sorted runs</td><td>32</td><td>3.5x</td></tr>
+        <tr><td>100 sorted runs</td><td>49</td><td>2.3x</td></tr>
+        <tr><td>1,000 sorted runs</td><td>65</td><td>1.7x</td></tr>
+        <tr><td>10,000 sorted runs</td><td>75</td><td>1.5x</td></tr>
+      </table>
+
+      <h2>Why</h2>
+
+      <p>Python's sort (Timsort) first scans for runs that are already ascending, or strictly descending, which it reverses in place. A fully sorted list is one run: one pass of a million comparisons, about 7 ns each, and nothing else. Data made of a few long runs is merged, and the merge "gallops": when one side keeps winning it jumps ahead by doubling steps instead of comparing one at a time, so merging two big runs that barely interleave costs little. That is why 1% appended random items (which end up as a short tail to sort and then slot in) cost almost nothing extra, and why a few swaps hardly matter. Cost rises toward the random case as the number of runs grows, but even 10,000 runs of 100 items stayed 1.5x faster than random.</p>
+
+      <h2>So what</h2>
+
+      <p>Re-sorting a list after a handful of changes, or after appending new items to an already sorted one, is cheap, so there is usually no reason to maintain a special "insert in order" structure just to avoid the sort. Calling <code>sort()</code> on a nearly sorted log, leaderboard or time series is close to a single pass. It doesn't rescue you from heavy disorder: at 10% of items swapped, the gain was only 2x.</p>
+
+      <p>Method: one machine, a 25-line script, Python 3.14 in a container. Floats only; I didn't measure strings, tuples or key functions.</p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+</body>
+</html>
