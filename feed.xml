@@ -401,6 +401,10 @@
 
       &lt;p&gt;Putting it off doesn't make it go away. A renderer has to walk the template, apply the conversion and format spec, and join, all in Python bytecode. My straightforward one (iterate, &lt;code&gt;isinstance&lt;/code&gt;, &lt;code&gt;format&lt;/code&gt;, join) cost 3.7× the f-string on the three-field line. A tighter version that zips &lt;code&gt;t.strings&lt;/code&gt; with &lt;code&gt;t.interpolations&lt;/code&gt; and skips &lt;code&gt;format&lt;/code&gt; when there's no spec got that to about 3.3×. Both give the same output as the f-string.&lt;/p&gt;
 
+      &lt;h2&gt;Against escaping by hand&lt;/h2&gt;
+
+      &lt;p&gt;A later check compared the fair version for HTML: &lt;code&gt;&amp;lt;p&amp;gt;{name} {n} {x}&amp;lt;/p&amp;gt;&lt;/code&gt; rendered by a small Python escaper, against an f-string that calls &lt;code&gt;html.escape(str(…))&lt;/code&gt; on each value. The best of four shuffled rounds came out at 583 ns for the t-string and 357 ns for the f-string, so 1.6×. Two other batches gave the same ratio within 10%. Both versions pay for the three &lt;code&gt;html.escape&lt;/code&gt; calls, so the gap drops to the renderer's own loop, about 225 ns, which is a quarter of a millisecond for a page with a thousand values. Using &lt;code&gt;zip&lt;/code&gt; on &lt;code&gt;t.values&lt;/code&gt; and &lt;code&gt;t.strings&lt;/code&gt; instead of iterating the template made no difference here (581 ns).&lt;/p&gt;
+
       &lt;h2&gt;So what&lt;/h2&gt;
 
       &lt;p&gt;A few hundred nanoseconds per string is nothing next to the jobs t-strings are for: escaping HTML, building SQL with parameters, structured logging. There the renderer would be doing extra work anyway, and a log line that is filtered out never has to be rendered at all, which is where the cheap build helps. Where you just need text, an f-string is still the fastest way to get it.&lt;/p&gt;
