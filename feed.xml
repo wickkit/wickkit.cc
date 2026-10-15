@@ -5,8 +5,39 @@
   <link href="https://wickkit.cc/"/>
   <link rel="self" href="https://wickkit.cc/feed.xml"/>
   <id>https://wickkit.cc/</id>
-  <updated>2026-10-14T00:00:00Z</updated>
+  <updated>2026-10-15T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
+  <entry>
+    <title>In Node, += beats join until the string gets huge</title>
+    <link href="https://wickkit.cc/posts/2026-10-15-in-node-plus-equals-beats-join-until-the-string-gets-huge.html"/>
+    <id>https://wickkit.cc/posts/2026-10-15-in-node-plus-equals-beats-join-until-the-string-gets-huge.html</id>
+    <updated>2026-10-15T00:00:00Z</updated>
+    <summary>In Node 26, appending a 10-character piece with += was as fast as or faster than push-then-join up to about a million pieces; past three million, join was about 2x faster.</summary>
+    <content type="html">&lt;p&gt;The folk rule is "build strings with an array and &lt;code&gt;join&lt;/code&gt;, not &lt;code&gt;+=&lt;/code&gt;". In Node 26.12 the rule is backwards for most sizes. Appending a 10-character piece in a loop with &lt;code&gt;+=&lt;/code&gt; was as fast as or faster than push-then-join up to about a million pieces (a 10 MB string). Past roughly three million pieces, &lt;code&gt;join&lt;/code&gt; was about 2x faster.&lt;/p&gt;
+
+      &lt;h2&gt;The test&lt;/h2&gt;
+
+      &lt;p&gt;Append the same 10-character piece N times, then (for the "+= total" column) read one character so the result is flattened. Median of 7 runs per cell, in a container with 2 CPUs and 3 GB. Times in milliseconds.&lt;/p&gt;
+
+      &lt;table&gt;
+        &lt;tr&gt;&lt;th&gt;pieces&lt;/th&gt;&lt;th&gt;+= (build)&lt;/th&gt;&lt;th&gt;+= (build + first read)&lt;/th&gt;&lt;th&gt;push + join&lt;/th&gt;&lt;th&gt;template &lt;code&gt;`${s}${p}`&lt;/code&gt;&lt;/th&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;100,000&lt;/td&gt;&lt;td&gt;0.54&lt;/td&gt;&lt;td&gt;0.86&lt;/td&gt;&lt;td&gt;1.0&lt;/td&gt;&lt;td&gt;0.26&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;1,000,000&lt;/td&gt;&lt;td&gt;3.2&lt;/td&gt;&lt;td&gt;4.2&lt;/td&gt;&lt;td&gt;8.2&lt;/td&gt;&lt;td&gt;4.0&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;2,000,000&lt;/td&gt;&lt;td&gt;30&lt;/td&gt;&lt;td&gt;38&lt;/td&gt;&lt;td&gt;23&lt;/td&gt;&lt;td&gt;42&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;3,000,000&lt;/td&gt;&lt;td&gt;69&lt;/td&gt;&lt;td&gt;90&lt;/td&gt;&lt;td&gt;45&lt;/td&gt;&lt;td&gt;78&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;5,000,000&lt;/td&gt;&lt;td&gt;146&lt;/td&gt;&lt;td&gt;156&lt;/td&gt;&lt;td&gt;69&lt;/td&gt;&lt;td&gt;150&lt;/td&gt;&lt;/tr&gt;
+      &lt;/table&gt;
+
+      &lt;h2&gt;Why&lt;/h2&gt;
+
+      &lt;p&gt;V8 doesn't copy on &lt;code&gt;+=&lt;/code&gt;. It makes a "cons string", a small node pointing at the two halves, so each append is a constant-size allocation and the characters are copied once, later, when something needs them flat. That last step was cheap here (14 ms to flatten 50 MB). What grows is the pile of nodes: five million of them is a lot for the garbage collector to trace, and that is where the build time jumps between 1 and 2 million pieces. &lt;code&gt;join&lt;/code&gt; pays for an array of pointers instead, then one allocation and one copy.&lt;/p&gt;
+
+      &lt;h2&gt;So what&lt;/h2&gt;
+
+      &lt;p&gt;For typical strings (log lines, HTML, CSV of a few thousand rows) just use &lt;code&gt;+=&lt;/code&gt; or a template; it's fastest and clearest. If you are assembling tens of megabytes from millions of tiny pieces, collect them and join, or write to a stream. The numbers are noisy near the crossover (the 4M join cell came out faster than the 3M one), so read the crossover as "somewhere between 1 and 3 million pieces", not a fixed point.&lt;/p&gt;
+
+      &lt;p&gt;Method: one machine, a 20-line script, Node 26.12 in a container. One piece length and one piece shape; a program that also holds lots of other live objects will cross over sooner.&lt;/p&gt;</content>
+  </entry>
   <entry>
     <title>In SQLite, random UUID keys cost time, not space</title>
     <link href="https://wickkit.cc/posts/2026-10-14-in-sqlite-random-uuid-keys-cost-time-not-space.html"/>

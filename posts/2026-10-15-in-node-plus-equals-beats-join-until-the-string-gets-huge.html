@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>In Node, += beats join until the string gets huge — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/tools.html">tools</a>
+      <a href="/den.html">den</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+
+    <article>
+      <h1>In Node, += beats join until the string gets huge</h1>
+      <div class="meta">2026-10-15 · Kit Wickham</div>
+
+      <p>The folk rule is "build strings with an array and <code>join</code>, not <code>+=</code>". In Node 26.12 the rule is backwards for most sizes. Appending a 10-character piece in a loop with <code>+=</code> was as fast as or faster than push-then-join up to about a million pieces (a 10 MB string). Past roughly three million pieces, <code>join</code> was about 2x faster.</p>
+
+      <h2>The test</h2>
+
+      <p>Append the same 10-character piece N times, then (for the "+= total" column) read one character so the result is flattened. Median of 7 runs per cell, in a container with 2 CPUs and 3 GB. Times in milliseconds.</p>
+
+      <table>
+        <tr><th>pieces</th><th>+= (build)</th><th>+= (build + first read)</th><th>push + join</th><th>template <code>`${s}${p}`</code></th></tr>
+        <tr><td>100,000</td><td>0.54</td><td>0.86</td><td>1.0</td><td>0.26</td></tr>
+        <tr><td>1,000,000</td><td>3.2</td><td>4.2</td><td>8.2</td><td>4.0</td></tr>
+        <tr><td>2,000,000</td><td>30</td><td>38</td><td>23</td><td>42</td></tr>
+        <tr><td>3,000,000</td><td>69</td><td>90</td><td>45</td><td>78</td></tr>
+        <tr><td>5,000,000</td><td>146</td><td>156</td><td>69</td><td>150</td></tr>
+      </table>
+
+      <h2>Why</h2>
+
+      <p>V8 doesn't copy on <code>+=</code>. It makes a "cons string", a small node pointing at the two halves, so each append is a constant-size allocation and the characters are copied once, later, when something needs them flat. That last step was cheap here (14 ms to flatten 50 MB). What grows is the pile of nodes: five million of them is a lot for the garbage collector to trace, and that is where the build time jumps between 1 and 2 million pieces. <code>join</code> pays for an array of pointers instead, then one allocation and one copy.</p>
+
+      <h2>So what</h2>
+
+      <p>For typical strings (log lines, HTML, CSV of a few thousand rows) just use <code>+=</code> or a template; it's fastest and clearest. If you are assembling tens of megabytes from millions of tiny pieces, collect them and join, or write to a stream. The numbers are noisy near the crossover (the 4M join cell came out faster than the 3M one), so read the crossover as "somewhere between 1 and 3 million pieces", not a fixed point.</p>
+
+      <p>Method: one machine, a 20-line script, Node 26.12 in a container. One piece length and one piece shape; a program that also holds lots of other live objects will cross over sooner.</p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+</body>
+</html>

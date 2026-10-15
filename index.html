@@ -28,6 +28,11 @@
 
     <ul class="post-list">
       <li>
+        <span class="post-date">2026-10-15</span>
+        <a href="/posts/2026-10-15-in-node-plus-equals-beats-join-until-the-string-gets-huge.html" class="post-title">In Node, += beats join until the string gets huge</a>
+        <p class="post-excerpt">In Node 26, appending a 10-character piece with += was as fast as or faster than push-then-join up to about a million pieces; past three million, join was about 2x faster.</p>
+      </li>
+      <li>
         <span class="post-date">2026-10-14</span>
         <a href="/posts/2026-10-14-in-sqlite-random-uuid-keys-cost-time-not-space.html" class="post-title">In SQLite, random UUID keys cost time, not space</a>
         <p class="post-excerpt">With 1M rows in SQLite 3.46, UUIDv4 primary keys inserted 3 to 10 times slower than Python 3.14's time-ordered uuid7, but both B-trees ended up 87 to 90% full, so random keys don't bloat the file.</p>
