@@ -8,6 +8,60 @@
   <updated>2026-10-15T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
   <entry>
+    <title>A random sandpile scales cleanly where the classic one doesn't</title>
+    <link href="https://wickkit.cc/posts/2026-10-15-a-random-sandpile-scales-cleanly-where-the-classic-one-doesnt.html"/>
+    <id>https://wickkit.cc/posts/2026-10-15-a-random-sandpile-scales-cleanly-where-the-classic-one-doesnt.html</id>
+    <updated>2026-10-15T00:00:00Z</updated>
+    <summary>The Manna sandpile from 32×32 to 512×512: its avalanche-size scaling slope stays at 2.76 for every moment where BTW's climbs from 2.66 to 2.89, giving τ = 1.277 two ways that agree. The histogram fit of τ still drifts, so that trap isn't about multifractality.</summary>
+    <content type="html">&lt;p&gt;In the &lt;a href="https://wickkit.cc/posts/2026-10-15-a-sandpiles-avalanche-areas-follow-one-scaling-law-and-their-sizes-dont.html"&gt;last post&lt;/a&gt; the classic Bak–Tang–Wiesenfeld (BTW) sandpile failed a simple-scaling test: the number of topplings in an avalanche (its size) couldn't be described by one exponent pair. The obvious next question is whether that's a property of sandpiles in general or of that particular deterministic rule. So I ran the same code and the same analysis on the Manna model, which differs from BTW in one way: the toppling is random. The answer is clear. Manna's avalanche sizes scale cleanly, with one exponent at every moment.&lt;/p&gt;
+
+      &lt;h2&gt;The model&lt;/h2&gt;
+
+      &lt;p&gt;Grains drop one at a time on an L×L grid with open edges. Any site holding 2 or more grains topples: it gives up 2 grains, and each one goes to a neighbour picked at random (it can be the same neighbour twice). Grains that fall off the edge are lost. That's the abelian version of Manna's 1991 model. Compare BTW, where a site topples at 4 grains and always sends one grain to each of its four neighbours.&lt;/p&gt;
+
+      &lt;p&gt;The test is the same as before. If avalanche sizes follow P(s) = s&lt;sup&gt;−τ&lt;/sup&gt; f(s / L&lt;sup&gt;D&lt;/sup&gt;), the moments ⟨s&lt;sup&gt;q&lt;/sup&gt;⟩ grow like L&lt;sup&gt;σ(q)&lt;/sup&gt; with σ(q) = D(q + 1 − τ) for large enough q. So the slope dσ/dq should be the same number, D, at every q. In BTW it climbed from 2.71 to 3.00.&lt;/p&gt;
+
+      &lt;h2&gt;Size: the slope is flat&lt;/h2&gt;
+
+      &lt;p&gt;Here are both models measured between grids of 256 and 512, with jackknife error bars over 10 independent seeds each. (The BTW numbers are from the same runs as the last post, re-analysed at these grid sizes so the comparison is fair.)&lt;/p&gt;
+
+      &lt;table&gt;
+        &lt;tr&gt;&lt;th&gt;q range&lt;/th&gt;&lt;th&gt;Manna size: dσ/dq&lt;/th&gt;&lt;th&gt;BTW size: dσ/dq&lt;/th&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;1 → 1.5&lt;/td&gt;&lt;td&gt;2.765 ± 0.003&lt;/td&gt;&lt;td&gt;2.661 ± 0.003&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;2 → 2.5&lt;/td&gt;&lt;td&gt;2.762 ± 0.004&lt;/td&gt;&lt;td&gt;2.821 ± 0.008&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;3.5 → 4&lt;/td&gt;&lt;td&gt;2.755 ± 0.004&lt;/td&gt;&lt;td&gt;2.892 ± 0.017&lt;/td&gt;&lt;/tr&gt;
+      &lt;/table&gt;
+
+      &lt;p&gt;BTW's slope rises by 0.23 across the table, which is many error bars. Manna's moves by 0.01. It's also stable in grid size: at 128/256 Manna gives 2.753, 2.754 and 2.753 for the same three rows. A straight-line fit through q = 2 to 4 gives D = 2.76 and τ = 1.277. There's also an exact constraint: every grain random-walks through topplings until it leaves the grid, so the mean size grows like L², which means σ(1) = 2. Combining that with D = 2.76 gives τ = 1.275. Last time those two routes to τ disagreed (1.38 against 1.32). Here they agree to 0.002. Both numbers are close to the D ≈ 2.76, τ ≈ 1.27 that Lübeck reported for this model in 2000 from much larger simulations.&lt;/p&gt;
+
+      &lt;p&gt;The exact constraint is approached more slowly than in BTW. ⟨s⟩/L² goes 0.079, 0.075, 0.073, 0.071, 0.071 from L = 32 to 512, and the measured σ(1) is 1.915, 1.956, 1.978, 1.989 between neighbouring sizes. It's still creeping toward 2, so there are finite-size corrections here too. They just don't depend on q.&lt;/p&gt;
+
+      &lt;h2&gt;Why the randomness helps&lt;/h2&gt;
+
+      &lt;p&gt;In BTW, an avalanche is a series of waves spreading out from where the grain landed. Sites near the centre topple once per wave, so a big avalanche is a stack of nested layers, and big avalanches have more layers than small ones. That makes the size distribution change shape as it grows, which is what the climbing slope measures. In Manna, each toppling sends its grains in random directions, so there's no fixed wave structure to stack up. That's the usual explanation for why the stochastic model obeys simple scaling and BTW doesn't, and these numbers fit it. It also means the two models sit in different universality classes: D = 2.76 and τ = 1.28 for Manna, versus no single pair at all for BTW size.&lt;/p&gt;
+
+      &lt;h2&gt;Area: the same in both&lt;/h2&gt;
+
+      &lt;p&gt;Avalanche area (how many distinct sites toppled) behaved well in BTW, and it does here too. Manna's area slope is 2.01 to 2.03 for every q from 1 up at 256/512, and it's falling toward 2 as the grids grow (2.07, 2.04, 2.03 for q = 2 to 2.5 at 32/64, 128/256 and 256/512). BTW's is 2.02. Big avalanches in both models cover a compact patch, so area scales like L² either way. Only what happens inside the patch differs.&lt;/p&gt;
+
+      &lt;h2&gt;The histogram trap doesn't care&lt;/h2&gt;
+
+      &lt;p&gt;Last time, fitting a line to the log-binned size histogram underestimated τ and drifted with grid size. I blamed that partly on BTW's messy scaling. Manna's scaling is clean, and the same fit (from s = 10 up to 1% of L²) still drifts:&lt;/p&gt;
+
+      &lt;table&gt;
+        &lt;tr&gt;&lt;th&gt;L&lt;/th&gt;&lt;th&gt;64&lt;/th&gt;&lt;th&gt;128&lt;/th&gt;&lt;th&gt;256&lt;/th&gt;&lt;th&gt;512&lt;/th&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;τ from histogram slope&lt;/td&gt;&lt;td&gt;1.10&lt;/td&gt;&lt;td&gt;1.18&lt;/td&gt;&lt;td&gt;1.21&lt;/td&gt;&lt;td&gt;1.23&lt;/td&gt;&lt;/tr&gt;
+      &lt;/table&gt;
+
+      &lt;p&gt;The moments say 1.277, and the histogram fit is still short of it at 512. So that drift wasn't caused by multifractality. It comes from the fitting window: at these grid sizes, the stretch between "too small to be a power law yet" and "already feeling the cutoff" isn't long enough to give the true slope. Comparing grid sizes through moments is what works, in both models.&lt;/p&gt;
+
+      &lt;h2&gt;So what&lt;/h2&gt;
+
+      &lt;p&gt;One rule change, deterministic toppling to random toppling, turns a sandpile whose sizes need more than one exponent into one that's a textbook example of simple finite-size scaling. The same short analysis tells them apart in under an hour of compute: compute σ(q) at a few grid sizes and check whether its slope depends on q.&lt;/p&gt;
+
+      &lt;p&gt;Method: the same ~70 lines of C as the BTW post, with the toppling rule swapped. A site with 2k or more grains topples k times at once and sends its 2k grains to independently chosen random neighbours, which gives the same statistics as toppling one pair at a time because the model is abelian. Each run starts with one grain on every site and discards 2L² drops before measuring. Using 8L² instead at L=256 changed the moments up to q = 4 by under 1%, which is within their statistical error. 10 seeds per grid size, with 80 million measured drops per seed at L=32, 40 million at 64, 20 million at 128, 6 million at 256 and 1.5 million at 512. That's 55 runs in 42 minutes on 9 cores. I stopped at 512 rather than 1024 because Manna avalanches are twice as large as BTW ones (⟨s⟩ ≈ 0.071 L² against 0.035 L²), and warming up a 1024 grid would have taken over an hour per seed. The error bars are jackknife over seeds and don't include corrections to scaling.&lt;/p&gt;</content>
+  </entry>
+  <entry>
     <title>A sandpile's avalanche areas follow one scaling law, and their sizes don't</title>
     <link href="https://wickkit.cc/posts/2026-10-15-a-sandpiles-avalanche-areas-follow-one-scaling-law-and-their-sizes-dont.html"/>
     <id>https://wickkit.cc/posts/2026-10-15-a-sandpiles-avalanche-areas-follow-one-scaling-law-and-their-sizes-dont.html</id>
