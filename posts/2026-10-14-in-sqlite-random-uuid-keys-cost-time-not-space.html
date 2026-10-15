@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>In SQLite, random UUID keys cost time, not space — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/tools.html">tools</a>
+      <a href="/den.html">den</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+
+    <article>
+      <h1>In SQLite, random UUID keys cost time, not space</h1>
+      <div class="meta">2026-10-14 · Kit Wickham</div>
+
+      <p>The usual case against random UUID primary keys is that they scatter inserts across the index, so pages split half-empty and the index bloats. Python 3.14 added <code>uuid.uuid7()</code>, which puts a millisecond timestamp first, so I measured both in SQLite. The slowdown is real: UUIDv4 keys inserted 3 to 10 times slower than UUIDv7. The bloat isn't there. Both B-trees ended up 87 to 90% full, and the v4 one was slightly fuller.</p>
+
+      <h2>The test</h2>
+
+      <p>CPython 3.14.8, SQLite 3.46.1, Linux container, database on tmpfs. Table <code>t(id PRIMARY KEY, payload BLOB)</code> with a 100-byte payload, keys stored as 16-byte blobs, created before timing starts. 1M rows inserted in transactions of 10,000, WAL mode, <code>synchronous=OFF</code>. I tried both an ordinary rowid table (the UUID lives in a separate unique index) and <code>WITHOUT ROWID</code> (the UUID is the table's own key, and rows sit in its leaves). Each cell is the median of 3 separate processes. Python's <code>uuid7()</code> keeps keys strictly increasing within a process; I checked a million in a row.</p>
+
+      <table>
+        <tr><th>layout</th><th>uuid4 ns/row</th><th>uuid7 ns/row</th><th>ratio</th><th>leaf fill v4 / v7</th></tr>
+        <tr><td>rowid + unique index</td><td>2,270</td><td>704</td><td>3.2x</td><td>90% / 88%</td></tr>
+        <tr><td>WITHOUT ROWID</td><td>3,743</td><td>669</td><td>5.6x</td><td>88% / 87%</td></tr>
+      </table>
+
+      <p>For scale, an INTEGER PRIMARY KEY in the same setup took about 660 ns per row. At 4M rows, v7 stayed flat at 550 to 650 ns while v4 stayed at 3,400 to 6,300 ns, and the files were within 1% of each other (561 vs 566 MB for WITHOUT ROWID). Storing the keys as 36-character text instead of blobs added 18 to 29% to the file and changed none of the ratios by much.</p>
+
+      <h2>Why there's no bloat</h2>
+
+      <p>When a SQLite page overflows, the B-tree doesn't just split it in two. It redistributes cells across the page and up to two siblings, so random inserts keep neighbouring pages fairly full. The sequential case doesn't get a perfect 100% either: index trees get no special path for appending at the end (rowid tables do, and an INTEGER key came out 99.5% full), so v7 leaves land around 87%.</p>
+
+      <h2>Where the time goes</h2>
+
+      <p>I varied the page cache (2 MB vs 256 MB, which holds the whole database), the journal (WAL vs off) and the transaction size (1,000 rows to all million in one):</p>
+
+      <table>
+        <tr><th>WITHOUT ROWID, 256 MB cache</th><th>1,000 / txn</th><th>10,000 / txn</th><th>1M in one txn</th></tr>
+        <tr><td>WAL, v4 / v7</td><td>7.5x</td><td>5.6x</td><td>3.1x</td></tr>
+        <tr><td>no journal, v4 / v7</td><td>5.6x</td><td>4.7x</td><td>2.9x</td></tr>
+      </table>
+
+      <p>Two costs stack up. Each commit writes every page it dirtied to the WAL, and a batch of random keys dirties a page for nearly every row, while a batch of v7 keys dirties a handful of pages at the right edge. Small transactions make that worse: 5.4x for rowid tables at 1,000 rows per commit, 2.0x with one giant commit. Under that sits a floor of about 2 to 3x that survives one transaction, no journal and a cache that holds everything. A random insert walks to a cold leaf and rebalances in the middle of the tree; v7 keeps touching the same few hot pages. The 2 MB cache made the v4 runs 0 to 80% slower, but this database was on tmpfs, so a cache miss was a memory copy. On a real disk the misses would cost more.</p>
+
+      <p>WITHOUT ROWID suffers more because each leaf holds the 100-byte rows, not just the keys, so there are about five times as many leaves for random keys to land in.</p>
+
+      <h2>Lookups</h2>
+
+      <p>Point lookups of 100,000 random existing keys cost the same for both, 3 to 6.5 µs each from Python, mostly statement overhead. Time order helps inserts, not reads by key.</p>
+
+      <h2>So what</h2>
+
+      <p>If you pick UUIDs for SQLite keys, use v7: inserts run at about integer-key speed, while v4 costs 3 to 10x as much. Don't expect to save space, though, because SQLite's rebalancing already handles random keys well. If you're stuck with v4, larger transactions recover part of the gap.</p>
+
+      <p>Method: one machine, a 50-line script, run while other jobs shared the CPU. v7 timings repeated within about 20%. v4 timings moved by up to 1.7x between two sweeps run at different load, so trust the ratios within a sweep more than the absolute numbers.</p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+</body>
+</html>

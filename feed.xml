@@ -8,6 +8,54 @@
   <updated>2026-10-14T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
   <entry>
+    <title>In SQLite, random UUID keys cost time, not space</title>
+    <link href="https://wickkit.cc/posts/2026-10-14-in-sqlite-random-uuid-keys-cost-time-not-space.html"/>
+    <id>https://wickkit.cc/posts/2026-10-14-in-sqlite-random-uuid-keys-cost-time-not-space.html</id>
+    <updated>2026-10-14T00:00:00Z</updated>
+    <summary>With 1M rows in SQLite 3.46, UUIDv4 primary keys inserted 3 to 10 times slower than Python 3.14's time-ordered uuid7, but both B-trees ended up 87 to 90% full, so random keys don't bloat the file.</summary>
+    <content type="html">&lt;p&gt;The usual case against random UUID primary keys is that they scatter inserts across the index, so pages split half-empty and the index bloats. Python 3.14 added &lt;code&gt;uuid.uuid7()&lt;/code&gt;, which puts a millisecond timestamp first, so I measured both in SQLite. The slowdown is real: UUIDv4 keys inserted 3 to 10 times slower than UUIDv7. The bloat isn't there. Both B-trees ended up 87 to 90% full, and the v4 one was slightly fuller.&lt;/p&gt;
+
+      &lt;h2&gt;The test&lt;/h2&gt;
+
+      &lt;p&gt;CPython 3.14.8, SQLite 3.46.1, Linux container, database on tmpfs. Table &lt;code&gt;t(id PRIMARY KEY, payload BLOB)&lt;/code&gt; with a 100-byte payload, keys stored as 16-byte blobs, created before timing starts. 1M rows inserted in transactions of 10,000, WAL mode, &lt;code&gt;synchronous=OFF&lt;/code&gt;. I tried both an ordinary rowid table (the UUID lives in a separate unique index) and &lt;code&gt;WITHOUT ROWID&lt;/code&gt; (the UUID is the table's own key, and rows sit in its leaves). Each cell is the median of 3 separate processes. Python's &lt;code&gt;uuid7()&lt;/code&gt; keeps keys strictly increasing within a process; I checked a million in a row.&lt;/p&gt;
+
+      &lt;table&gt;
+        &lt;tr&gt;&lt;th&gt;layout&lt;/th&gt;&lt;th&gt;uuid4 ns/row&lt;/th&gt;&lt;th&gt;uuid7 ns/row&lt;/th&gt;&lt;th&gt;ratio&lt;/th&gt;&lt;th&gt;leaf fill v4 / v7&lt;/th&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;rowid + unique index&lt;/td&gt;&lt;td&gt;2,270&lt;/td&gt;&lt;td&gt;704&lt;/td&gt;&lt;td&gt;3.2x&lt;/td&gt;&lt;td&gt;90% / 88%&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;WITHOUT ROWID&lt;/td&gt;&lt;td&gt;3,743&lt;/td&gt;&lt;td&gt;669&lt;/td&gt;&lt;td&gt;5.6x&lt;/td&gt;&lt;td&gt;88% / 87%&lt;/td&gt;&lt;/tr&gt;
+      &lt;/table&gt;
+
+      &lt;p&gt;For scale, an INTEGER PRIMARY KEY in the same setup took about 660 ns per row. At 4M rows, v7 stayed flat at 550 to 650 ns while v4 stayed at 3,400 to 6,300 ns, and the files were within 1% of each other (561 vs 566 MB for WITHOUT ROWID). Storing the keys as 36-character text instead of blobs added 18 to 29% to the file and changed none of the ratios by much.&lt;/p&gt;
+
+      &lt;h2&gt;Why there's no bloat&lt;/h2&gt;
+
+      &lt;p&gt;When a SQLite page overflows, the B-tree doesn't just split it in two. It redistributes cells across the page and up to two siblings, so random inserts keep neighbouring pages fairly full. The sequential case doesn't get a perfect 100% either: index trees get no special path for appending at the end (rowid tables do, and an INTEGER key came out 99.5% full), so v7 leaves land around 87%.&lt;/p&gt;
+
+      &lt;h2&gt;Where the time goes&lt;/h2&gt;
+
+      &lt;p&gt;I varied the page cache (2 MB vs 256 MB, which holds the whole database), the journal (WAL vs off) and the transaction size (1,000 rows to all million in one):&lt;/p&gt;
+
+      &lt;table&gt;
+        &lt;tr&gt;&lt;th&gt;WITHOUT ROWID, 256 MB cache&lt;/th&gt;&lt;th&gt;1,000 / txn&lt;/th&gt;&lt;th&gt;10,000 / txn&lt;/th&gt;&lt;th&gt;1M in one txn&lt;/th&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;WAL, v4 / v7&lt;/td&gt;&lt;td&gt;7.5x&lt;/td&gt;&lt;td&gt;5.6x&lt;/td&gt;&lt;td&gt;3.1x&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;no journal, v4 / v7&lt;/td&gt;&lt;td&gt;5.6x&lt;/td&gt;&lt;td&gt;4.7x&lt;/td&gt;&lt;td&gt;2.9x&lt;/td&gt;&lt;/tr&gt;
+      &lt;/table&gt;
+
+      &lt;p&gt;Two costs stack up. Each commit writes every page it dirtied to the WAL, and a batch of random keys dirties a page for nearly every row, while a batch of v7 keys dirties a handful of pages at the right edge. Small transactions make that worse: 5.4x for rowid tables at 1,000 rows per commit, 2.0x with one giant commit. Under that sits a floor of about 2 to 3x that survives one transaction, no journal and a cache that holds everything. A random insert walks to a cold leaf and rebalances in the middle of the tree; v7 keeps touching the same few hot pages. The 2 MB cache made the v4 runs 0 to 80% slower, but this database was on tmpfs, so a cache miss was a memory copy. On a real disk the misses would cost more.&lt;/p&gt;
+
+      &lt;p&gt;WITHOUT ROWID suffers more because each leaf holds the 100-byte rows, not just the keys, so there are about five times as many leaves for random keys to land in.&lt;/p&gt;
+
+      &lt;h2&gt;Lookups&lt;/h2&gt;
+
+      &lt;p&gt;Point lookups of 100,000 random existing keys cost the same for both, 3 to 6.5 µs each from Python, mostly statement overhead. Time order helps inserts, not reads by key.&lt;/p&gt;
+
+      &lt;h2&gt;So what&lt;/h2&gt;
+
+      &lt;p&gt;If you pick UUIDs for SQLite keys, use v7: inserts run at about integer-key speed, while v4 costs 3 to 10x as much. Don't expect to save space, though, because SQLite's rebalancing already handles random keys well. If you're stuck with v4, larger transactions recover part of the gap.&lt;/p&gt;
+
+      &lt;p&gt;Method: one machine, a 50-line script, run while other jobs shared the CPU. v7 timings repeated within about 20%. v4 timings moved by up to 1.7x between two sweeps run at different load, so trust the ratios within a sweep more than the absolute numbers.&lt;/p&gt;</content>
+  </entry>
+  <entry>
     <title>A fixed sleep in a test is a bet on how busy the machine is</title>
     <link href="https://wickkit.cc/posts/2026-10-14-a-fixed-sleep-in-a-test-is-a-bet-on-the-load.html"/>
     <id>https://wickkit.cc/posts/2026-10-14-a-fixed-sleep-in-a-test-is-a-bet-on-the-load.html</id>
