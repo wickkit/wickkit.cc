@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Binder crossings find the Ising critical point to three digits — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/tools.html">tools</a>
+      <a href="/den.html">den</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+
+    <article>
+      <h1>Binder crossings find the Ising critical point to three digits</h1>
+      <div class="meta">2026-10-15 · Kit Wickham</div>
+
+      <p>The 2D Ising model has an exact critical temperature: T<sub>c</sub> = 2/ln(1+√2) ≈ 2.26919. I tried to find it from simulation alone, using the textbook trick of Binder cumulant crossings. Comparing 64×64 and 128×128 lattices gave 2.2700 ± 0.0008. That matches to three digits and sits within one error bar of the exact value, after about 25 minutes of laptop GPU time. Small lattices miss: the 8×8 vs 16×16 crossing came out at 2.2646, 8.5 error bars too low.</p>
+
+      <h2>The trick</h2>
+
+      <p>For each lattice size L, measure the magnetization m (the mean spin) and form U = 1 − ⟨m⁴⟩ / (3⟨m²⟩²). Deep in the ordered phase U goes to 2/3, and in the disordered phase it goes to 0. Near the critical point, U for a big lattice falls off more steeply than for a small one, but right at T<sub>c</sub> every size gives roughly the same value. So you plot U against T for two sizes and read off where the curves cross. You never need to know the critical exponents.</p>
+
+      <h2>The run</h2>
+
+      <p>Checkerboard Metropolis on the GPU through MLX, with 17 temperatures from 2.230 to 2.310 in steps of 0.005 and 64 independent replicas per temperature, all updated as one array. That works out to about 850 million spin updates a second at L=128. Each lattice started fully ordered, got 5,000 to 25,000 sweeps to equilibrate depending on size, and then 30,000 to 40,000 measured sweeps. The crossing is the root of a quadratic fitted to U<sub>L</sub> − U<sub>2L</sub> over the 9 temperatures around the sign change. Error bars come from a jackknife over 16 groups of 4 replicas.</p>
+
+      <table>
+        <tr><th>sizes</th><th>crossing T</th><th>minus exact</th><th>in error bars</th><th>U at crossing</th></tr>
+        <tr><td>8 / 16</td><td>2.2646 ± 0.0006</td><td>−0.0046</td><td>−8.5</td><td>0.6141</td></tr>
+        <tr><td>16 / 32</td><td>2.2678 ± 0.0007</td><td>−0.0014</td><td>−1.9</td><td>0.6123</td></tr>
+        <tr><td>32 / 64</td><td>2.2684 ± 0.0009</td><td>−0.0008</td><td>−0.9</td><td>0.6116</td></tr>
+        <tr><td>64 / 128</td><td>2.2700 ± 0.0008</td><td>+0.0008</td><td>+0.9</td><td>0.608 ± 0.002</td></tr>
+      </table>
+
+      <p>GPU time per size: 3 s at L=8, 7 s at 16, 46 s at 32, 3.7 minutes at 64 and 20 minutes at 128.</p>
+
+      <h2>What it shows</h2>
+
+      <p>The crossings creep up toward T<sub>c</sub> from below as the lattices grow. The curves don't meet at exactly one point, because small lattices carry correction terms that fade with size. At 8/16 that bias is 0.2% of T<sub>c</sub>, which is enormous next to the statistical error. From 32/64 on, the bias is smaller than the noise, and the last two pairs sit about one error bar on either side of the exact value. The height where the curves cross drifts too, from 0.614 down toward the published infinite-lattice value of about 0.6107.</p>
+
+      <h2>So what</h2>
+
+      <p>Binder crossings earn their reputation. Without knowing any exponent, you get the critical temperature to 0.04% from two modest lattices. Getting below that takes more than a bigger GPU budget, though. Halving the error bar means 4 times the samples. Plain Metropolis also slows sharply near T<sub>c</sub>: the sweeps needed between independent samples grow roughly as L<sup>2.2</sup>. One more doubling to L=256 would cost hours for each digit. A cluster algorithm like Wolff's would be the next thing to try.</p>
+
+      <p>Method: one Mac, a 60-line MLX script, one seed per size. I didn't check equilibration separately, beyond the crossings landing where theory says they should. The 128 lattice had 25,000 sweeps to settle, which is near the edge for Metropolis at that size.</p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+</body>
+</html>
