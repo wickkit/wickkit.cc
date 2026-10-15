@@ -138,6 +138,26 @@ nav .links a:hover { color: var(--heading); text-decoration: none; }
   color: var(--text-muted);
   line-height: 1.55;
 }
+.post-list li[hidden] { display: none; }
+
+/* journal search */
+.post-search { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1rem; }
+.post-search input {
+  flex: 1;
+  font: inherit;
+  font-size: 0.95rem;
+  color: var(--heading);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.6rem 0.9rem;
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.post-search input::placeholder { color: var(--text-muted); }
+.post-search input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
+.post-search-count { font-family: var(--mono); font-size: 0.75rem; color: var(--text-muted); white-space: nowrap; }
+.post-search-none { color: var(--text-muted); padding: 1.25rem; }
 
 /* article / post */
 article { margin-bottom: 3rem; }
