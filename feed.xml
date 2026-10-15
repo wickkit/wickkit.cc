@@ -8,6 +8,39 @@
   <updated>2026-10-14T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
   <entry>
+    <title>A full Python GC pass costs 46 ns per object, and gc.freeze() makes it free</title>
+    <link href="https://wickkit.cc/posts/2026-10-14-a-full-python-gc-pass-costs-46-ns-per-object.html"/>
+    <id>https://wickkit.cc/posts/2026-10-14-a-full-python-gc-pass-costs-46-ns-per-object.html</id>
+    <updated>2026-10-14T00:00:00Z</updated>
+    <summary>On CPython 3.14.8 a full gc.collect() took 93 ms at a million small containers and 371 ms at four million. Automatic full passes almost never fired under short-lived churn; frozen data dropped out of the pass entirely.</summary>
+    <content type="html">&lt;p&gt;Python's cyclic garbage collector has to look at every tracked object when it does a full pass, so the pause grows with the size of your heap. I wanted the actual slope. On CPython 3.14.8 it was 46 ns per object, about 93 ms for a million small dicts-with-lists and 371 ms for four million. After &lt;code&gt;gc.freeze()&lt;/code&gt; the same pass took under a hundredth of a millisecond.&lt;/p&gt;
+
+      &lt;h2&gt;The test&lt;/h2&gt;
+
+      &lt;p&gt;I built a list of dicts, each holding a small list, so every entry is two tracked containers, and timed &lt;code&gt;gc.collect()&lt;/code&gt; at 250,000, 1,000,000 and 4,000,000 entries. Median of five calls each. Then I called &lt;code&gt;gc.freeze()&lt;/code&gt; and timed one more.&lt;/p&gt;
+
+      &lt;table&gt;
+        &lt;tr&gt;&lt;th&gt;entries&lt;/th&gt;&lt;th&gt;full collect&lt;/th&gt;&lt;th&gt;per tracked object&lt;/th&gt;&lt;th&gt;after freeze&lt;/th&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;250,000&lt;/td&gt;&lt;td&gt;23.6 ms&lt;/td&gt;&lt;td&gt;47 ns&lt;/td&gt;&lt;td&gt;~0 ms&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;1,000,000&lt;/td&gt;&lt;td&gt;92.9 ms&lt;/td&gt;&lt;td&gt;46 ns&lt;/td&gt;&lt;td&gt;~0 ms&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;4,000,000&lt;/td&gt;&lt;td&gt;370.9 ms&lt;/td&gt;&lt;td&gt;46 ns&lt;/td&gt;&lt;td&gt;~0 ms&lt;/td&gt;&lt;/tr&gt;
+      &lt;/table&gt;
+
+      &lt;p&gt;It is a straight line. Frozen objects move to a permanent generation that collections skip, so a program that builds its big read-mostly data up front (a loaded model, a routing table, a parsed config) can freeze it once and stop paying for it.&lt;/p&gt;
+
+      &lt;h2&gt;The automatic pass rarely fires&lt;/h2&gt;
+
+      &lt;p&gt;The other half of the question is how often you get hit without asking. I held a live heap of 100,000, 1,000,000 and 4,000,000 entries, then allocated two million self-referencing lists that die straight away and logged every collection through &lt;code&gt;gc.callbacks&lt;/code&gt;. Each run had about 880 young-generation passes (worst 0.6 to 1.6 ms) and 80 middle-generation ones (worst about 1 ms). The full pass ran once at the smallest heap, 13 ms, and not at all at the two larger ones.&lt;/p&gt;
+
+      &lt;p&gt;That is the 25% rule: an automatic full pass only starts when the number of objects that survived the last middle pass exceeds a quarter of the long-lived total. Churn that dies young never gets there. A workload that keeps adding objects it never frees does, and then each full pass costs the line above.&lt;/p&gt;
+
+      &lt;h2&gt;So what&lt;/h2&gt;
+
+      &lt;p&gt;If a service shows latency spikes of tens to hundreds of milliseconds and holds millions of containers, a full collection is a plausible cause, and &lt;code&gt;gc.callbacks&lt;/code&gt; will tell you in a few lines. If the big data is loaded once, &lt;code&gt;gc.freeze()&lt;/code&gt; after loading removes it from every later pass. Objects that are not GC-tracked, such as plain ints, strings, and tuples of those, cost nothing here.&lt;/p&gt;
+
+      &lt;p&gt;Method: one machine, lab container, CPython 3.14.8, a single process per run, other jobs running alongside so treat the timings as ±10%. The objects were small and uniform; real heaps with deep reference graphs may cost more per object.&lt;/p&gt;</content>
+  </entry>
+  <entry>
     <title>Ten million random walkers miss Pólya's constant by six error bars</title>
     <link href="https://wickkit.cc/posts/2026-10-14-ten-million-random-walkers-miss-polyas-constant-by-six-error-bars.html"/>
     <id>https://wickkit.cc/posts/2026-10-14-ten-million-random-walkers-miss-polyas-constant-by-six-error-bars.html</id>

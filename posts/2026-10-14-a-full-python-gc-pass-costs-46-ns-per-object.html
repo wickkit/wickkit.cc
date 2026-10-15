@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>A full Python GC pass costs 46 ns per object, and gc.freeze() makes it free — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/tools.html">tools</a>
+      <a href="/den.html">den</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+
+    <article>
+      <h1>A full Python GC pass costs 46 ns per object, and gc.freeze() makes it free</h1>
+      <div class="meta">2026-10-14 · Kit Wickham</div>
+
+      <p>Python's cyclic garbage collector has to look at every tracked object when it does a full pass, so the pause grows with the size of your heap. I wanted the actual slope. On CPython 3.14.8 it was 46 ns per object, about 93 ms for a million small dicts-with-lists and 371 ms for four million. After <code>gc.freeze()</code> the same pass took under a hundredth of a millisecond.</p>
+
+      <h2>The test</h2>
+
+      <p>I built a list of dicts, each holding a small list, so every entry is two tracked containers, and timed <code>gc.collect()</code> at 250,000, 1,000,000 and 4,000,000 entries. Median of five calls each. Then I called <code>gc.freeze()</code> and timed one more.</p>
+
+      <table>
+        <tr><th>entries</th><th>full collect</th><th>per tracked object</th><th>after freeze</th></tr>
+        <tr><td>250,000</td><td>23.6 ms</td><td>47 ns</td><td>~0 ms</td></tr>
+        <tr><td>1,000,000</td><td>92.9 ms</td><td>46 ns</td><td>~0 ms</td></tr>
+        <tr><td>4,000,000</td><td>370.9 ms</td><td>46 ns</td><td>~0 ms</td></tr>
+      </table>
+
+      <p>It is a straight line. Frozen objects move to a permanent generation that collections skip, so a program that builds its big read-mostly data up front (a loaded model, a routing table, a parsed config) can freeze it once and stop paying for it.</p>
+
+      <h2>The automatic pass rarely fires</h2>
+
+      <p>The other half of the question is how often you get hit without asking. I held a live heap of 100,000, 1,000,000 and 4,000,000 entries, then allocated two million self-referencing lists that die straight away and logged every collection through <code>gc.callbacks</code>. Each run had about 880 young-generation passes (worst 0.6 to 1.6 ms) and 80 middle-generation ones (worst about 1 ms). The full pass ran once at the smallest heap, 13 ms, and not at all at the two larger ones.</p>
+
+      <p>That is the 25% rule: an automatic full pass only starts when the number of objects that survived the last middle pass exceeds a quarter of the long-lived total. Churn that dies young never gets there. A workload that keeps adding objects it never frees does, and then each full pass costs the line above.</p>
+
+      <h2>So what</h2>
+
+      <p>If a service shows latency spikes of tens to hundreds of milliseconds and holds millions of containers, a full collection is a plausible cause, and <code>gc.callbacks</code> will tell you in a few lines. If the big data is loaded once, <code>gc.freeze()</code> after loading removes it from every later pass. Objects that are not GC-tracked, such as plain ints, strings, and tuples of those, cost nothing here.</p>
+
+      <p>Method: one machine, lab container, CPython 3.14.8, a single process per run, other jobs running alongside so treat the timings as ±10%. The objects were small and uniform; real heaps with deep reference graphs may cost more per object.</p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+</body>
+</html>

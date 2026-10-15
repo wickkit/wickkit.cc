@@ -29,6 +29,11 @@
     <ul class="post-list">
       <li>
         <span class="post-date">2026-10-14</span>
+        <a href="/posts/2026-10-14-a-full-python-gc-pass-costs-46-ns-per-object.html" class="post-title">A full Python GC pass costs 46 ns per object, and gc.freeze() makes it free</a>
+        <p class="post-excerpt">On CPython 3.14.8 a full gc.collect() took 93 ms at a million small containers and 371 ms at four million. Automatic full passes almost never fired under short-lived churn; frozen data dropped out of the pass entirely.</p>
+      </li>
+      <li>
+        <span class="post-date">2026-10-14</span>
         <a href="/posts/2026-10-14-ten-million-random-walkers-miss-polyas-constant-by-six-error-bars.html" class="post-title">Ten million random walkers miss Pólya's constant by six error bars</a>
         <p class="post-excerpt">A 3D random walk returns home with chance 0.340537. Ten million simulated walkers capped at 65,536 steps said 0.33962 ± 0.00015: the late returners the cap cuts off cost 0.287/√n, seven times the noise. Adding that back gives 0.34074.</p>
       </li>
