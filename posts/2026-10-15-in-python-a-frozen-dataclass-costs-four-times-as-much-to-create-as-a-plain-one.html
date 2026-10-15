@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>In Python, a frozen dataclass costs four times as much to create as a plain one — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/tools.html">tools</a>
+      <a href="/den.html">den</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+
+    <article>
+      <h1>In Python, a frozen dataclass costs four times as much to create as a plain one</h1>
+      <div class="meta">2026-10-15 · Kit Wickham</div>
+
+      <p>I built the same four-field record eight ways in Python 3.14 and timed creating and reading it. A plain class and a <code>@dataclass</code> came out identical. <code>slots=True</code> made them 38% smaller and about 13% faster to create. <code>frozen=True</code> on top made creation 4.5 times slower, and <code>namedtuple</code> reads were nearly as slow as a dict's.</p>
+
+      <h2>The test</h2>
+
+      <p>Four int fields, <code>a</code> to <code>d</code>. Creation is <code>timeit</code> on a call with literal arguments (2 million calls, best of 7). Reading is <code>o.a + o.d</code> (or the dict/tuple equivalent) minus the cost of <code>1 + 4</code>. Memory is the bytes <code>tracemalloc</code> sees for 100,000 instances, minus the list holding them. CPython 3.14.8 in a container pinned to one CPU, three runs one after another; the spread was under 1 ns everywhere except a few ns on the frozen case.</p>
+
+      <table>
+        <tr><th>record</th><th>create (ns)</th><th>read two fields (ns)</th><th>bytes each</th></tr>
+        <tr><td>plain class</td><td>40.5</td><td>5.1</td><td>104</td></tr>
+        <tr><td>@dataclass</td><td>40.4</td><td>5.1</td><td>104</td></tr>
+        <tr><td>class with __slots__</td><td>35.0</td><td>4.8</td><td>64</td></tr>
+        <tr><td>@dataclass(slots=True)</td><td>34.9</td><td>4.8</td><td>64</td></tr>
+        <tr><td>@dataclass(frozen=True, slots=True)</td><td>159</td><td>4.8</td><td>64</td></tr>
+        <tr><td>namedtuple</td><td>90</td><td>14.2</td><td>88</td></tr>
+        <tr><td>dict</td><td>41.8</td><td>15.0</td><td>184</td></tr>
+        <tr><td>tuple</td><td>~13</td><td>6.3</td><td>80</td></tr>
+      </table>
+
+      <p>The tuple's creation time comes from a separate run with the values in variables. With constants in the literal, Python builds the tuple once at compile time and the loop measures nothing (2 ns).</p>
+
+      <h2>What it shows</h2>
+
+      <p><b>Dataclass is free.</b> The generated <code>__init__</code> is the same code as the one you would write, so the two rows match to within noise.</p>
+
+      <p><b>Slots pay in memory first.</b> 64 bytes against 104, because the instance has no per-object dict. Creation is about 5 ns faster and reads about 0.3 ns faster, small next to the memory saving at a million objects (40 MB).</p>
+
+      <p><b>Frozen is the expensive one.</b> A frozen dataclass sets its fields through <code>object.__setattr__</code> in the generated <code>__init__</code>, once per field, and that is where 120 ns goes. Reads are as fast as any slots class, so it is a cost on the creation path only.</p>
+
+      <p><b>Namedtuple creation and reads both lag.</b> Creating one goes through <code>tuple.__new__</code> from Python code at 90 ns, more than twice a class. A field read takes 14 ns, about the cost of a dict lookup and nearly three times an attribute on a slots class. A plain tuple indexed by number reads in 6.3 ns, so the names cost 8 ns per read.</p>
+
+      <h2>So what</h2>
+
+      <p>For many small records, use <code>@dataclass(slots=True)</code>: the smallest and fastest to create, with the same read speed as anything else. Add <code>frozen=True</code> only when you need hashing or immutability, and not on a path that creates millions of them per second. Prefer a class to a namedtuple when you read fields in a hot loop. A dict is the worst on memory (184 bytes) and reads, though not on creation.</p>
+
+      <p>Method: one machine, an 80-line script, CPython 3.14.8 (default build, no JIT). Four int fields, small ints that Python caches; records with larger fields would add the same amount to every row. Frozen dataclasses with different field counts weren't tested.</p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+</body>
+</html>
