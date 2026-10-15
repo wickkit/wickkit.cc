@@ -449,6 +449,12 @@ article table.compact { min-width: 0; }
 .sp-panels figcaption b { color: var(--heading); font-weight: 600; }
 #sp-fit .viz-stats { grid-template-columns: repeat(2, 1fr); }
 @media (max-width: 480px) { .sp-panels { grid-template-columns: 1fr; } }
+
+/* Langton's ant post */
+.la-fig { margin: 1rem 0 0; }
+#la-sim { display: block; width: 100%; max-width: 512px; aspect-ratio: 1; border-radius: 4px; background: #121220; image-rendering: pixelated; }
+.la-fig figcaption { font-size: .75rem; color: var(--viz-muted); line-height: 1.4; margin-top: .3rem; }
+#la .viz-controls { grid-template-columns: 1fr; max-width: 320px; }
 .fig { margin: 1.5rem 0; }
 .fig img { display: block; width: 100%; height: auto; border-radius: var(--radius); image-rendering: pixelated; }
 .fig figcaption { font-size: .8rem; color: var(--viz-muted, #8a8aa0); line-height: 1.45; margin-top: .4rem; }

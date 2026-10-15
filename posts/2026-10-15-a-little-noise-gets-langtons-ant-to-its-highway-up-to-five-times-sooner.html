@@ -33,6 +33,37 @@
 
       <p>The ant sits on a grid of white and black cells. On a white cell it turns right, on a black cell it turns left. Either way it flips the cell's color and steps forward. Starting from all white, it makes symmetric-looking shapes for a few hundred steps, then a mess, then at step 9,977 the highway. Nobody has proved it always gets there, though in every experiment so far it has.</p>
 
+      <p>Try it. Pick a patch size and a density, and the ant starts on a fresh random patch. "Highway forming" means the turns have started repeating; the onset only counts once the ant has left everything it touched before.</p>
+
+      <div class="viz" id="la">
+        <div class="viz-presets" role="group" aria-label="Patch size">
+          <button type="button" data-k="0" aria-pressed="false">empty grid</button>
+          <button type="button" data-k="4" aria-pressed="false">4×4</button>
+          <button type="button" data-k="8" aria-pressed="true">8×8</button>
+          <button type="button" data-k="32" aria-pressed="false">32×32</button>
+          <button type="button" data-k="128" aria-pressed="false">128×128</button>
+        </div>
+        <div class="viz-presets" role="group" aria-label="Speed">
+          <button type="button" data-speed="slow" aria-pressed="false">slow</button>
+          <button type="button" data-speed="fast" aria-pressed="true">fast</button>
+          <button type="button" data-speed="fastest" aria-pressed="false">fastest</button>
+          <button type="button" id="la-reset">new patch</button>
+          <button type="button" id="la-pause" aria-pressed="false">pause</button>
+        </div>
+        <div class="viz-controls">
+          <label>Patch density <output id="la-pv">30%</output><input type="range" id="la-p" min="5" max="90" step="5" value="30"></label>
+        </div>
+        <figure class="la-fig"><canvas id="la-sim" role="img" aria-label="Langton's ant on a grid. Light cells are black cells the ant has flipped, muted blue cells are patch cells it hasn't reached, the orange dot is the ant. The view zooms out as the ant travels."></canvas>
+          <figcaption>Light = black cells the ant has touched; muted blue = patch cells it hasn't reached yet; orange = the ant. The view zooms out to fit everything it has touched.</figcaption></figure>
+        <div class="viz-stats">
+          <div><b id="la-t">0</b>steps</div>
+          <div><b id="la-st">–</b>status</div>
+          <div><b id="la-on">–</b>highway onset</div>
+          <div><b id="la-vs">–</b>vs the empty grid's 9,977</div>
+        </div>
+        <noscript><p class="note">The simulation needs JavaScript.</p></noscript>
+      </div>
+
       <h2>The test</h2>
 
       <p>I put a k×k patch of random black cells (each black with probability p) around the ant's start, then ran it until the highway was permanent. "Permanent" means the ant's turns repeated with period 104 for at least 12 periods <em>and</em> the ant then left the box containing every cell it had touched before, plus the patch. Outside that box the grid is blank, so nothing can interrupt the highway after that. The onset is the first step of the periodic stretch. I ran 400 random patches per cell of the table, all 400 found a highway, and the empty-grid case reproduced 9,977 exactly.</p>
@@ -79,5 +110,7 @@
   </main>
 
   <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+  <script src="/js/ant.js"></script>
+  <script src="/js/ant-ui.js"></script>
 </body>
 </html>
