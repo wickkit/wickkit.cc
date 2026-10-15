@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Wolff clusters make Ising autocorrelation nearly flat at Tc — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/tools.html">tools</a>
+      <a href="/den.html">den</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+
+    <article>
+      <h1>Wolff clusters make Ising autocorrelation nearly flat at T<sub>c</sub></h1>
+      <div class="meta">2026-10-15 · Kit Wickham</div>
+
+      <p>My last post ended with plain Metropolis getting slow near the 2D Ising critical point and a cluster algorithm as the fix. I tried it. At the exact T<sub>c</sub>, a 128×128 lattice needs about 2,500 Metropolis sweeps between independent readings of the magnetization, but only 1.65 sweeps' worth of Wolff cluster flips. That's roughly 1,500 times less work per independent sample, and the gap keeps widening with size.</p>
+
+      <h2>The setup</h2>
+
+      <p>Two small C programs in one file, run exactly at T<sub>c</sub> = 2/ln(1+√2). One does single-spin Metropolis with random site picks, the other does Wolff: grow a cluster from a random seed spin, adding each aligned neighbour with probability 1 − e<sup>−2/T</sup>, then flip the whole cluster. For each run I recorded |m| after every update (a Metropolis sweep, or one Wolff cluster) and computed its integrated autocorrelation time with a self-consistent window. To compare costs fairly I converted Wolff time into sweeps: one cluster costs (cluster size ÷ N) of a sweep, and that average shrinks from 0.65 sweeps at L=8 to 0.27 at L=256. Three seeds per size, averaged.</p>
+
+      <table>
+        <tr><th>L</th><th>Metropolis, sweeps</th><th>Wolff, cluster flips</th><th>Wolff, sweep-equivalents</th></tr>
+        <tr><td>8</td><td>9.7</td><td>1.55</td><td>1.00</td></tr>
+        <tr><td>16</td><td>39.9</td><td>2.22</td><td>1.21</td></tr>
+        <tr><td>32</td><td>182</td><td>3.02</td><td>1.38</td></tr>
+        <tr><td>64</td><td>738</td><td>3.95</td><td>1.53</td></tr>
+        <tr><td>128</td><td>2,490</td><td>5.08</td><td>1.65</td></tr>
+        <tr><td>256</td><td>—</td><td>6.55</td><td>1.79</td></tr>
+      </table>
+
+      <h2>The exponents</h2>
+
+      <p>Fitting τ ∝ L<sup>z</sup> on a log-log scale gives z ≈ 2.0 for Metropolis over all five sizes (1.9 using only 32 to 128) and z ≈ 0.41 for Wolff counted in cluster flips (0.37 from 32 up). Literature values are about 2.17 and 0.25. My Metropolis fit sits a little low and the Wolff one a little high, which is what you'd expect from small-lattice corrections: the Wolff numbers are still bending downward, not following a clean power law. In the unit that actually costs CPU time, sweep-equivalents, Wolff grows as L<sup>0.12–0.16</sup>, close to flat. Metropolis at L=128 also has real noise: its three seeds gave 2,110, 2,470 and 2,900.</p>
+
+      <h2>So what</h2>
+
+      <p>Here the cost of an independent sample under Metropolis went up 260× from L=8 to L=128, while under Wolff it went up 1.7×. That is why the Binder run in the last post stopped at L=128: each doubling cost about 4× more sweeps per sample, on top of 4× more spins. With Wolff, L=1024 is a matter of minutes per thousand samples rather than days. The catch is that it only works near T<sub>c</sub>. Away from it, clusters either stay tiny or swallow the whole lattice, and plain Metropolis is fine. It also doesn't carry over to GPUs as easily, since growing a cluster is a sequential flood fill, so my checkerboard MLX code stays the better choice for many independent small lattices.</p>
+
+      <p>Method: one Mac, 12 cores, about 70 lines of C, a cluster-size and autocorrelation estimate on |m| only, 1 million updates per Wolff run and 1 to 2 million sweeps per Metropolis run. Metropolis L=256 and Wolff L≥512 were planned but didn't finish before I stopped the batch, and the autocorrelation of other observables like energy may behave differently.</p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+</body>
+</html>
