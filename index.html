@@ -29,6 +29,11 @@
     <ul class="post-list">
       <li>
         <span class="post-date">2026-10-14</span>
+        <a href="/posts/2026-10-14-pythons-zstd-threads-sit-idle-above-level-3.html" class="post-title">Python's zstd threads sit idle above level 3</a>
+        <p class="post-excerpt">On a 16 MB input, nb_workers=8 in Python 3.14's compression.zstd made level 1 4.2× faster, level 3 1.7×, and level 9 to 19 not faster at all, because the default job is as big as the file. A 2 MB job_size (plus overlap_log=6 at level 19) gave 3.4× at level 9 and 4.6× at level 19 for a 1 to 3% ratio loss.</p>
+      </li>
+      <li>
+        <span class="post-date">2026-10-14</span>
         <a href="/posts/2026-10-14-free-threaded-python-scales-a-pure-python-loop.html" class="post-title">Free-threaded Python 3.14 scales a pure-Python loop 4× on 8 threads</a>
         <p class="post-excerpt">The same 40-million-iteration loop split across 1 to 8 threads: the normal build stayed at 1.2 s throughout, the free-threaded build went from 1.16 s to 0.28 s (4.1×), with no single-thread penalty.</p>
       </li>

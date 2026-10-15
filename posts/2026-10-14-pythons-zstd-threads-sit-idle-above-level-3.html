@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Python's zstd threads sit idle above level 3 — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/tools.html">tools</a>
+      <a href="/den.html">den</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+
+    <article>
+      <h1>Python's zstd threads sit idle above level 3</h1>
+      <div class="meta">2026-10-14 · Kit Wickham</div>
+
+      <p>Python 3.14 ships zstd in the standard library as <code>compression.zstd</code>, and it exposes zstd's multithreading through one option, <code>CompressionParameter.nb_workers</code>. On a 16 MB input, eight workers made level 1 compress 4.2× faster. At level 3 they gave 1.7×. At level 9 and above they did nothing at all. Setting two more parameters, <code>job_size</code> and, at the top levels, <code>overlap_log</code>, turned that into a 3.4× speedup at level 9 and up to 5× at level 19, for a ratio loss of 1 to 4%.</p>
+
+      <h2>The test</h2>
+
+      <p>The input is every <code>.py</code> file in the CPython 3.14 standard library, concatenated in sorted order: 16.3 MB of real source code. Each configuration is a one-shot <code>compress(data, options=…)</code> call, timed five times. I report the median of three such rounds, each run in a fresh process. The setup is CPython 3.14.8 with its bundled zstd 1.5.7, in a Linux aarch64 container with 10 cores. The machine had other work on it, so treat differences under about 10% as noise.</p>
+
+      <table>
+        <tr><th>level</th><th>0 workers (s)</th><th>2</th><th>4</th><th>8</th><th>speedup at 8</th></tr>
+        <tr><td>1</td><td>0.021</td><td>0.011</td><td>0.007</td><td>0.005</td><td>4.2×</td></tr>
+        <tr><td>3</td><td>0.029</td><td>0.017</td><td>0.017</td><td>0.018</td><td>1.7×</td></tr>
+        <tr><td>9</td><td>0.130</td><td>0.132</td><td>0.134</td><td>0.137</td><td>1.0×</td></tr>
+        <tr><td>15</td><td>1.233</td><td>1.328</td><td>1.217</td><td>1.386</td><td>0.9×</td></tr>
+        <tr><td>19</td><td>2.838</td><td>2.761</td><td>3.064</td><td>2.829</td><td>1.0×</td></tr>
+      </table>
+
+      <p>Level 3 stops at two workers, and from level 9 up the extra threads might as well not exist. Setting <code>nb_workers=1</code> isn't free either: it moves compression onto a background thread, which was 2 to 5% slower than 0 at the fast levels and changed the output slightly.</p>
+
+      <h2>Why: one big job</h2>
+
+      <p>zstd's multithreaded mode doesn't split the input across workers evenly. It cuts the input into <em>jobs</em> and hands each job to a worker. With <code>job_size</code> left at 0, the job size scales with the compression window, which grows with the level. The numbers fit jobs of about four windows: 2 MB at level 1 gives eight jobs for eight workers, 8 MB at level 3 gives two jobs, and 16 MB or more from level 9 up puts the whole input into a single job. A 16 MB file is simply too small to split at the default job size. A much larger file would be split, so this mostly affects inputs in the tens of megabytes and below.</p>
+
+      <p>Setting the job size yourself fixes level 9:</p>
+
+      <table>
+        <tr><th>level 9, 8 workers</th><th>time (s)</th><th>ratio</th><th>vs single-threaded</th></tr>
+        <tr><td>0 workers (baseline)</td><td>0.131</td><td>5.066</td><td>—</td></tr>
+        <tr><td>job_size default</td><td>0.133</td><td>5.064</td><td>1.0×</td></tr>
+        <tr><td>job_size 4 MB</td><td>0.052</td><td>5.038</td><td>2.5×, −0.6% ratio</td></tr>
+        <tr><td>job_size 2 MB</td><td>0.039</td><td>5.019</td><td>3.4×, −0.9% ratio</td></tr>
+        <tr><td>job_size 1 MB</td><td>0.046</td><td>5.007</td><td>2.8×, −1.2% ratio</td></tr>
+      </table>
+
+      <h2>Level 19 needs the overlap too</h2>
+
+      <p>At level 19, <code>job_size</code> did nothing. With 8 MB, 4 MB, 2 MB and 1 MB jobs the output was the same size to the byte, and the time stayed around 2.5 s. The reason is the overlap: each job is primed with the tail of the data before it, so matches can cross job boundaries. At the strongest levels that overlap defaults to the whole window, 8 MB here, and zstd won't make a job smaller than its overlap. <code>overlap_log</code> sets the overlap as a fraction of the window: 9 is the whole window, and each step down halves it.</p>
+
+      <table>
+        <tr><th>level 19, 8 workers, 2 MB jobs</th><th>time (s)</th><th>ratio</th><th>vs single-threaded</th></tr>
+        <tr><td>0 workers (baseline)</td><td>2.838</td><td>5.845</td><td>—</td></tr>
+        <tr><td>overlap_log 9 (full window)</td><td>2.501</td><td>5.844</td><td>1.1×</td></tr>
+        <tr><td>overlap_log 7</td><td>0.829</td><td>5.717</td><td>3.4×, −2.2% ratio</td></tr>
+        <tr><td>overlap_log 6</td><td>0.619</td><td>5.646</td><td>4.6×, −3.4% ratio</td></tr>
+        <tr><td>overlap_log 5</td><td>0.532</td><td>5.604</td><td>5.3×, −4.1% ratio</td></tr>
+        <tr><td>overlap_log 1</td><td>0.452</td><td>5.441</td><td>6.3×, −6.9% ratio</td></tr>
+      </table>
+
+      <p>The useful comparison is with level 15 on one thread: 1.23 s for a ratio of 5.31. Level 19 with 2 MB jobs and <code>overlap_log=6</code> takes half that time and still compresses 6% better. Below <code>overlap_log</code> 5 the time barely improves and the ratio keeps falling. Lowering <code>overlap_log</code> without setting <code>job_size</code> changed nothing, because the default job is still bigger than the input.</p>
+
+      <h2>Takeaway</h2>
+
+      <p>Setting <code>nb_workers</code> on its own only reliably helped at level 1. For anything stronger on inputs under a few tens of megabytes, set the job size as well:</p>
+
+      <pre><code>from compression.zstd import compress, CompressionParameter as P
+opts = {P.compression_level: 19, P.nb_workers: 8,
+        P.job_size: 2 &lt;&lt; 20, P.overlap_log: 6}
+out = compress(data, options=opts)</code></pre>
+
+      <p>Every setting here round-tripped through <code>decompress</code> correctly, and the output is an ordinary zstd frame that any decoder reads. Method: one input, one machine, one zstd version. Code with a different mix of repetition, or a much larger file, will land in different places, but checking whether your threads are working at all takes one timed run.</p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+</body>
+</html>

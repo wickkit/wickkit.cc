@@ -8,6 +8,71 @@
   <updated>2026-10-14T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
   <entry>
+    <title>Python's zstd threads sit idle above level 3</title>
+    <link href="https://wickkit.cc/posts/2026-10-14-pythons-zstd-threads-sit-idle-above-level-3.html"/>
+    <id>https://wickkit.cc/posts/2026-10-14-pythons-zstd-threads-sit-idle-above-level-3.html</id>
+    <updated>2026-10-14T00:00:00Z</updated>
+    <summary>On a 16 MB input, nb_workers=8 in Python 3.14's compression.zstd made level 1 4.2× faster, level 3 1.7×, and level 9 to 19 not faster at all, because the default job is as big as the file. A 2 MB job_size (plus overlap_log=6 at level 19) gave 3.4× at level 9 and 4.6× at level 19 for a 1 to 3% ratio loss.</summary>
+    <content type="html">&lt;p&gt;Python 3.14 ships zstd in the standard library as &lt;code&gt;compression.zstd&lt;/code&gt;, and it exposes zstd's multithreading through one option, &lt;code&gt;CompressionParameter.nb_workers&lt;/code&gt;. On a 16 MB input, eight workers made level 1 compress 4.2× faster. At level 3 they gave 1.7×. At level 9 and above they did nothing at all. Setting two more parameters, &lt;code&gt;job_size&lt;/code&gt; and, at the top levels, &lt;code&gt;overlap_log&lt;/code&gt;, turned that into a 3.4× speedup at level 9 and up to 5× at level 19, for a ratio loss of 1 to 4%.&lt;/p&gt;
+
+      &lt;h2&gt;The test&lt;/h2&gt;
+
+      &lt;p&gt;The input is every &lt;code&gt;.py&lt;/code&gt; file in the CPython 3.14 standard library, concatenated in sorted order: 16.3 MB of real source code. Each configuration is a one-shot &lt;code&gt;compress(data, options=…)&lt;/code&gt; call, timed five times. I report the median of three such rounds, each run in a fresh process. The setup is CPython 3.14.8 with its bundled zstd 1.5.7, in a Linux aarch64 container with 10 cores. The machine had other work on it, so treat differences under about 10% as noise.&lt;/p&gt;
+
+      &lt;table&gt;
+        &lt;tr&gt;&lt;th&gt;level&lt;/th&gt;&lt;th&gt;0 workers (s)&lt;/th&gt;&lt;th&gt;2&lt;/th&gt;&lt;th&gt;4&lt;/th&gt;&lt;th&gt;8&lt;/th&gt;&lt;th&gt;speedup at 8&lt;/th&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;1&lt;/td&gt;&lt;td&gt;0.021&lt;/td&gt;&lt;td&gt;0.011&lt;/td&gt;&lt;td&gt;0.007&lt;/td&gt;&lt;td&gt;0.005&lt;/td&gt;&lt;td&gt;4.2×&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;3&lt;/td&gt;&lt;td&gt;0.029&lt;/td&gt;&lt;td&gt;0.017&lt;/td&gt;&lt;td&gt;0.017&lt;/td&gt;&lt;td&gt;0.018&lt;/td&gt;&lt;td&gt;1.7×&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;9&lt;/td&gt;&lt;td&gt;0.130&lt;/td&gt;&lt;td&gt;0.132&lt;/td&gt;&lt;td&gt;0.134&lt;/td&gt;&lt;td&gt;0.137&lt;/td&gt;&lt;td&gt;1.0×&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;15&lt;/td&gt;&lt;td&gt;1.233&lt;/td&gt;&lt;td&gt;1.328&lt;/td&gt;&lt;td&gt;1.217&lt;/td&gt;&lt;td&gt;1.386&lt;/td&gt;&lt;td&gt;0.9×&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;19&lt;/td&gt;&lt;td&gt;2.838&lt;/td&gt;&lt;td&gt;2.761&lt;/td&gt;&lt;td&gt;3.064&lt;/td&gt;&lt;td&gt;2.829&lt;/td&gt;&lt;td&gt;1.0×&lt;/td&gt;&lt;/tr&gt;
+      &lt;/table&gt;
+
+      &lt;p&gt;Level 3 stops at two workers, and from level 9 up the extra threads might as well not exist. Setting &lt;code&gt;nb_workers=1&lt;/code&gt; isn't free either: it moves compression onto a background thread, which was 2 to 5% slower than 0 at the fast levels and changed the output slightly.&lt;/p&gt;
+
+      &lt;h2&gt;Why: one big job&lt;/h2&gt;
+
+      &lt;p&gt;zstd's multithreaded mode doesn't split the input across workers evenly. It cuts the input into &lt;em&gt;jobs&lt;/em&gt; and hands each job to a worker. With &lt;code&gt;job_size&lt;/code&gt; left at 0, the job size scales with the compression window, which grows with the level. The numbers fit jobs of about four windows: 2 MB at level 1 gives eight jobs for eight workers, 8 MB at level 3 gives two jobs, and 16 MB or more from level 9 up puts the whole input into a single job. A 16 MB file is simply too small to split at the default job size. A much larger file would be split, so this mostly affects inputs in the tens of megabytes and below.&lt;/p&gt;
+
+      &lt;p&gt;Setting the job size yourself fixes level 9:&lt;/p&gt;
+
+      &lt;table&gt;
+        &lt;tr&gt;&lt;th&gt;level 9, 8 workers&lt;/th&gt;&lt;th&gt;time (s)&lt;/th&gt;&lt;th&gt;ratio&lt;/th&gt;&lt;th&gt;vs single-threaded&lt;/th&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;0 workers (baseline)&lt;/td&gt;&lt;td&gt;0.131&lt;/td&gt;&lt;td&gt;5.066&lt;/td&gt;&lt;td&gt;—&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;job_size default&lt;/td&gt;&lt;td&gt;0.133&lt;/td&gt;&lt;td&gt;5.064&lt;/td&gt;&lt;td&gt;1.0×&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;job_size 4 MB&lt;/td&gt;&lt;td&gt;0.052&lt;/td&gt;&lt;td&gt;5.038&lt;/td&gt;&lt;td&gt;2.5×, −0.6% ratio&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;job_size 2 MB&lt;/td&gt;&lt;td&gt;0.039&lt;/td&gt;&lt;td&gt;5.019&lt;/td&gt;&lt;td&gt;3.4×, −0.9% ratio&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;job_size 1 MB&lt;/td&gt;&lt;td&gt;0.046&lt;/td&gt;&lt;td&gt;5.007&lt;/td&gt;&lt;td&gt;2.8×, −1.2% ratio&lt;/td&gt;&lt;/tr&gt;
+      &lt;/table&gt;
+
+      &lt;h2&gt;Level 19 needs the overlap too&lt;/h2&gt;
+
+      &lt;p&gt;At level 19, &lt;code&gt;job_size&lt;/code&gt; did nothing. With 8 MB, 4 MB, 2 MB and 1 MB jobs the output was the same size to the byte, and the time stayed around 2.5 s. The reason is the overlap: each job is primed with the tail of the data before it, so matches can cross job boundaries. At the strongest levels that overlap defaults to the whole window, 8 MB here, and zstd won't make a job smaller than its overlap. &lt;code&gt;overlap_log&lt;/code&gt; sets the overlap as a fraction of the window: 9 is the whole window, and each step down halves it.&lt;/p&gt;
+
+      &lt;table&gt;
+        &lt;tr&gt;&lt;th&gt;level 19, 8 workers, 2 MB jobs&lt;/th&gt;&lt;th&gt;time (s)&lt;/th&gt;&lt;th&gt;ratio&lt;/th&gt;&lt;th&gt;vs single-threaded&lt;/th&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;0 workers (baseline)&lt;/td&gt;&lt;td&gt;2.838&lt;/td&gt;&lt;td&gt;5.845&lt;/td&gt;&lt;td&gt;—&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;overlap_log 9 (full window)&lt;/td&gt;&lt;td&gt;2.501&lt;/td&gt;&lt;td&gt;5.844&lt;/td&gt;&lt;td&gt;1.1×&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;overlap_log 7&lt;/td&gt;&lt;td&gt;0.829&lt;/td&gt;&lt;td&gt;5.717&lt;/td&gt;&lt;td&gt;3.4×, −2.2% ratio&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;overlap_log 6&lt;/td&gt;&lt;td&gt;0.619&lt;/td&gt;&lt;td&gt;5.646&lt;/td&gt;&lt;td&gt;4.6×, −3.4% ratio&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;overlap_log 5&lt;/td&gt;&lt;td&gt;0.532&lt;/td&gt;&lt;td&gt;5.604&lt;/td&gt;&lt;td&gt;5.3×, −4.1% ratio&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;overlap_log 1&lt;/td&gt;&lt;td&gt;0.452&lt;/td&gt;&lt;td&gt;5.441&lt;/td&gt;&lt;td&gt;6.3×, −6.9% ratio&lt;/td&gt;&lt;/tr&gt;
+      &lt;/table&gt;
+
+      &lt;p&gt;The useful comparison is with level 15 on one thread: 1.23 s for a ratio of 5.31. Level 19 with 2 MB jobs and &lt;code&gt;overlap_log=6&lt;/code&gt; takes half that time and still compresses 6% better. Below &lt;code&gt;overlap_log&lt;/code&gt; 5 the time barely improves and the ratio keeps falling. Lowering &lt;code&gt;overlap_log&lt;/code&gt; without setting &lt;code&gt;job_size&lt;/code&gt; changed nothing, because the default job is still bigger than the input.&lt;/p&gt;
+
+      &lt;h2&gt;Takeaway&lt;/h2&gt;
+
+      &lt;p&gt;Setting &lt;code&gt;nb_workers&lt;/code&gt; on its own only reliably helped at level 1. For anything stronger on inputs under a few tens of megabytes, set the job size as well:&lt;/p&gt;
+
+      &lt;pre&gt;&lt;code&gt;from compression.zstd import compress, CompressionParameter as P
+opts = {P.compression_level: 19, P.nb_workers: 8,
+        P.job_size: 2 &amp;lt;&amp;lt; 20, P.overlap_log: 6}
+out = compress(data, options=opts)&lt;/code&gt;&lt;/pre&gt;
+
+      &lt;p&gt;Every setting here round-tripped through &lt;code&gt;decompress&lt;/code&gt; correctly, and the output is an ordinary zstd frame that any decoder reads. Method: one input, one machine, one zstd version. Code with a different mix of repetition, or a much larger file, will land in different places, but checking whether your threads are working at all takes one timed run.&lt;/p&gt;</content>
+  </entry>
+  <entry>
     <title>Free-threaded Python 3.14 scales a pure-Python loop 4× on 8 threads</title>
     <link href="https://wickkit.cc/posts/2026-10-14-free-threaded-python-scales-a-pure-python-loop.html"/>
     <id>https://wickkit.cc/posts/2026-10-14-free-threaded-python-scales-a-pure-python-loop.html</id>
