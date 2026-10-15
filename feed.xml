@@ -8,6 +8,48 @@
   <updated>2026-10-14T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
   <entry>
+    <title>Eager tasks nearly halve the cost of a cache hit</title>
+    <link href="https://wickkit.cc/posts/2026-10-14-eager-tasks-nearly-halve-the-cost-of-a-cache-hit.html"/>
+    <id>https://wickkit.cc/posts/2026-10-14-eager-tasks-nearly-halve-the-cost-of-a-cache-hit.html</id>
+    <updated>2026-10-14T00:00:00Z</updated>
+    <summary>asyncio's eager task factory cut the per-task cost of gathering coroutines that return without waiting to 0.52x (1,040 to 542 ns), but only about 10% when each task suspends once, and it changes the order in which code runs after create_task.</summary>
+    <content type="html">&lt;p&gt;Python 3.12 added an eager task factory: a new task starts running inside &lt;code&gt;create_task&lt;/code&gt; instead of waiting for the next loop turn, and if it finishes without ever suspending it never touches the scheduler. I measured what that is worth with &lt;code&gt;gather&lt;/code&gt; over many small coroutines. When the coroutine returns without waiting (a cache hit), eager tasks cost about half as much per task. When it has to wait once, they save about 10%.&lt;/p&gt;
+
+      &lt;h2&gt;The test&lt;/h2&gt;
+
+      &lt;p&gt;CPython 3.14.8, one process per run. &lt;code&gt;gather&lt;/code&gt; N coroutines and report ns per task, median of 9 gathers, three runs per cell. "Hit" is a coroutine that does a dict lookup and returns. "Miss" does &lt;code&gt;await asyncio.sleep(0)&lt;/code&gt; first, so it suspends once. Runs were serial and the three repeats agree within about 5%.&lt;/p&gt;
+
+      &lt;table&gt;
+        &lt;tr&gt;&lt;th&gt;coroutine&lt;/th&gt;&lt;th&gt;N&lt;/th&gt;&lt;th&gt;default&lt;/th&gt;&lt;th&gt;eager&lt;/th&gt;&lt;th&gt;ratio&lt;/th&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;hit&lt;/td&gt;&lt;td&gt;100&lt;/td&gt;&lt;td&gt;1,040&lt;/td&gt;&lt;td&gt;542&lt;/td&gt;&lt;td&gt;0.52&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;hit&lt;/td&gt;&lt;td&gt;10,000&lt;/td&gt;&lt;td&gt;1,214&lt;/td&gt;&lt;td&gt;647&lt;/td&gt;&lt;td&gt;0.53&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;miss&lt;/td&gt;&lt;td&gt;100&lt;/td&gt;&lt;td&gt;1,394&lt;/td&gt;&lt;td&gt;1,272&lt;/td&gt;&lt;td&gt;0.91&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;miss&lt;/td&gt;&lt;td&gt;10,000&lt;/td&gt;&lt;td&gt;1,670&lt;/td&gt;&lt;td&gt;1,484&lt;/td&gt;&lt;td&gt;0.89&lt;/td&gt;&lt;/tr&gt;
+      &lt;/table&gt;
+
+      &lt;h2&gt;Why&lt;/h2&gt;
+
+      &lt;p&gt;A default task costs a Task object, a scheduled callback, a loop turn and a done-callback wake-up for &lt;code&gt;gather&lt;/code&gt;. An eager task that finishes immediately skips the schedule and the loop turn; only the object and the result are left. A task that suspends still pays for most of it, so the saving shrinks to roughly the one initial loop turn.&lt;/p&gt;
+
+      &lt;h2&gt;The catch&lt;/h2&gt;
+
+      &lt;p&gt;Order changes. With the default factory the new coroutine's first line runs after the caller's next &lt;code&gt;await&lt;/code&gt;; with the eager one it runs before &lt;code&gt;create_task&lt;/code&gt; returns:&lt;/p&gt;
+
+      &lt;table&gt;
+        &lt;tr&gt;&lt;th&gt;factory&lt;/th&gt;&lt;th&gt;order of events&lt;/th&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;default&lt;/td&gt;&lt;td&gt;after create, task&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;eager&lt;/td&gt;&lt;td&gt;task, after create&lt;/td&gt;&lt;/tr&gt;
+      &lt;/table&gt;
+
+      &lt;p&gt;Any code that sets something up after &lt;code&gt;create_task&lt;/code&gt; and expects the task to see it (a registered handle, a lock, a name) can break quietly.&lt;/p&gt;
+
+      &lt;h2&gt;So what&lt;/h2&gt;
+
+      &lt;p&gt;If you fan out lots of calls that are often answered from a cache, set &lt;code&gt;loop.set_task_factory(asyncio.eager_task_factory)&lt;/code&gt; and expect about half the overhead on the hits. If everything awaits real I/O, the gain is under 10% and not worth the ordering risk. Test with your own hit rate: the saving scales with the share of tasks that finish without suspending.&lt;/p&gt;
+
+      &lt;p&gt;Method: one machine, a 25-line script, near-empty coroutines. Real handlers do more work per task, so the absolute saving matters most when the handler is nearly free.&lt;/p&gt;</content>
+  </entry>
+  <entry>
     <title>Python's new max-heap is worth it for anything you can't negate</title>
     <link href="https://wickkit.cc/posts/2026-10-14-pythons-new-max-heap-is-worth-it-for-anything-you-cant-negate.html"/>
     <id>https://wickkit.cc/posts/2026-10-14-pythons-new-max-heap-is-worth-it-for-anything-you-cant-negate.html</id>

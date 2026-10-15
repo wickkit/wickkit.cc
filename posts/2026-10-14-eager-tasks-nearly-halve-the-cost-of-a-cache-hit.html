@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Eager tasks nearly halve the cost of a cache hit — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/tools.html">tools</a>
+      <a href="/den.html">den</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <a href="/" class="back">← back to journal</a>
+
+    <article>
+      <h1>Eager tasks nearly halve the cost of a cache hit</h1>
+      <div class="meta">2026-10-14 · Kit Wickham</div>
+
+      <p>Python 3.12 added an eager task factory: a new task starts running inside <code>create_task</code> instead of waiting for the next loop turn, and if it finishes without ever suspending it never touches the scheduler. I measured what that is worth with <code>gather</code> over many small coroutines. When the coroutine returns without waiting (a cache hit), eager tasks cost about half as much per task. When it has to wait once, they save about 10%.</p>
+
+      <h2>The test</h2>
+
+      <p>CPython 3.14.8, one process per run. <code>gather</code> N coroutines and report ns per task, median of 9 gathers, three runs per cell. "Hit" is a coroutine that does a dict lookup and returns. "Miss" does <code>await asyncio.sleep(0)</code> first, so it suspends once. Runs were serial and the three repeats agree within about 5%.</p>
+
+      <table>
+        <tr><th>coroutine</th><th>N</th><th>default</th><th>eager</th><th>ratio</th></tr>
+        <tr><td>hit</td><td>100</td><td>1,040</td><td>542</td><td>0.52</td></tr>
+        <tr><td>hit</td><td>10,000</td><td>1,214</td><td>647</td><td>0.53</td></tr>
+        <tr><td>miss</td><td>100</td><td>1,394</td><td>1,272</td><td>0.91</td></tr>
+        <tr><td>miss</td><td>10,000</td><td>1,670</td><td>1,484</td><td>0.89</td></tr>
+      </table>
+
+      <h2>Why</h2>
+
+      <p>A default task costs a Task object, a scheduled callback, a loop turn and a done-callback wake-up for <code>gather</code>. An eager task that finishes immediately skips the schedule and the loop turn; only the object and the result are left. A task that suspends still pays for most of it, so the saving shrinks to roughly the one initial loop turn.</p>
+
+      <h2>The catch</h2>
+
+      <p>Order changes. With the default factory the new coroutine's first line runs after the caller's next <code>await</code>; with the eager one it runs before <code>create_task</code> returns:</p>
+
+      <table>
+        <tr><th>factory</th><th>order of events</th></tr>
+        <tr><td>default</td><td>after create, task</td></tr>
+        <tr><td>eager</td><td>task, after create</td></tr>
+      </table>
+
+      <p>Any code that sets something up after <code>create_task</code> and expects the task to see it (a registered handle, a lock, a name) can break quietly.</p>
+
+      <h2>So what</h2>
+
+      <p>If you fan out lots of calls that are often answered from a cache, set <code>loop.set_task_factory(asyncio.eager_task_factory)</code> and expect about half the overhead on the hits. If everything awaits real I/O, the gain is under 10% and not worth the ordering risk. Test with your own hit rate: the saving scales with the share of tasks that finish without suspending.</p>
+
+      <p>Method: one machine, a 25-line script, near-empty coroutines. Real handlers do more work per task, so the absolute saving matters most when the handler is nearly free.</p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+</body>
+</html>
