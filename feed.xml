@@ -8,6 +8,45 @@
   <updated>2026-10-14T00:00:00Z</updated>
   <author><name>Kit Wickham</name></author>
   <entry>
+    <title>Ten million random walkers miss Pólya's constant by six error bars</title>
+    <link href="https://wickkit.cc/posts/2026-10-14-ten-million-random-walkers-miss-polyas-constant-by-six-error-bars.html"/>
+    <id>https://wickkit.cc/posts/2026-10-14-ten-million-random-walkers-miss-polyas-constant-by-six-error-bars.html</id>
+    <updated>2026-10-14T00:00:00Z</updated>
+    <summary>A 3D random walk returns home with chance 0.340537. Ten million simulated walkers capped at 65,536 steps said 0.33962 ± 0.00015: the late returners the cap cuts off cost 0.287/√n, seven times the noise. Adding that back gives 0.34074.</summary>
+    <content type="html">&lt;p&gt;A random walk on the 3D integer grid steps to one of its six neighbours, each with the same chance. Pólya proved in 1921 that such a walk doesn't always come back to where it started (in 1D and 2D it does). The chance that it ever returns is about 0.340537. I tried to get that number by brute force: 10 million walkers, each allowed 65,536 steps. The noise came out small, ±0.00015, but the answer was 0.33962, six error bars too low. Every walker that would have come home after step 65,536 counted as one that never did, and there are a lot of them.&lt;/p&gt;
+
+      &lt;h2&gt;The run&lt;/h2&gt;
+
+      &lt;p&gt;A short JavaScript loop: a 128-bit generator (sfc32), and each 32-bit draw below 6&lt;sup&gt;12&lt;/sup&gt; becomes 12 steps. It records the step at which each walker first lands back on the origin. Eighty jobs of 125,000 walkers ran nine at a time, about 3.6 CPU-hours over 25 minutes.&lt;/p&gt;
+
+      &lt;p&gt;To check the simulation I also computed the exact chance of returning by step &lt;i&gt;n&lt;/i&gt;. The chance of being at the origin at step 2&lt;i&gt;m&lt;/i&gt; splits into the steps that go along the x axis (a 1D walk) and the rest (a walk in the y–z plane, which is two independent 1D walks rotated 45°). First returns then come from the renewal equation &lt;i&gt;u&lt;/i&gt; = 1 + &lt;i&gt;f&lt;/i&gt; ∗ &lt;i&gt;u&lt;/i&gt;. That's about 20 lines of numpy and takes 25 seconds up to step 65,536.&lt;/p&gt;
+
+      &lt;table&gt;
+        &lt;tr&gt;&lt;th&gt;steps &lt;i&gt;n&lt;/i&gt;&lt;/th&gt;&lt;th&gt;simulated P(back by &lt;i&gt;n&lt;/i&gt;)&lt;/th&gt;&lt;th&gt;exact&lt;/th&gt;&lt;th&gt;difference / error bar&lt;/th&gt;&lt;th&gt;simulated + 0.287/√&lt;i&gt;n&lt;/i&gt;&lt;/th&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;16&lt;/td&gt;&lt;td&gt;0.27053&lt;/td&gt;&lt;td&gt;0.27028&lt;/td&gt;&lt;td&gt;+1.8&lt;/td&gt;&lt;td&gt;0.34227&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;64&lt;/td&gt;&lt;td&gt;0.30503&lt;/td&gt;&lt;td&gt;0.30485&lt;/td&gt;&lt;td&gt;+1.2&lt;/td&gt;&lt;td&gt;0.34090&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;256&lt;/td&gt;&lt;td&gt;0.32284&lt;/td&gt;&lt;td&gt;0.32263&lt;/td&gt;&lt;td&gt;+1.4&lt;/td&gt;&lt;td&gt;0.34077&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;1,024&lt;/td&gt;&lt;td&gt;0.33178&lt;/td&gt;&lt;td&gt;0.33157&lt;/td&gt;&lt;td&gt;+1.4&lt;/td&gt;&lt;td&gt;0.34074&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;4,096&lt;/td&gt;&lt;td&gt;0.33626&lt;/td&gt;&lt;td&gt;0.33605&lt;/td&gt;&lt;td&gt;+1.4&lt;/td&gt;&lt;td&gt;0.34074&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;16,384&lt;/td&gt;&lt;td&gt;0.33849&lt;/td&gt;&lt;td&gt;0.33830&lt;/td&gt;&lt;td&gt;+1.3&lt;/td&gt;&lt;td&gt;0.34073&lt;/td&gt;&lt;/tr&gt;
+        &lt;tr&gt;&lt;td&gt;65,536&lt;/td&gt;&lt;td&gt;0.33962&lt;/td&gt;&lt;td&gt;0.33942&lt;/td&gt;&lt;td&gt;+1.3&lt;/td&gt;&lt;td&gt;0.34074&lt;/td&gt;&lt;/tr&gt;
+      &lt;/table&gt;
+
+      &lt;p&gt;The simulation matches the exact numbers at every length. Its excess of about 1.3 error bars is a single bit of luck carried along: the column is cumulative, and most of the excess is already there at step 2 (0.16681 against 1/6, +1.2).&lt;/p&gt;
+
+      &lt;h2&gt;The tail you can't wait out&lt;/h2&gt;
+
+      &lt;p&gt;The walkers still out at step &lt;i&gt;n&lt;/i&gt; come home slowly. The chance of standing on the origin at step 2&lt;i&gt;m&lt;/i&gt; falls like &lt;i&gt;m&lt;/i&gt;&lt;sup&gt;−3/2&lt;/sup&gt;, so the return chance still missing after &lt;i&gt;n&lt;/i&gt; steps falls only like 1/√&lt;i&gt;n&lt;/i&gt;. Working the constant out gives 0.287/√&lt;i&gt;n&lt;/i&gt;: (1−&lt;i&gt;p&lt;/i&gt;)² × 4√2 × (3/4π)&lt;sup&gt;3/2&lt;/sup&gt;. At 65,536 steps that's 0.00112, seven times the noise. Each extra digit costs 100 times more steps per walker, so running longer doesn't really help.&lt;/p&gt;
+
+      &lt;p&gt;Adding the formula back fixes it. The last column flattens out by about 1,000 steps and stays at 0.34074 ± 0.00015, which is within 1.3 error bars of the true 0.340537, the same lucky +1.3 as before. Applied to the exact column, the same correction gives 0.340537 to six places.&lt;/p&gt;
+
+      &lt;h2&gt;So what&lt;/h2&gt;
+
+      &lt;p&gt;In a Monte Carlo run, the error bar only covers the luck of the draw. It says nothing about stopping each walker early, and here that cut was the bigger error by a factor of seven. Adding more walkers would have shrunk the error bar around the wrong number. If you know how the tail falls off, add it back. If you don't, at least plot the estimate against the cutoff and see whether it has stopped moving. Here it hadn't, even at 65,536 steps.&lt;/p&gt;
+
+      &lt;p&gt;Method: one machine, 10,000,000 walkers in 80 independently seeded streams, cutoff 2&lt;sup&gt;16&lt;/sup&gt; steps. Error bars are binomial standard errors. The true value is Watson's 1939 closed form.&lt;/p&gt;</content>
+  </entry>
+  <entry>
     <title>A Python t-string is cheap until you render it</title>
     <link href="https://wickkit.cc/posts/2026-10-14-a-t-string-is-cheap-until-you-render-it.html"/>
     <id>https://wickkit.cc/posts/2026-10-14-a-t-string-is-cheap-until-you-render-it.html</id>
