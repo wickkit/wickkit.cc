@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Gray-Scott playground — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/tools.html">tools</a>
+      <a href="/den.html">den</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <h1 class="page-title">Gray-Scott playground</h1>
+    <p style="color: var(--text-muted);">Two chemicals on a 128 by 128 grid, run in your browser. V eats U to make more of itself, U is fed in at rate <b>F</b>, and V is removed at rate <b>k</b>. Drag on the grid to drop more V. Nothing is stored or sent anywhere.</p>
+
+    <section class="viz" id="gsp">
+      <div class="viz-presets" role="group" aria-label="Presets">
+        <button type="button" data-f="0.030" data-k="0.062">spots</button>
+        <button type="button" data-f="0.0367" data-k="0.0649">mitosis</button>
+        <button type="button" data-f="0.029" data-k="0.057">mazes</button>
+        <button type="button" data-f="0.0545" data-k="0.062">coral</button>
+        <button type="button" data-f="0.078" data-k="0.061">worms</button>
+      </div>
+
+      <canvas id="gsp-sim" width="128" height="128" role="img" aria-label="Gray-Scott simulation"></canvas>
+
+      <div class="viz-controls">
+        <div>
+          <label for="gsp-f">Feed rate F <output id="gsp-fo">0.0367</output></label>
+          <input type="range" id="gsp-f" min="0" max="0.09" step="0.0005" value="0.0367">
+        </div>
+        <div>
+          <label for="gsp-k">Kill rate k <output id="gsp-ko">0.0649</output></label>
+          <input type="range" id="gsp-k" min="0.03" max="0.07" step="0.0005" value="0.0649">
+        </div>
+      </div>
+
+      <p class="viz-presets" style="margin: 1rem 0 0;">
+        <button type="button" id="gsp-pause" aria-pressed="false">pause</button>
+        <button type="button" id="gsp-reset">new seed</button>
+      </p>
+      <p style="font-size: .75rem; color: var(--viz-muted); margin: .5rem 0 0;">steps run: <span id="gsp-t">0</span></p>
+    </section>
+
+    <article>
+      <p>Each slider moves the pattern somewhere else. Low F and low k leave the grid quiet. Raise F and the spots split and grow. Move k and the same spots become mazes, coral or worms. The presets are starting points I picked from the usual map; the sliders go past them, and some settings a hair apart look alike and behave differently.</p>
+
+      <p>The simulator is <a href="/js/gs.js">one small file</a>: a 9-point Laplacian and one explicit step at a time, with diffusion rates 1.0 for U and 0.5 for V. It's the same code behind <a href="/posts/2026-10-07-mazes-dont-finish.html">Mazes Don't Finish</a>. Back to <a href="/tools.html">tools</a>.</p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+  <script src="/js/gs.js"></script>
+  <script>
+  (function () {
+    const $ = (id) => document.getElementById(id);
+    const G = window.KitGS;
+    const N = 128, STEPS = 4;
+    const cv = $("gsp-sim"), ctx = cv.getContext("2d"), img = ctx.createImageData(N, N);
+    const fIn = $("gsp-f"), kIn = $("gsp-k"), fOut = $("gsp-fo"), kOut = $("gsp-ko");
+    const tOut = $("gsp-t"), pauseBtn = $("gsp-pause");
+    let g, paused = false, running = false, visible = true;
+
+    function draw() {
+      const d = img.data, v = g.v;
+      for (let i = 0; i < N * N; i++) {
+        const t = Math.min(1, Math.max(0, v[i] / 0.4));
+        // dark blue-black through the site accent to near white (same palette as the mazes post)
+        d[4 * i] = 18 + t * 237;
+        d[4 * i + 1] = 18 + t * t * 200;
+        d[4 * i + 2] = 32 + t * 90 * (1 - t) + t * t * 140;
+        d[4 * i + 3] = 255;
+      }
+      ctx.putImageData(img, 0, 0);
+      tOut.textContent = g.t.toLocaleString("en-US");
+    }
+
+    function frame() {
+      running = false;
+      if (!visible || paused) return;
+      G.step(g, STEPS);
+      draw();
+      start();
+    }
+    function start() {
+      if (!running && !paused) { running = true; requestAnimationFrame(frame); }
+    }
+
+    function setParams(F, k, reseed) {
+      if (!g || reseed) { g = G.create(N, F, k); G.seed(g, (Math.random() * 1e9) | 0); }
+      g.F = F; g.k = k;
+      fIn.value = F; kIn.value = k;
+      fOut.textContent = (+F).toFixed(4);
+      kOut.textContent = (+k).toFixed(4);
+      document.querySelectorAll("[data-f]").forEach((b) =>
+        b.setAttribute("aria-pressed", +b.dataset.f === +F && +b.dataset.k === +k));
+      draw();
+      start();
+    }
+
+    // dragging on the grid drops more V
+    let painting = false;
+    function paint(e) {
+      const r = cv.getBoundingClientRect();
+      const x = Math.floor(((e.clientX - r.left) / r.width) * N), y = Math.floor(((e.clientY - r.top) / r.height) * N);
+      if (x >= 0 && y >= 0 && x < N && y < N) { G.blot(g, x, y, 3); draw(); }
+    }
+    cv.addEventListener("pointerdown", (e) => { painting = true; cv.setPointerCapture(e.pointerId); paint(e); });
+    cv.addEventListener("pointermove", (e) => { if (painting) paint(e); });
+    cv.addEventListener("pointerup", () => (painting = false));
+    cv.addEventListener("pointercancel", () => (painting = false));
+
+    document.querySelectorAll("[data-f]").forEach((b) =>
+      b.addEventListener("click", () => setParams(+b.dataset.f, +b.dataset.k, true)));
+    fIn.addEventListener("input", () => setParams(+fIn.value, g.k, false));
+    kIn.addEventListener("input", () => setParams(g.F, +kIn.value, false));
+    $("gsp-reset").addEventListener("click", () => setParams(g.F, g.k, true));
+    pauseBtn.addEventListener("click", () => {
+      paused = !paused;
+      pauseBtn.textContent = paused ? "play" : "pause";
+      pauseBtn.setAttribute("aria-pressed", paused);
+      start();
+    });
+
+    if ("IntersectionObserver" in window) {
+      new IntersectionObserver((es) => { visible = es[0].isIntersecting; if (visible) start(); }).observe($("gsp"));
+    }
+    document.addEventListener("visibilitychange", () => { visible = !document.hidden; if (visible) start(); });
+
+    setParams(0.0367, 0.0649, true);
+  })();
+  </script>
+</body>
+</html>
