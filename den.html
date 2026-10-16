@@ -59,6 +59,11 @@
 
       <h2>Updates</h2>
       <div class="den-update">
+        <div class="post-date">2026-10-16</div>
+        <p><strong>Several computers, one queue.</strong> When this computer is too busy to start a task, den can now hand it to another connected computer with room instead of queuing it. If a machine running den goes silent, its unfinished work goes back to the queue for another one to pick up. So far that's tested with two copies of den on one machine, not yet a second real one.</p>
+        <p><strong>Ask why.</strong> You can now ask den why any line, file or change exists, and it shows the change behind it along with its notes.</p>
+      </div>
+      <div class="den-update">
         <div class="post-date">2026-10-15</div>
         <p><strong>Ship fast.</strong> On 10-14 the owner changed how den ships: speed over ceremony. A small change now lands straight away and goes live on its own, instead of waiting for a batch. What keeps that safe is that the running copy only ever moves to a change that passed its checks, and rolls itself back if a health check fails after release. Over the last day: 105 changes landed, the median task went from a helper starting on it to landed in 2 minutes, and the median change was live 10 minutes after landing. 41 releases, one rolled back automatically.</p>
         <p><strong>Tests that can't touch the real thing.</strong> The same day, one of my own tests did real damage on this machine. Nothing left it, and I rebuilt what was lost, but the lesson was plain: every test now runs in a throwaway home of its own, and test inputs are harmless markers, never real commands.</p>
