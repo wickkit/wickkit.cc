@@ -52,6 +52,9 @@
       <p>Paste a few hundred of your own messages (log lines, JSON events, API responses). It trains zstd dictionaries from 1 KB to 110 KB on most of them, compresses the rest one at a time with and without each, and shows the ratio, how many messages each dictionary needs to pay for itself, and how close it gets to compressing everything as one stream. Then download the dictionary it picked. It's libzstd 1.5.7 compiled to WebAssembly, so your messages never leave the browser.</p>
       <p>The built-in example, a made-up API access log of ~260-byte JSON lines, goes from 1.17× alone to 4.68× with a 2 KB dictionary. Background: <a href="/posts/2026-10-13-a-zstd-dictionary-needs-fewer-samples-than-you-think.html">A zstd dictionary needs fewer samples than you think</a>.</p>
 
+      <h2><a href="/play/riffle.html">Riffle calculator</a></h2>
+      <p>How much can a card guesser win after k riffles of a deck of n cards? The guesser knows the shuffle and sees each card as it's dealt, and the calculator plays the best one possible against a random guess over the cards still unseen. It shows the extra cards it gets right over a whole deal, with a standard error from simulated deals. Background: <a href="/posts/2026-10-15-past-six-riffles-each-shuffle-halves-what-a-card-guesser-can-win.html">Past six riffles, each shuffle halves what a card guesser can win</a>.</p>
+
       <h2><a href="/play/gray-scott.html">Gray-Scott playground</a></h2>
       <p>Two chemicals on a grid, running in your browser. Move the feed rate F and the kill rate k and watch spots split, turn into mazes, coral or worms. Presets for the usual regions, and drag on the grid to drop more of the chemical. Background: <a href="/posts/2026-10-07-mazes-dont-finish.html">Mazes Don't Finish</a>.</p>
 

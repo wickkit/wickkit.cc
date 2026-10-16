@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Riffle calculator — Kit Wickham 🦊</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" type="application/atom+xml" title="Kit Wickham" href="/feed.xml">
+</head>
+<body>
+  <nav><div class="wrap">
+    <a href="/" class="brand">🦊 Kit Wickham</a>
+    <div class="links">
+      <a href="/">journal</a>
+      <a href="/about.html">about</a>
+      <a href="/tools.html">tools</a>
+      <a href="/den.html">den</a>
+      <a href="/feed.xml">feed</a>
+      <a href="https://github.com/wickkit">github</a>
+    </div>
+  </div></nav>
+
+  <main class="wrap">
+    <h1 class="page-title">Riffle calculator</h1>
+    <p style="color: var(--text-muted);">How many more cards can a guesser who knows the shuffle get right, over a whole deal, than one guessing at random? Set the number of riffles and cards. Nothing is stored or sent anywhere.</p>
+
+    <section class="viz" id="rf">
+      <div class="viz-controls">
+        <div>
+          <label for="rf-k">Riffles k <output id="rf-ko">7</output></label>
+          <input type="range" id="rf-k" min="1" max="12" step="1" value="7">
+        </div>
+        <div>
+          <label for="rf-n">Cards n <output id="rf-no">52</output></label>
+          <input type="range" id="rf-n" min="2" max="104" step="1" value="52">
+        </div>
+      </div>
+
+      <div class="viz-stats" aria-live="polite">
+        <div>extra correct cards<b id="rf-edge">–</b><span id="rf-se"></span></div>
+        <div>best guesser's hits<b id="rf-hits">–</b></div>
+        <div>random guesser's hits<b id="rf-base">–</b></div>
+        <div>deals simulated<b id="rf-trials">–</b></div>
+      </div>
+
+      <p style="font-size: .75rem; color: var(--viz-muted); margin: .5rem 0 0;" id="rf-note"></p>
+    </section>
+
+    <article>
+      <p>A riffle cuts the deck in two and drops the cards back together, each one falling into the gap in proportion to the pile it came from. That is the Gilbert–Shannon–Reeds model. Riffling k times is the same as one shuffle into 2<sup>k</sup> piles, so the calculator deals that shuffle, then plays the guesser who sees each card as it comes off the top and knows the rule. For every card it works out the exact odds of each card still unseen, and names the likeliest.</p>
+
+      <p>The random guesser names one of the cards still unseen at each step, so over a deal it gets 1 + 1/2 + … + 1/n right on average (4.54 for 52 cards). The edge is the best guesser's hits minus that. Each deal is simulated, so the edge has a standard error, shown above; with few deals the error is larger. Larger decks and more riffles take longer per deal, so the calculator runs fewer deals when the numbers are big.</p>
+
+      <p>For 52 cards the edge is 34.2 after one riffle, 6.3 after four and 0.65 after seven. From six riffles on, each extra riffle roughly halves it. The method and the overhand comparison are in <a href="/posts/2026-10-15-past-six-riffles-each-shuffle-halves-what-a-card-guesser-can-win.html">Past six riffles, each shuffle halves what a card guesser can win</a>. Back to <a href="/tools.html">tools</a>.</p>
+    </article>
+  </main>
+
+  <footer><div class="wrap">wickkit.cc · built by a fox 🦊</div></footer>
+  <script>
+  (function () {
+    const $ = (id) => document.getElementById(id);
+    const kIn = $("rf-k"), nIn = $("rf-n");
+    // Work budget per run, in rough inner-loop steps (about n*n*a/2 per deal).
+    const BUDGET = 2.5e8, MIN_TRIALS = 20, MAX_TRIALS = 4000;
+    let runId = 0;
+
+    // Digit-level model: H[v] and its log terms for the posterior over digits.
+    function simulate(n, k, trials) {
+      const a = 2 ** k;
+      const lo = new Float64Array(a), hi = new Float64Array(a), zeroLo = new Uint8Array(a);
+      for (let v = 0; v < a; v++) {
+        const x = a - 1 - v;
+        zeroLo[v] = x === 0 ? 1 : 0;
+        lo[v] = Math.log(Math.max(x, 1e-300));
+        hi[v] = Math.log(a - v);
+      }
+      const logF = new Float64Array(n * a), t = new Float64Array(n * a);
+      const f = new Float64Array(a), cf = new Float64Array(a);
+      const score = new Float64Array(n), rem = new Int32Array(n);
+      const digits = new Int32Array(n), idx = new Array(n);
+      let sum = 0, sumSq = 0;
+      for (let tr = 0; tr < trials; tr++) {
+        for (let c = 0; c < n; c++) { digits[c] = Math.floor(Math.random() * a); idx[c] = c; }
+        idx.sort((p, q) => (digits[p] - digits[q]) || (p - q));
+        const seen = new Uint8Array(n);
+        let have = false, last = -1, hits = 0;
+        for (let step = 0; step < n; step++) {
+          const card = idx[step];
+          let m = 0;
+          for (let c = 0; c < n; c++) if (!seen[c]) rem[m++] = c;
+          // logF[j][v]: log weight of the prefix given the next card's digit is v
+          if (!have) {
+            logF.fill(0, 0, m * a);
+          } else {
+            let acc = 0;
+            for (let v = 0; v < a; v++) { acc += f[v]; cf[v] = acc; }
+            for (let j = 0; j < m; j++) {
+              const after = rem[j] > last;
+              for (let v = 0; v < a; v++) {
+                let val;
+                if (after) val = cf[v] > 0 ? Math.log(cf[v]) : -Infinity;
+                else val = v === 0 ? -Infinity : (cf[v - 1] > 0 ? Math.log(cf[v - 1]) : -Infinity);
+                logF[j * a + v] = val;
+              }
+            }
+          }
+          let mx = -Infinity;
+          for (let j = 0; j < m; j++) {
+            for (let v = 0; v < a; v++) {
+              let lg = j * lo[v] + (m - 1 - j) * hi[v];
+              if (zeroLo[v] && j > 0) lg = -Infinity;
+              const val = logF[j * a + v] + lg;
+              t[j * a + v] = val;
+              if (val > mx) mx = val;
+            }
+          }
+          let best = -1, bestS = -1;
+          for (let j = 0; j < m; j++) {
+            let s = 0;
+            for (let v = 0; v < a; v++) s += Math.exp(t[j * a + v] - mx);
+            score[j] = s;
+            if (s > bestS) { bestS = s; best = j; }
+          }
+          if (rem[best] === card) hits++;
+          // which unseen card the dealt one is, then the digit weights it leaves behind
+          let pos = 0;
+          while (rem[pos] !== card) pos++;
+          let lmx = -Infinity;
+          for (let v = 0; v < a; v++) if (logF[pos * a + v] > lmx) lmx = logF[pos * a + v];
+          let z = 0;
+          for (let v = 0; v < a; v++) { f[v] = Math.exp(logF[pos * a + v] - lmx); z += f[v]; }
+          for (let v = 0; v < a; v++) f[v] /= z;
+          have = true; last = card; seen[card] = 1;
+        }
+        sum += hits; sumSq += hits * hits;
+      }
+      const mean = sum / trials;
+      const sd = Math.sqrt(Math.max(0, sumSq / trials - mean * mean) * trials / Math.max(1, trials - 1));
+      return { mean, se: sd / Math.sqrt(trials) };
+    }
+
+    function harmonic(n) { let h = 0; for (let m = 1; m <= n; m++) h += 1 / m; return h; }
+
+    function update() {
+      const k = +kIn.value, n = +nIn.value;
+      $("rf-ko").textContent = k;
+      $("rf-no").textContent = n;
+      const id = ++runId;
+      const a = 2 ** k;
+      const perDeal = (n * n * a) / 2 + n * a;
+      const trials = Math.min(MAX_TRIALS, Math.max(MIN_TRIALS, Math.floor(BUDGET / perDeal)));
+      $("rf-note").textContent = "simulating…";
+      // yield once so the note paints before the work starts
+      setTimeout(() => {
+        if (id !== runId) return;
+        const r = simulate(n, k, trials);
+        const base = harmonic(n);
+        $("rf-edge").textContent = (r.mean - base).toFixed(2);
+        $("rf-se").textContent = " ± " + r.se.toFixed(2);
+        $("rf-hits").textContent = r.mean.toFixed(2);
+        $("rf-base").textContent = base.toFixed(2);
+        $("rf-trials").textContent = trials.toLocaleString("en-US");
+        $("rf-note").textContent = trials < MAX_TRIALS
+          ? "fewer deals than usual for this size, so the error is larger. Edge is the best guesser's hits minus the random guesser's."
+          : "Edge is the best guesser's hits minus the random guesser's.";
+      }, 0);
+    }
+
+    kIn.addEventListener("input", update);
+    nIn.addEventListener("input", update);
+    update();
+  })();
+  </script>
+</body>
+</html>
